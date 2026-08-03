@@ -1,6 +1,11 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "balier",
+  // Must match the Worker that Workers Builds actually deploys to. It does not
+  // say `balier`: the live dev Worker is `balier-dev`, and a mismatch here means
+  // `pnpm deploy` silently creates a *second*, empty Worker under the config's
+  // name instead of updating the running one. Phase 5 stands the store up again
+  // on the client's account, and that Worker gets its own name.
+  "name": "balier-dev",
   "compatibility_date": "2026-07-30",
   "compatibility_flags": ["nodejs_compat"],
   "observability": {

@@ -64,12 +64,17 @@ the critical path and nothing here is under our control.
 
 - [x] Neon project, EU Frankfurt — created 2026-08-03 on the Free plan, Postgres 18. Database is
       the default `neondb` (not `balier`). `DATABASE_URL` in `.dev.vars` is the **pooled** string;
-      `db:migrate` and `db:seed` both ran clean through it. The same pooled string is set as the
-      `DATABASE_URL` secret on the deployed app Worker. The cron Worker needs its own copy in
+      `db:migrate` and `db:seed` both ran clean through it. The cron Worker needs its own copy in
       Phase 3 — secrets are per-Worker and do not carry over
-- [~] Cloudflare account — done, deploying through Workers Builds (dashboard, not CLI). `DATABASE_URL`
-      is set on the app Worker; the remaining secrets wait on Phase 0's other items. Note the local
-      wrangler login has expired, so secrets are managed in the dashboard, not by `wrangler secret put`
+- [~] Cloudflare account — done, deploying through Workers Builds (dashboard, not CLI).
+      **`DATABASE_URL` must be an encrypted Secret on the `balier-dev` Worker, not a plaintext
+      variable.** It was recorded here as set, and on 2026-08-03 it was not: `wrangler secret list`
+      returned `[]` and every DB-backed route 500ed with «No database connection string was provided
+      to `neon()`» while the homepage, which queries nothing, kept returning 200. A plaintext
+      variable added in the dashboard does not survive a deploy — Workers Builds sends the `vars`
+      block from `wrangler.jsonc` as the complete set, so anything not in that file is dropped.
+      Encrypted secrets are not in that file and are preserved. The remaining secrets wait on
+      Phase 0's other items
 - [x] **R2 bucket `balier-media`** — created 2026-08-03, wrangler login restored. The 16 dev photos
       were pushed to it with `pnpm media:push` and verified byte-for-byte. Note this is still the
       *developer's* account: Phase 5 creates the bucket again on the client's and re-pushes, exactly

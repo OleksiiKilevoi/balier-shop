@@ -333,6 +333,14 @@ Non-negotiables, all enforced by tokens in `global.css`:
 
 - Secrets live only in `wrangler` secrets / Cloudflare environment variables. Never in the
   repository, never in the client bundle. Public keys get the `PUBLIC_` prefix.
+- A secret must be an **encrypted Secret**, never a plaintext dashboard variable. A deploy sends the
+  `vars` block from `wrangler.jsonc` as the *complete* set of plaintext variables, so anything added
+  in the dashboard as Text is silently dropped by the next push. Encrypted secrets live outside that
+  file and survive. This has already taken the deployed site down once: `DATABASE_URL` vanished and
+  every DB-backed route 500ed while the homepage, which queries nothing, stayed green.
+- `wrangler.jsonc`'s `name` must match the Worker actually being deployed to (`balier-dev`).
+  A mismatch does not error — `wrangler deploy` just creates a second, empty Worker under the
+  config's name, leaving the live one untouched and the failure invisible.
 - `/admin/**` and admin APIs are behind Cloudflare Access, plus a server-side check of the Access JWT
   header inside the app — do not rely on edge configuration alone.
 - Rate limiting on all public API routes (checkout, search, order creation).
