@@ -29,7 +29,11 @@ Phase 1 (foundation) is complete. The catalog, cart and checkout do not exist ye
 | Admin access | Cloudflare Access |
 | Notifications | Telegram Bot API + email |
 
-Package manager is **pnpm**. Do not run `npm install` / `yarn`.
+Package manager is **pnpm**, pinned to the major in `packageManager` — do not run `npm install` /
+`yarn`, and do not drop that field. `pnpm-workspace.yaml` holds settings (`allowBuilds`), not a
+workspace: pnpm 10 reads that file as a workspace definition and fails the install outright with
+`packages field missing or empty`, which is how a CI runner that picks its own pnpm breaks the
+build.
 
 ## Commands
 
