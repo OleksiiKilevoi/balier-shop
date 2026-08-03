@@ -1,12 +1,19 @@
 ---
-interface Props {
+import type { HTMLAttributes } from 'astro/types';
+
+/**
+ * Attributes are forwarded, not just `class`: without the spread, an
+ * `aria-labelledby` on a `<Container as="section">` is dropped on the floor with
+ * no error anywhere, and the section ships unlabelled.
+ */
+type Props = {
   as?: 'div' | 'section' | 'header' | 'footer' | 'main' | 'nav';
   class?: string;
-}
+} & HTMLAttributes<'div'>;
 
-const { as: Tag = 'div', class: className = '' } = Astro.props;
+const { as: Tag = 'div', class: className = '', ...rest } = Astro.props;
 ---
 
-<Tag class:list={['container-page', className]}>
+<Tag class:list={['container-page', className]} {...rest}>
   <slot />
 </Tag>

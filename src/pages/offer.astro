@@ -1,0 +1,15 @@
+---
+import StaticPageLayout from '~/layouts/StaticPageLayout.astro';
+import ContentPlaceholder from '~/components/ContentPlaceholder.astro';
+
+export const prerender = false;
+---
+
+<StaticPageLayout
+  title="Публічна оферта"
+  lead="Умови договору купівлі-продажу між магазином і покупцем."
+>
+  {/* Required for the Monobank Acquiring application — the text is legal copy
+      and comes from the client, not from us (roadmap.md, Phase 2/5). */}
+  <ContentPlaceholder />
+</StaticPageLayout>

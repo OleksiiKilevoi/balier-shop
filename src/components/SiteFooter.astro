@@ -24,6 +24,14 @@ const columns = [
     ],
   },
 ];
+
+// Kept out of the columns above and put in the bottom bar, where a shopper
+// looks for them. They are also a hard requirement of the Monobank Acquiring
+// application, so they must be reachable from every page.
+const legal = [
+  { href: '/offer', label: 'Публічна оферта' },
+  { href: '/privacy', label: 'Політика конфіденційності' },
+];
 ---
 
 <footer class="bg-espresso mt-16 py-12 text-white/75 sm:mt-24 sm:py-14">
@@ -54,15 +62,32 @@ const columns = [
 
   </Container>
 
-  <Container class="mt-10 flex flex-col gap-1 border-t border-white/10 pt-6 text-xs sm:mt-12 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
-    <p>© {year} Balier. Усі права захищено.</p>
-    <a
-      href="https://www.instagram.com/balier.ua/"
-      rel="me noopener"
-      target="_blank"
-      class="flex min-h-touch items-center transition-colors hover:text-white md:min-h-0"
+  <Container class="mt-10 border-t border-white/10 pt-6 text-xs sm:mt-12">
+    <nav aria-label="Правова інформація" class="flex flex-col sm:flex-row sm:gap-6">
+      {
+        legal.map((link) => (
+          <a
+            href={link.href}
+            class="flex min-h-touch items-center transition-colors hover:text-white md:min-h-0 md:py-1"
+          >
+            {link.label}
+          </a>
+        ))
+      }
+    </nav>
+
+    <div
+      class="mt-1 flex flex-col gap-1 sm:mt-4 sm:flex-row sm:items-center sm:justify-between sm:gap-2"
     >
-      Instagram
-    </a>
+      <p>© {year} Balier. Усі права захищено.</p>
+      <a
+        href="https://www.instagram.com/balier.ua/"
+        rel="me noopener"
+        target="_blank"
+        class="flex min-h-touch items-center transition-colors hover:text-white md:min-h-0"
+      >
+        Instagram
+      </a>
+    </div>
   </Container>
 </footer>

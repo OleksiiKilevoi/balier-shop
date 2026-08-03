@@ -108,9 +108,11 @@ Decisions locked during this phase:
 - **Variants are always present.** Every product has at least one `product_variants` row; stock and
   SKU live there, never on `products`. See `CLAUDE.md` for the full rule.
 
-## Phase 2 — Catalog, storefront (3 days)
+## Phase 2 — Catalog, storefront (3 days) — built, copy pending
 
-Full mockups exist for every page here, so there is little left to design.
+Full mockups exist for every page here, so there is little left to design. Every page now exists
+and renders; the only thing outstanding is the text of the seven static pages, which is a Phase 5
+content item and a Monobank gate, not a build one.
 
 - [x] **Image storage and the dev catalog** — R2 bucket binding (`MEDIA`), `src/lib/media/`
       (content-hash keys, format allowlist, the shared `storeImage`), the `/media/[...key]` route,
@@ -119,7 +121,24 @@ Full mockups exist for every page here, so there is little left to design.
       deliberately — between them they cover the multi-variant selector and the "no photography"
       placeholder, which the real three do not. Ingest runs against the **local** R2 simulator, so
       it needs no Cloudflare login; the real bucket does not exist yet (see Phase 0)
-- [ ] Homepage — replace placeholder sections with featured products from the DB
+- [x] Homepage — hero, «Обрані товари», teasers for `/about` and `/care`, then the delivery /
+      payment / returns strip moved below them, where it answers "how do I get this" instead of
+      interrupting the products.
+      Featured products come from `listFeaturedProducts`, which orders by **`is_featured DESC`
+      rather than filtering on it**: the flag floats a product to the front of the row, it does not
+      gate the row's existence, so a client who has flagged nothing, flagged two, or archived the
+      three they had flagged still gets a full grid of the newest products. The section cannot be
+      emptied or left ragged from the admin panel, only reordered.
+      No database constraint caps how many products carry the flag — that would hand the client a
+      Postgres error and no way to see which slots are taken. The extras just fall past the query's
+      `limit`, which is **4**: the row is two cards on a phone and four at `lg`, so five would leave
+      a ragged trailing card at every width. Phase 4 adds one checkbox to the product form and
+      nothing else.
+      The teaser copy is placeholder-grade on purpose — the real text arrives with the pages
+      themselves, and writing a brand story here would just mean writing it twice.
+      Found and fixed on the way: `Container` never forwarded attributes, so an `aria-labelledby` on
+      a `<Container as="section">` was dropped with no error anywhere and the section shipped
+      unlabelled. It spreads now
 - [x] `/products` page — breadcrumbs, product count, grid. `src/lib/db/queries/products.ts`
       (`listActiveProducts`) and `src/lib/db/queries/stock.ts` (the one definition of
       `available = stock − unexpired reservations`, which Phase 3 reuses). Two columns on a phone,
@@ -145,10 +164,18 @@ Full mockups exist for every page here, so there is little left to design.
       (`%`, `_`) are escaped and match literally, and 320px lays out with no overflow.
       If the catalog ever outgrows a sequential scan, the fix is a `pg_trgm` GIN index over the same
       expression — not a different matching rule
-- [ ] Static pages: `/about`, `/care`, `/delivery`, `/returns`, `/contacts`, `/offer`, `/privacy`
-      — all currently 404 and linked from the header and footer.
-      **The legal ones are a hard gate for Monobank approval, not decoration.**
-- [~] Mobile layout — the catalog and product pages are written phone-first and verified to lay out
+- [~] Static pages: `/about`, `/care`, `/delivery`, `/returns`, `/contacts`, `/offer`, `/privacy`
+      — all seven now exist and return 200. **Copy is still missing**: each page renders its
+      heading, a one-line lead and a `ContentPlaceholder` that says the text is being prepared.
+      Lorem ipsum and invented terms were rejected deliberately — a plausible-looking legal page is
+      worse than an obviously empty one, and **the legal ones are a hard gate for Monobank
+      approval, not decoration**. Filling them in stays a Phase 5 item; deleting the
+      `ContentPlaceholder` import is what marks a page as written.
+      Shared frame in `src/layouts/StaticPageLayout.astro` (breadcrumbs, `h1`, lead, slot) with the
+      body typography in the `prose-page` utility in `global.css`, so a finished page is plain
+      headings and paragraphs with no classes. `/offer` and `/privacy` were linked from nowhere —
+      they are now a legal row in the footer's bottom bar
+- [x] Mobile layout — every Phase 2 page is written phone-first and verified to lay out
       inside 320px with no horizontal overflow. Two traps worth remembering:
       **(1)** a horizontal scroller inside a grid item still widens the track. `overflow-x` only
       zeroes the *automatic minimum size* of flex/grid items, and a plain block scroller is neither,
@@ -157,8 +184,10 @@ Full mockups exist for every page here, so there is little left to design.
       **(2)** headless Chrome cannot be screenshotted at 320px with `--window-size` — Windows clamps
       the browser window to a minimum width of roughly 500px and the page silently lays out wider.
       Use CDP `Emulation.setDeviceMetricsOverride` and check `Page.getLayoutMetrics.cssContentSize`.
-      `/search` is verified the same way, in all three states (no query, results, nothing found).
-      Still to do: the remaining Phase 2 pages once they exist
+      `/search` is verified the same way, in all three states (no query, results, nothing found),
+      as are the seven static pages — `cssContentSize` is 320 on each, and the longest heading
+      («Політика конфіденційності») wraps rather than overflowing. The homepage is verified at both
+      320 and 1280 with the featured grid populated
 
 ## Phase 3 — Cart and payment (3 days — realistically 5–6)
 

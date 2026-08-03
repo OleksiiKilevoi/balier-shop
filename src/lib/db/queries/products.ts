@@ -197,6 +197,28 @@ export async function listActiveProducts(db: Db): Promise<ProductCardData[]> {
 }
 
 /**
+ * The homepage row.
+ *
+ * `is_featured DESC` rather than `where is_featured`: the flag floats a product
+ * to the front of the row, it does not gate the row's existence. A client who
+ * has flagged nothing, flagged two, or archived the three they had flagged still
+ * gets a full, correctly-sized grid of the newest products instead of an empty
+ * section — the section cannot be broken from the admin panel, only reordered.
+ *
+ * There is deliberately no limit on how many products may carry the flag. A
+ * database constraint on that would hand the client an error dialog and no way
+ * to see which slots are taken; the extras simply fall past `limit`.
+ */
+export async function listFeaturedProducts(db: Db, limit: number): Promise<ProductCardData[]> {
+  const rows = await selectProductCards(db)
+    .where(eq(products.status, 'active'))
+    .orderBy(desc(products.isFeatured), asc(products.position), desc(products.createdAt))
+    .limit(limit);
+
+  return hydrateProductCards(db, rows);
+}
+
+/**
  * Wraps a token in `%…%` and escapes the LIKE metacharacters, so a query of
  * `50%` looks for that text rather than for anything at all.
  *

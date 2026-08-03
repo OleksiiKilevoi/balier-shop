@@ -1,0 +1,41 @@
+---
+import BaseLayout from '~/layouts/BaseLayout.astro';
+import Container from '~/components/Container.astro';
+import Breadcrumbs from '~/components/Breadcrumbs.astro';
+
+/**
+ * The frame every hand-written content page shares: `/about`, `/care`,
+ * `/delivery`, `/returns`, `/contacts` and the two legal pages.
+ *
+ * Only the frame lives here. The copy is plain markup in the page's slot and is
+ * styled by the `prose-page` utility in `global.css`, so writing a page means
+ * writing headings and paragraphs, not classes.
+ */
+interface Props {
+  /** Also the `<h1>` and the last breadcrumb. */
+  title: string;
+  /** One sentence under the heading. Doubles as the meta description. */
+  lead?: string;
+  /** Override when the meta description should differ from the lead. */
+  description?: string;
+}
+
+const { title, lead, description = lead } = Astro.props;
+---
+
+<BaseLayout title={title} description={description}>
+  <Container class="py-8 sm:py-12">
+    <Breadcrumbs items={[{ label: 'Головна', href: '/' }, { label: title }]} />
+
+    {/* Capped to the same measure as the body copy so the heading breaks with
+        it instead of running the full 82rem gutter on a desktop. */}
+    <header class="mt-5 max-w-[65ch] sm:mt-6">
+      <h1 class="text-3xl sm:text-4xl lg:text-5xl">{title}</h1>
+      {lead && <p class="text-ink-muted mt-3">{lead}</p>}
+    </header>
+
+    <div class="prose-page mt-8">
+      <slot />
+    </div>
+  </Container>
+</BaseLayout>

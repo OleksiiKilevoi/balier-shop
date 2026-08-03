@@ -133,6 +133,70 @@
   padding-inline: var(--spacing-gutter);
 }
 
+/*
+ * Long-form copy on the hand-written pages (/about, /delivery, the legal ones).
+ * Those are written as plain headings, paragraphs and lists, so the styling is
+ * attached to the elements here instead of a class on every line.
+ *
+ * The measure is capped in `ch`, not in rem: it tracks the font, and ~65
+ * characters is where a line stops being comfortable to return from.
+ */
+@utility prose-page {
+  max-width: 65ch;
+
+  & h2 {
+    font-size: 1.5rem;
+    margin-top: 2.5rem;
+    margin-bottom: 0.75rem;
+  }
+
+  & h3 {
+    font-size: 1.125rem;
+    margin-top: 1.75rem;
+    margin-bottom: 0.5rem;
+  }
+
+  /* The first heading sits right under the page header, which brings its own
+     spacing — the top margin above would double it. */
+  & > :first-child {
+    margin-top: 0;
+  }
+
+  & p,
+  & ul,
+  & ol {
+    margin-block: 1rem;
+  }
+
+  & ul,
+  & ol {
+    padding-inline-start: 1.5rem;
+  }
+
+  & ul {
+    list-style: disc;
+  }
+
+  & ol {
+    list-style: decimal;
+  }
+
+  & li {
+    margin-block: 0.375rem;
+  }
+
+  & a {
+    color: var(--color-brand);
+    text-decoration: underline;
+    text-underline-offset: 0.2em;
+  }
+
+  & strong {
+    color: var(--color-ink);
+    font-weight: 600;
+  }
+}
+
 /* Prices are always tabular so columns of numbers line up. */
 @utility price {
   font-variant-numeric: tabular-nums;

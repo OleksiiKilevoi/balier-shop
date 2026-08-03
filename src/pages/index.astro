@@ -1,11 +1,45 @@
 ---
+import { env } from 'cloudflare:workers';
 import BaseLayout from '~/layouts/BaseLayout.astro';
 import Container from '~/components/Container.astro';
 import Button from '~/components/Button.astro';
+import ProductCard from '~/components/ProductCard.astro';
+import { createDb } from '~/lib/db';
+import { listFeaturedProducts } from '~/lib/db/queries/products';
 
 export const prerender = false;
 
-// Phase 2 replaces the placeholder sections with featured products from the DB.
+/**
+ * Four, not five: the row is two cards on a phone and four at `lg`, so five
+ * leaves a ragged trailing card at every width. The 3-column step `/products`
+ * uses at `md` is skipped here for the same reason.
+ */
+const FEATURED_COUNT = 4;
+
+// Per request — never a module-scope singleton, every request is a fresh isolate.
+const db = createDb(env.DATABASE_URL);
+const featured = await listFeaturedProducts(db, FEATURED_COUNT);
+
+/**
+ * Teasers for the two content pages, so `/about` and `/care` have an entry point
+ * that is not the nav. The copy is placeholder-grade and stays generic on
+ * purpose: the real text arrives with the pages themselves (roadmap.md, Phase 5),
+ * and inventing a brand story here would just mean writing it twice.
+ */
+const teasers = [
+  {
+    href: '/about',
+    title: 'Про нас',
+    text: 'Невелика майстерня, у якій кожна річ шиється вручну й малими партіями.',
+    cta: 'Наша історія',
+  },
+  {
+    href: '/care',
+    title: 'Догляд за шкірою',
+    text: 'Кілька простих правил, які подовжать життя вашій речі на роки.',
+    cta: 'Як доглядати',
+  },
+];
 ---
 
 <BaseLayout
@@ -32,7 +66,74 @@ export const prerender = false;
     </Container>
   </section>
 
-  <Container as="section" class="py-12 sm:py-16">
+  {
+    featured.length > 0 && (
+      <Container as="section" class="py-12 sm:py-16" aria-labelledby="featured-heading">
+        {/* The heading and the link share a row from `sm:` up. On a phone the
+            link goes under the grid instead — a small "Усі товари" tucked beside
+            the heading is both a poor target and easy to miss above the fold. */}
+        <div class="flex items-baseline justify-between gap-4">
+          <h2 id="featured-heading" class="text-2xl sm:text-3xl">
+            Обрані товари
+          </h2>
+          <a
+            href="/products"
+            class="text-ink-muted hover:text-brand hidden text-sm transition-colors sm:inline"
+          >
+            Усі товари →
+          </a>
+        </div>
+
+        {/* No card is `eager` here, unlike `/products`: the hero owns the LCP and
+            every one of these starts below the fold. */}
+        <div class="mt-6 grid grid-cols-2 gap-3 sm:mt-8 sm:gap-5 lg:grid-cols-4 lg:gap-6">
+          {featured.map((product) => (
+            <ProductCard
+              slug={product.slug}
+              title={product.title}
+              category={product.categoryTitle}
+              price={product.price}
+              compareAtPrice={product.compareAtPrice}
+              imageUrl={product.imageUrl}
+              imageAlt={product.imageAlt}
+              swatches={product.swatches}
+              soldOut={!product.inStock}
+            />
+          ))}
+        </div>
+
+        <Button href="/products" variant="secondary" block class="mt-6 sm:hidden">
+          Усі товари
+        </Button>
+      </Container>
+    )
+  }
+
+  <Container as="section" class="pb-12 sm:pb-16">
+    <div class="grid gap-4 sm:gap-5 md:grid-cols-2">
+      {
+        teasers.map((teaser) => (
+          <article class="border-line bg-paper-raised rounded-card flex flex-col p-6 sm:p-8">
+            <h2 class="text-xl sm:text-2xl">{teaser.title}</h2>
+            <p class="text-ink-muted mt-3 max-w-prose grow text-sm sm:text-base">{teaser.text}</p>
+            {/* The whole card is not a link: two links in one card and a
+                screen reader announces the same destination twice. */}
+            <a
+              href={teaser.href}
+              class="text-brand hover:text-brand-hover mt-4 inline-flex min-h-touch items-center text-sm font-medium transition-colors md:min-h-0"
+            >
+              {teaser.cta} →
+            </a>
+          </article>
+        ))
+      }
+    </div>
+  </Container>
+
+  {/* Reassurance for a first-time visitor arriving from Instagram — kept last,
+      where it answers "how do I actually get this" rather than interrupting the
+      products. */}
+  <Container as="section" class="border-line border-t py-12 sm:py-16">
     {/* Three columns need ~230px each to avoid ragged two-word lines, so they
         arrive at md rather than sm. */}
     <div class="grid gap-8 sm:gap-10 md:grid-cols-3">
