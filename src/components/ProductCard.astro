@@ -1,0 +1,96 @@
+---
+import { formatPrice, type Kopiykas } from '~/lib/money';
+
+interface Props {
+  slug: string;
+  title: string;
+  /** Category name, shown under the title. */
+  category?: string | null;
+  price: Kopiykas;
+  compareAtPrice?: Kopiykas | null;
+  imageUrl?: string | null;
+  imageAlt?: string | null;
+  /** Colour swatches, rendered only when the product genuinely has a choice. */
+  swatches?: readonly { name: string; hex: string | null }[];
+  soldOut?: boolean;
+  /** Set on the first row of the grid so the LCP image is not lazy. */
+  eager?: boolean;
+}
+
+const {
+  slug,
+  title,
+  category,
+  price,
+  compareAtPrice,
+  imageUrl,
+  imageAlt,
+  swatches = [],
+  soldOut = false,
+  eager = false,
+} = Astro.props;
+
+const showCompareAt = typeof compareAtPrice === 'number' && compareAtPrice > price;
+---
+
+<article
+  class="border-line bg-paper-raised rounded-card group overflow-hidden border transition-shadow hover:shadow-md"
+>
+  <a href={`/products/${slug}`} class="block">
+    <div class="bg-line/50 relative aspect-square overflow-hidden">
+      {
+        imageUrl ? (
+          <img
+            src={imageUrl}
+            alt={imageAlt ?? title}
+            loading={eager ? 'eager' : 'lazy'}
+            fetchpriority={eager ? 'high' : undefined}
+            decoding="async"
+            class="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.03]"
+          />
+        ) : (
+          <div class="text-ink-muted flex h-full w-full items-center justify-center text-xs">
+            Фото незабаром
+          </div>
+        )
+      }
+      {
+        soldOut && (
+          <span class="bg-paper/95 text-ink absolute top-3 left-3 rounded-full px-2.5 py-1 text-xs">
+            Немає в наявності
+          </span>
+        )
+      }
+    </div>
+
+    <div class="space-y-1 p-4">
+      <h3 class="font-display text-ink text-lg leading-snug font-bold">{title}</h3>
+      {category && <p class="text-ink-muted text-sm">{category}</p>}
+
+      <div class="flex items-baseline gap-2 pt-1.5">
+        <p class="price text-base">{formatPrice(price)}</p>
+        {
+          showCompareAt && (
+            <p class="text-ink-muted text-sm line-through tabular-nums">
+              {formatPrice(compareAtPrice)}
+            </p>
+          )
+        }
+      </div>
+
+      {
+        swatches.length > 1 && (
+          <ul class="flex gap-1.5 pt-1" aria-label="Доступні кольори">
+            {swatches.map((swatch) => (
+              <li
+                class="border-line-strong h-3.5 w-3.5 rounded-full border"
+                style={swatch.hex ? `background-color:${swatch.hex}` : undefined}
+                title={swatch.name}
+              />
+            ))}
+          </ul>
+        )
+      }
+    </div>
+  </a>
+</article>

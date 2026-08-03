@@ -1,0 +1,28 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "balier",
+  "compatibility_date": "2026-07-30",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true
+  },
+  "images": {
+    "binding": "IMAGES"
+  },
+  // Secrets are NOT set here. Locally they live in `.dev.vars`; in production
+  // they are set with `wrangler secret put <NAME>`.
+  //   DATABASE_URL, MONOBANK_TOKEN, MONOBANK_WEBHOOK_URL,
+  //   NOVAPOSHTA_API_KEY, TURNSTILE_SECRET_KEY,
+  //   TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+  "vars": {
+    "PUBLIC_SITE_URL": "https://balier.ua"
+  }
+
+  // Added in Phase 3, once the namespaces exist:
+  //   wrangler kv namespace create CACHE
+  //   wrangler kv namespace create RATE_LIMIT
+  // "kv_namespaces": [
+  //   { "binding": "CACHE", "id": "<id>" },
+  //   { "binding": "RATE_LIMIT", "id": "<id>" }
+  // ]
+}

@@ -1,0 +1,144 @@
+---
+import Container from './Container.astro';
+
+const nav = [
+  { href: '/products', label: 'Товари' },
+  { href: '/about', label: 'Про нас' },
+  { href: '/care', label: 'Догляд' },
+];
+
+const pathname = Astro.url.pathname;
+const isActive = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
+---
+
+<header class="border-line bg-paper sticky top-0 z-40 border-b">
+  <Container class="flex h-header items-center gap-2 sm:gap-4">
+    <a href="/" class="font-display text-ink text-2xl font-bold tracking-[0.14em]"> BALIER </a>
+
+    <nav aria-label="Головне меню" class="hidden flex-1 justify-center md:flex">
+      <ul class="flex items-center gap-8 text-sm">
+        {
+          nav.map((item) => (
+            <li>
+              <a
+                href={item.href}
+                aria-current={isActive(item.href) ? 'page' : undefined}
+                class="hover:text-brand aria-[current=page]:text-brand text-ink-soft transition-colors aria-[current=page]:font-medium"
+              >
+                {item.label}
+              </a>
+            </li>
+          ))
+        }
+      </ul>
+    </nav>
+
+    {/* Icon controls are sized to --spacing-touch rather than padded around the
+        glyph — the gap tightens instead, so the row still reads as the mockup. */}
+    <div class="ml-auto flex items-center gap-0.5 sm:gap-1 md:ml-0">
+      <a
+        href="/search"
+        class="text-ink-soft hover:text-brand flex size-touch items-center justify-center transition-colors"
+        aria-label="Пошук"
+      >
+        <svg width="19" height="19" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+          <circle cx="9" cy="9" r="6" stroke="currentColor" stroke-width="1.5"></circle>
+          <path d="m13.5 13.5 3.5 3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"
+          ></path>
+        </svg>
+      </a>
+
+      <a
+        href="/cart"
+        class="text-ink-soft hover:text-brand relative flex size-touch items-center justify-center transition-colors"
+        aria-label="Кошик"
+      >
+        {/* The badge hangs off the glyph, not off the 44px hit area. */}
+        <span class="relative flex">
+          <svg width="19" height="19" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+            <path
+              d="M4 6h12l-1 11H5L4 6Z"
+              stroke="currentColor"
+              stroke-width="1.5"
+              stroke-linejoin="round"></path>
+            <path d="M7.5 6a2.5 2.5 0 0 1 5 0" stroke="currentColor" stroke-width="1.5"></path>
+          </svg>
+          <span
+            class="bg-brand absolute -top-1.5 -right-2 hidden h-4 min-w-4 items-center justify-center rounded-full px-1 text-[0.625rem] font-medium text-white"
+            data-cart-count
+            aria-live="polite"></span>
+        </span>
+      </a>
+
+      <button
+        type="button"
+        class="text-ink-soft flex size-touch items-center justify-center md:hidden"
+        aria-label="Відкрити меню"
+        aria-expanded="false"
+        aria-controls="mobile-nav"
+        data-menu-toggle
+      >
+        <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true" fill="none">
+          <path d="M3 6h14M3 10h14M3 14h14" stroke="currentColor" stroke-width="1.5"></path>
+        </svg>
+      </button>
+    </div>
+  </Container>
+
+  {/* The panel is inside the sticky header, so it stays reachable while scrolled.
+      It scrolls internally in case a short landscape viewport cannot hold it. */}
+  <nav
+    id="mobile-nav"
+    aria-label="Мобільне меню"
+    class="border-line hidden max-h-[calc(100dvh-var(--spacing-header))] overflow-y-auto border-t md:hidden"
+  >
+    <Container>
+      <ul class="flex flex-col py-2 text-base">
+        {
+          nav.map((item) => (
+            <li>
+              <a
+                href={item.href}
+                aria-current={isActive(item.href) ? 'page' : undefined}
+                class="text-ink-soft aria-[current=page]:text-brand flex min-h-touch items-center aria-[current=page]:font-medium"
+              >
+                {item.label}
+              </a>
+            </li>
+          ))
+        }
+      </ul>
+    </Container>
+  </nav>
+</header>
+
+<script>
+  const toggle = document.querySelector<HTMLButtonElement>('[data-menu-toggle]');
+  const panel = document.querySelector<HTMLElement>('#mobile-nav');
+
+  if (toggle && panel) {
+    const setOpen = (open: boolean) => {
+      toggle.setAttribute('aria-expanded', String(open));
+      toggle.setAttribute('aria-label', open ? 'Закрити меню' : 'Відкрити меню');
+      panel.classList.toggle('hidden', !open);
+    };
+
+    toggle.addEventListener('click', () => {
+      setOpen(toggle.getAttribute('aria-expanded') !== 'true');
+    });
+
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && toggle.getAttribute('aria-expanded') === 'true') {
+        setOpen(false);
+        toggle.focus();
+      }
+    });
+
+    // The panel is `md:hidden`, so on rotation to a tablet width it disappears
+    // while `aria-expanded` would otherwise stay stuck on "true".
+    const desktop = window.matchMedia('(width >= 48rem)');
+    desktop.addEventListener('change', (event) => {
+      if (event.matches) setOpen(false);
+    });
+  }
+</script>

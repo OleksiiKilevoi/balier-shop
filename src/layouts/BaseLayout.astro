@@ -1,0 +1,68 @@
+---
+import { Font } from 'astro:assets';
+import SiteHeader from '~/components/SiteHeader.astro';
+import SiteFooter from '~/components/SiteFooter.astro';
+import '~/styles/global.css';
+
+interface Props {
+  title: string;
+  description?: string;
+  /** Absolute or site-relative image for social cards. */
+  ogImage?: string;
+  noindex?: boolean;
+}
+
+const { title, description, ogImage, noindex = false } = Astro.props;
+
+const siteName = 'Balier';
+const fullTitle = title === siteName ? title : `${title} — ${siteName}`;
+const canonical = new URL(Astro.url.pathname, Astro.site ?? Astro.url).href;
+const ogImageUrl = ogImage ? new URL(ogImage, Astro.site ?? Astro.url).href : undefined;
+---
+
+<html lang="uk">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="canonical" href={canonical} />
+
+    {/* Only the display face is preloaded — it paints the LCP heading. Body
+        text has a metric-matched fallback, so preloading Inter's three weights
+        would compete with the hero for bandwidth without moving first paint. */}
+    <Font cssVariable="--font-playfair" preload />
+    <Font cssVariable="--font-inter" />
+
+    <title>{fullTitle}</title>
+    {description && <meta name="description" content={description} />}
+    {noindex && <meta name="robots" content="noindex, nofollow" />}
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content={siteName} />
+    <meta property="og:locale" content="uk_UA" />
+    <meta property="og:title" content={fullTitle} />
+    <meta property="og:url" content={canonical} />
+    {description && <meta property="og:description" content={description} />}
+    {ogImageUrl && <meta property="og:image" content={ogImageUrl} />}
+    <meta name="twitter:card" content="summary_large_image" />
+
+    <slot name="head" />
+  </head>
+
+  <body class="flex min-h-dvh flex-col">
+    <a
+      href="#main"
+      class="bg-ink text-paper sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:px-4 focus:py-2"
+    >
+      Перейти до вмісту
+    </a>
+
+    <SiteHeader />
+
+    <main id="main" class="flex-1">
+      <slot />
+    </main>
+
+    <SiteFooter />
+  </body>
+</html>

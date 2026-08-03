@@ -1,0 +1,21 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "balier-cron",
+  "main": "./index.ts",
+  "compatibility_date": "2026-07-30",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true
+  },
+  "triggers": {
+    "crons": [
+      // Release stock reserved by orders that were never paid.
+      "*/15 * * * *",
+      // Refresh the Nova Poshta settlement/warehouse cache.
+      "0 4 * * *"
+    ]
+  }
+  // Needs its own DATABASE_URL secret:
+  //   wrangler secret put DATABASE_URL -c workers/cron/wrangler.jsonc
+  // and NOVAPOSHTA_API_KEY for the sync job.
+}

@@ -1,0 +1,94 @@
+---
+import Container from './Container.astro';
+
+const year = new Date().getFullYear();
+
+const columns = [
+  {
+    title: 'Магазин',
+    links: [{ href: '/products', label: 'Усі товари' }],
+  },
+  {
+    title: 'Про нас',
+    links: [
+      { href: '/about', label: 'Наша історія' },
+      { href: '/care', label: 'Догляд за шкірою' },
+    ],
+  },
+  {
+    title: 'Обслуговування',
+    links: [
+      { href: '/delivery', label: 'Доставка' },
+      { href: '/returns', label: 'Повернення та обмін' },
+      { href: '/contacts', label: "Зв'язатися з нами" },
+    ],
+  },
+];
+---
+
+<footer class="bg-espresso mt-16 py-12 text-white/75 sm:mt-24 sm:py-14">
+  <Container class="grid gap-8 sm:grid-cols-2 sm:gap-10 lg:grid-cols-4">
+    {
+      columns.map((column) => (
+        <nav aria-label={column.title}>
+          <p class="font-display mb-2 text-lg font-bold text-white sm:mb-3">{column.title}</p>
+          {/* Padded to a comfortable row height instead of relying on `space-y`,
+              which leaves 20px-tall links between untappable gaps. */}
+          <ul class="text-sm">
+            {column.links.map((link) => (
+              <li>
+                <a
+                  href={link.href}
+                  class="flex min-h-touch items-center transition-colors hover:text-white md:min-h-0 md:py-1.5"
+                >
+                  {link.label}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </nav>
+      ))
+    }
+
+    <div>
+      <p class="font-display mb-3 text-lg font-bold text-white">Розсилка</p>
+      <p class="mb-4 text-sm">
+        Підпишіться, щоб отримувати оновлення про нові надходження та спеціальні пропозиції.
+      </p>
+      {/* Phase 6 — the POST endpoint does not exist yet, so submission is disabled.
+          `flex-1` on the field starts at `sm:` on purpose: while the form is a
+          column the main axis is vertical, and a `0%` flex-basis beats `h-11`. */}
+      <form class="flex flex-col gap-2 sm:flex-row" data-newsletter>
+        <label for="newsletter-email" class="sr-only">Ваш email</label>
+        <input
+          id="newsletter-email"
+          type="email"
+          name="email"
+          placeholder="Ваш email"
+          autocomplete="email"
+          inputmode="email"
+          class="rounded-btn h-11 w-full min-w-0 border border-white/20 bg-white/5 px-3 text-white placeholder:text-white/45 focus:border-white/40 focus:outline-none sm:h-10 sm:flex-1 sm:text-sm"
+        />
+        <button
+          type="button"
+          disabled
+          class="rounded-btn bg-brand hover:bg-brand-hover h-11 shrink-0 px-4 text-sm font-medium text-white transition-colors disabled:opacity-60 sm:h-10"
+        >
+          Підписатися
+        </button>
+      </form>
+    </div>
+  </Container>
+
+  <Container class="mt-10 flex flex-col gap-1 border-t border-white/10 pt-6 text-xs sm:mt-12 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
+    <p>© {year} Balier. Усі права захищено.</p>
+    <a
+      href="https://www.instagram.com/balier.ua/"
+      rel="me noopener"
+      target="_blank"
+      class="flex min-h-touch items-center transition-colors hover:text-white md:min-h-0"
+    >
+      Instagram
+    </a>
+  </Container>
+</footer>

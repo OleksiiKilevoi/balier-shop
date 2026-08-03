@@ -1,0 +1,141 @@
+@import 'tailwindcss';
+
+/*
+ * Design tokens, taken from the mockups in /design.
+ * Nothing outside this file should contain a raw colour value.
+ *
+ * The palette is warm leather: cream paper, espresso darks, a rust accent for
+ * every primary action. Telegram keeps its brand blue on purpose — it reads as
+ * "another channel", not as a second-choice button.
+ */
+@theme {
+  /* Astro's font pipeline (see astro.config.mjs) injects --font-playfair and
+     --font-inter at runtime. They are aliased into theme keys here so Tailwind
+     compiles `font-display` / `font-sans` utilities and so our --font-sans wins
+     over Tailwind's default system stack. Declaring them here is what makes the
+     logo and the footer titles render in Playfair. */
+  --font-display: var(--font-playfair);
+  --font-sans: var(--font-inter);
+
+  --color-paper: #fcf4e5;
+  --color-paper-raised: #ffffff;
+
+  --color-ink: #2e1a0f;
+  --color-ink-soft: #4a3728;
+  --color-ink-muted: #8a7767;
+
+  --color-line: #eadfcb;
+  --color-line-strong: #ddcdb2;
+
+  /* Primary action. Every "add to cart" / "place order" button is this. */
+  --color-brand: #8b430b;
+  --color-brand-hover: #723709;
+
+  /* Hero gradient and footer. */
+  --color-espresso: #3b1a0b;
+  --color-espresso-light: #6b3517;
+
+  --color-telegram: #26a5e4;
+  --color-telegram-hover: #1e93cd;
+
+  /* Category pill on product cards and the product page. */
+  --color-tag: #f5e7d3;
+  --color-tag-ink: #7a4a22;
+
+  --radius-card: 0.5rem;
+  --radius-btn: 0.375rem;
+
+  --spacing-gutter: 1.25rem;
+
+  /* The smallest square a finger can reliably hit. Icon-only controls in the
+     header and any future stepper/close button must be at least this. */
+  --spacing-touch: 2.75rem;
+
+  /* Height of the sticky header — also the scroll offset for in-page anchors. */
+  --spacing-header: 4rem;
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    scroll-behavior: smooth;
+    /* Without this, an anchor target lands underneath the sticky header. */
+    scroll-padding-top: calc(var(--spacing-header) + 1rem);
+  }
+
+  body {
+    background-color: var(--color-paper);
+    color: var(--color-ink-soft);
+    font-family: var(--font-sans);
+    /* 16px on phones — 15px body copy is uncomfortable at arm's length, and the
+       audience arrives from Instagram on a phone. The mockups are desktop, and
+       that is where the tighter 15px applies. */
+    font-size: 1rem;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  @media (width >= 40rem) {
+    body {
+      font-size: 0.9375rem;
+    }
+  }
+
+  /* iOS Safari zooms the viewport when a focused field is under 16px and never
+     zooms back out. Fields must therefore stay at 16px on phones; anything
+     smaller is a desktop-only refinement (`text-base sm:text-sm`). */
+  input,
+  select,
+  textarea {
+    font-size: 1rem;
+  }
+
+  /* Tailwind gates `hover:` behind `@media (hover: hover)`, so a phone gets no
+     hover feedback at all — the tap highlight is the only "I registered that"
+     signal there is. Kept, but tinted to the brand instead of the default grey. */
+  a,
+  button,
+  [role='button'] {
+    -webkit-tap-highlight-color: color-mix(in srgb, var(--color-brand) 15%, transparent);
+  }
+
+  h1,
+  h2,
+  h3 {
+    color: var(--color-ink);
+    font-family: var(--font-display);
+    font-weight: 700;
+    letter-spacing: -0.015em;
+    line-height: 1.15;
+    text-wrap: balance;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-brand);
+    outline-offset: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@utility container-page {
+  margin-inline: auto;
+  width: 100%;
+  max-width: 82rem;
+  padding-inline: var(--spacing-gutter);
+}
+
+/* Prices are always tabular so columns of numbers line up. */
+@utility price {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--color-ink);
+}

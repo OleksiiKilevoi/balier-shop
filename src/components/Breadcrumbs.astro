@@ -1,0 +1,35 @@
+---
+interface Crumb {
+  label: string;
+  /** Omit on the final crumb — it renders as plain text. */
+  href?: string;
+}
+
+interface Props {
+  items: readonly Crumb[];
+  class?: string;
+}
+
+const { items, class: className } = Astro.props;
+---
+
+<nav aria-label="Навігаційний ланцюжок" class:list={['text-sm', className]}>
+  <ol class="flex flex-wrap items-center gap-1.5">
+    {
+      items.map((crumb, index) => (
+        <li class="flex items-center gap-1.5">
+          {index > 0 && <span class="text-ink-muted/60" aria-hidden="true">/</span>}
+          {crumb.href ? (
+            <a href={crumb.href} class="text-ink-muted hover:text-brand transition-colors">
+              {crumb.label}
+            </a>
+          ) : (
+            <span class="text-ink font-medium" aria-current="page">
+              {crumb.label}
+            </span>
+          )}
+        </li>
+      ))
+    }
+  </ol>
+</nav>

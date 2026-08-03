@@ -1,0 +1,53 @@
+---
+import type { HTMLAttributes } from 'astro/types';
+
+type Variant = 'primary' | 'secondary' | 'telegram' | 'ghost';
+type Size = 'sm' | 'md' | 'lg';
+
+type Props = {
+  variant?: Variant;
+  size?: Size;
+  /** Renders an <a> instead of a <button>. */
+  href?: string;
+  /** Stretches to the container width — used for the product page CTAs. */
+  block?: boolean;
+  class?: string;
+} & Omit<HTMLAttributes<'button'> & HTMLAttributes<'a'>, 'size'>;
+
+const {
+  variant = 'primary',
+  size = 'md',
+  href,
+  block = false,
+  class: className,
+  ...rest
+} = Astro.props;
+
+const base =
+  'inline-flex items-center justify-center gap-2 rounded-btn text-center font-medium transition-colors duration-150 disabled:pointer-events-none disabled:opacity-50';
+
+const variants: Record<Variant, string> = {
+  primary: 'bg-brand text-white hover:bg-brand-hover',
+  secondary: 'border border-line-strong text-ink hover:border-ink hover:bg-white',
+  telegram: 'bg-telegram text-white hover:bg-telegram-hover',
+  ghost: 'text-ink-muted hover:text-ink',
+};
+
+// `sm` is the only size that falls under the 44px touch minimum, so it renders
+// at full height on touch widths and compacts to the mockup size from `md:` up.
+const sizes: Record<Size, string> = {
+  sm: 'h-touch px-4 text-sm md:h-9',
+  md: 'h-touch px-6 text-sm',
+  lg: 'h-13 px-7 text-base',
+};
+
+const Tag = href ? 'a' : 'button';
+---
+
+<Tag
+  href={href}
+  class:list={[base, variants[variant], sizes[size], block && 'w-full', className]}
+  {...rest}
+>
+  <slot />
+</Tag>

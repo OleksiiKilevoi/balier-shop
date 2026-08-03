@@ -1,0 +1,60 @@
+---
+import BaseLayout from '~/layouts/BaseLayout.astro';
+import Container from '~/components/Container.astro';
+import Button from '~/components/Button.astro';
+
+export const prerender = false;
+
+// Phase 2 replaces the placeholder sections with featured products from the DB.
+---
+
+<BaseLayout
+  title="Balier"
+  description="Шкіряні вироби ручної роботи. Обмежені партії, доставка Новою Поштою по всій Україні."
+>
+  <section
+    class="from-espresso via-espresso to-espresso-light bg-gradient-to-br text-white"
+    aria-labelledby="hero-heading"
+  >
+    {/* 32rem of hero eats a whole phone screen before anything else is visible,
+        so the tall version starts at the tablet breakpoint. */}
+    <Container class="flex min-h-[24rem] flex-col justify-center py-16 sm:min-h-[32rem] sm:py-28">
+      {/* 2rem keeps the forced break on one line down to a 320px viewport. */}
+      <h1 id="hero-heading" class="max-w-2xl text-[2rem] text-white sm:text-5xl lg:text-6xl">
+        Шкіряні вироби<br />ручної роботи
+      </h1>
+      <p class="mt-4 max-w-md text-white/80 sm:mt-5">
+        Кожен виріб розповідає історію майстерності та традицій.
+      </p>
+      <div class="mt-8">
+        <Button href="/products" size="lg" class="w-full sm:w-auto">До магазину</Button>
+      </div>
+    </Container>
+  </section>
+
+  <Container as="section" class="py-12 sm:py-16">
+    {/* Three columns need ~230px each to avoid ragged two-word lines, so they
+        arrive at md rather than sm. */}
+    <div class="grid gap-8 sm:gap-10 md:grid-cols-3">
+      <div>
+        <h2 class="text-xl">Доставка Новою Поштою</h2>
+        <p class="text-ink-muted mt-2 text-sm">
+          Відділення, поштомат або кур'єр — за тарифами перевізника. Відправка протягом 1–2 робочих
+          днів.
+        </p>
+      </div>
+      <div>
+        <h2 class="text-xl">Оплата карткою або при отриманні</h2>
+        <p class="text-ink-muted mt-2 text-sm">
+          Безпечна оплата через Monobank або накладений платіж.
+        </p>
+      </div>
+      <div>
+        <h2 class="text-xl">Обмін і повернення</h2>
+        <p class="text-ink-muted mt-2 text-sm">
+          14 днів на обмін або повернення товару належної якості.
+        </p>
+      </div>
+    </div>
+  </Container>
+</BaseLayout>

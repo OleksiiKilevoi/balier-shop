@@ -1,0 +1,21 @@
+# Copy to `.dev.vars` and fill in. This file is read by wrangler for local dev
+# and by drizzle-kit for migrations. `.dev.vars` is gitignored — never commit it.
+#
+# In production these are set with: wrangler secret put <NAME>
+
+# Neon pooled connection string (EU Frankfurt project)
+DATABASE_URL="postgresql://user:password@ep-xxx-pooler.eu-central-1.aws.neon.tech/balier?sslmode=require"
+
+# Monobank Acquiring. Use the TEST token until Phase 5.
+# https://api.monobank.ua/docs/acquiring.html
+MONOBANK_TOKEN=""
+
+# Nova Poshta API key from the business cabinet
+NOVAPOSHTA_API_KEY=""
+
+# Cloudflare Turnstile (secret half; the site key is public and lives in vars)
+TURNSTILE_SECRET_KEY=""
+
+# Telegram bot for new-order notifications
+TELEGRAM_BOT_TOKEN=""
+TELEGRAM_CHAT_ID=""
