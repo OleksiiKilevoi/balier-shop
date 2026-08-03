@@ -4,15 +4,30 @@ import SiteHeader from '~/components/SiteHeader.astro';
 import SiteFooter from '~/components/SiteFooter.astro';
 import '~/styles/global.css';
 
+/**
+ * Pre-launch: every page is `noindex, nofollow`.
+ *
+ * The store is reachable at a public workers.dev URL while the catalog, the
+ * checkout and the legal pages do not exist yet, and none of that should end up
+ * in an index — a page pulled out of the index later still leaves a stale cached
+ * copy behind. Flipping this to `true` is a Phase 5 launch step; see roadmap.md.
+ *
+ * Deliberately NOT paired with `Disallow` in robots.txt: a blocked crawler never
+ * fetches the page, so it never sees this tag, and the URL can still be indexed
+ * from external links. Allow the crawl, refuse the index.
+ */
+const SITE_IS_INDEXABLE = false;
+
 interface Props {
   title: string;
   description?: string;
   /** Absolute or site-relative image for social cards. */
   ogImage?: string;
+  /** Per-page override. Defaults to the site-wide setting above. */
   noindex?: boolean;
 }
 
-const { title, description, ogImage, noindex = false } = Astro.props;
+const { title, description, ogImage, noindex = !SITE_IS_INDEXABLE } = Astro.props;
 
 const siteName = 'Balier';
 const fullTitle = title === siteName ? title : `${title} — ${siteName}`;

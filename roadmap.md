@@ -40,7 +40,8 @@ the critical path and nothing here is under our control.
 - [ ] Nova Poshta API (NP account, business account), configure cash on delivery, decide who pays
       the transfer commission
 - [ ] Neon project, EU Frankfurt — **blocks `db:migrate` and `db:seed`**
-- [ ] Cloudflare account + `wrangler secret put` for each secret — **blocks any real deploy**
+- [~] Cloudflare account — done, deploying through Workers Builds (dashboard, not CLI). Secrets are
+      still unset; nothing reads one yet, so this no longer blocks a deploy
 - [ ] Telegram: manager account for the deep link, bot and chat for notifications
 - [ ] Confirm Neon plan covers the backup/PITR window we need (moved up from Phase 5)
 
@@ -54,7 +55,9 @@ the critical path and nothing here is under our control.
 - [x] Types and ports (`src/lib/ports.ts`): payment, shipping, notifier, captcha
 - [x] Base page layout, design tokens, self-hosted Cyrillic fonts
 - [x] Build verified (`pnpm check` + `pnpm build`), homepage renders
-- [ ] Verify a real deploy — blocked on the Cloudflare account in Phase 0
+- [x] Verify a real deploy — live at `balier-dev.mykhailoshulezhko.workers.dev`, deployed by
+      Cloudflare Workers Builds from GitHub `main` (2026-08-03). Immutable asset caching, the
+      self-hosted Cyrillic fonts and the mobile layout all confirmed on the deployed artifact.
 
 Decisions locked during this phase:
 
@@ -112,6 +115,9 @@ are the two places where a bug costs money.
 
 ## Phase 5 — Launch (2–3 days)
 
+- [ ] **Allow indexing** — `SITE_IS_INDEXABLE` in `src/layouts/BaseLayout.astro` is `false`, so every
+      page ships `noindex, nofollow`. Flip it only once the legal pages exist and the domain is
+      attached, or the store launches invisible
 - [ ] Filling in content
 - [ ] Testing
 - [ ] Replacing the Monobank test token with the client's token
