@@ -238,6 +238,8 @@ const showCompareAt =
 <script>
   import { formatPrice } from '~/lib/money';
   import { orderDeepLink } from '~/lib/telegram';
+  import { openCartPopup } from '~/lib/cartPopup';
+  import { addToCart } from '~/stores/cart';
 
   const root = document.querySelector<HTMLElement>('[data-product]');
 
@@ -246,7 +248,7 @@ const showCompareAt =
     const priceDisplay = root.querySelector<HTMLElement>('[data-price-display]');
     const variantName = root.querySelector<HTMLElement>('[data-variant-name]');
     const quantity = root.querySelector<HTMLInputElement>('input[data-quantity]');
-    const addToCart = root.querySelector<HTMLButtonElement>('[data-add-to-cart]');
+    const addButton = root.querySelector<HTMLButtonElement>('[data-add-to-cart]');
     const telegram = root.querySelector<HTMLAnchorElement>('a[data-telegram]');
     const stockNote = root.querySelector<HTMLElement>('[data-stock-note]');
 
@@ -255,11 +257,14 @@ const showCompareAt =
     const manager = root.dataset.manager ?? '';
     const showsColour = root.dataset.colourChoice === 'true';
 
+    /** The colour currently pressed — the one every action on this page applies to. */
+    const currentVariant = () =>
+      variantButtons.find((button) => button.getAttribute('aria-pressed') === 'true') ??
+      variantButtons[0];
+
     /** Re-derives everything that depends on the chosen colour and quantity. */
     const render = () => {
-      const variant =
-        variantButtons.find((button) => button.getAttribute('aria-pressed') === 'true') ??
-        variantButtons[0];
+      const variant = currentVariant();
       if (!variant) return;
 
       const price = Number(variant.dataset.price);
@@ -278,7 +283,7 @@ const showCompareAt =
         }
       }
 
-      if (addToCart) addToCart.disabled = available < 1;
+      if (addButton) addButton.disabled = available < 1;
       if (stockNote) stockNote.hidden = available > 0;
 
       if (telegram) {
@@ -312,5 +317,26 @@ const showCompareAt =
     }
 
     document.addEventListener('quantity:change', render);
+
+    /**
+     * Adding keeps the customer on the page — the popup that follows is the
+     * confirmation, with the full cart and a straight line to checkout, so
+     * browsing is never interrupted by a redirect to a cart they did not ask
+     * to see.
+     *
+     * Only the variant id and the quantity are stored. What that costs is
+     * resolved from the database by `/api/cart` when the popup opens, so
+     * nothing priced here can be carried forward as truth.
+     */
+    if (addButton) {
+      addButton.addEventListener('click', () => {
+        const variant = currentVariant();
+        const variantId = variant?.dataset.variantId;
+        if (!variantId) return;
+
+        addToCart(variantId, Number(quantity?.value) || 1);
+        openCartPopup();
+      });
+    }
   }
 </script>

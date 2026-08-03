@@ -78,34 +78,58 @@ const { max, name = 'quantity', class: className } = Astro.props;
 </style>
 
 <script>
-  for (const stepper of document.querySelectorAll<HTMLElement>('[data-stepper]')) {
-    const input = stepper.querySelector<HTMLInputElement>('input[data-quantity]');
-    if (!input) continue;
+  /**
+   * Delegated from `document` rather than bound per element.
+   *
+   * The cart page clones its rows — steppers included — out of a `<template>`
+   * after this module has run, and a per-element binding would leave every one
+   * of those dead with nothing to show for it. Delegation costs three listeners
+   * for the whole document and works the same for markup that arrives later.
+   */
 
-    /**
-     * The single way the value changes. Deliberately dispatches a custom event
-     * rather than `change`: re-dispatching the event we also listen for would
-     * loop.
-     */
-    const setValue = (next: number) => {
-      const max = Math.max(Number(input.max) || 1, 1);
-      const value = Math.min(Math.max(Math.round(next) || 1, 1), max);
+  /**
+   * The single way the value changes. Deliberately dispatches a custom event
+   * rather than `change`: re-dispatching the event we also listen for would loop.
+   */
+  const setValue = (stepper: HTMLElement, input: HTMLInputElement, next: number) => {
+    const max = Math.max(Number(input.max) || 1, 1);
+    const value = Math.min(Math.max(Math.round(next) || 1, 1), max);
 
-      input.value = String(value);
-      stepper.dispatchEvent(
-        new CustomEvent('quantity:change', { bubbles: true, detail: { value } }),
-      );
-    };
+    input.value = String(value);
+    stepper.dispatchEvent(new CustomEvent('quantity:change', { bubbles: true, detail: { value } }));
+  };
 
-    for (const button of stepper.querySelectorAll<HTMLButtonElement>('button[data-step]')) {
-      button.addEventListener('click', () => {
-        setValue(Number(input.value) + Number(button.dataset.step));
-      });
+  /** The stepper and its field, from anywhere inside one. */
+  const parts = (node: EventTarget | null) => {
+    if (!(node instanceof Element)) return null;
+
+    const stepper = node.closest<HTMLElement>('[data-stepper]');
+    const input = stepper?.querySelector<HTMLInputElement>('input[data-quantity]');
+    return stepper && input ? { stepper, input } : null;
+  };
+
+  document.addEventListener('click', (event) => {
+    if (!(event.target instanceof Element)) return;
+
+    const button = event.target.closest<HTMLButtonElement>('[data-stepper] button[data-step]');
+    const found = button && parts(button);
+    if (!button || !found) return;
+
+    setValue(found.stepper, found.input, Number(found.input.value) + Number(button.dataset.step));
+  });
+
+  // `change` alone misses a typed value that is never blurred on mobile, where
+  // the keyboard is dismissed rather than the field left. `blur` does not bubble,
+  // so delegation listens for its bubbling counterpart.
+  const reclamp = (event: Event) => {
+    if (!(event.target instanceof HTMLInputElement) || !event.target.matches('[data-quantity]')) {
+      return;
     }
 
-    // `change` alone misses a typed value that is never blurred on mobile, where
-    // the keyboard is dismissed rather than the field left.
-    input.addEventListener('change', () => setValue(Number(input.value)));
-    input.addEventListener('blur', () => setValue(Number(input.value)));
-  }
+    const found = parts(event.target);
+    if (found) setValue(found.stepper, found.input, Number(found.input.value));
+  };
+
+  document.addEventListener('change', reclamp);
+  document.addEventListener('focusout', reclamp);
 </script>

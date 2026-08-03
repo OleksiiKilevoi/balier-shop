@@ -52,6 +52,7 @@ const isActive = (href: string) => pathname === href || pathname.startsWith(`${h
         href="/cart"
         class="text-ink-soft hover:text-brand relative flex size-touch items-center justify-center transition-colors"
         aria-label="Кошик"
+        data-cart-link
       >
         {/* The badge hangs off the glyph, not off the 44px hit area. */}
         <span class="relative flex">
@@ -66,10 +67,13 @@ const isActive = (href: string) => pathname === href || pathname.startsWith(`${h
               <path d="M9 4a1 1 0 0 1 1-1h4a1 1 0 1 1 0 2h-4a1 1 0 0 1-1-1Z"></path>
             </g>
           </svg>
+          {/* A visual echo of the link's own accessible name, which the script
+              keeps in step — announcing a bare number on its own tells a screen
+              reader user nothing about what it counts. */}
           <span
             class="bg-brand absolute -top-1.5 -right-2 hidden h-4 min-w-4 items-center justify-center rounded-full px-1 text-[0.625rem] font-medium text-white"
             data-cart-count
-            aria-live="polite"></span>
+            aria-hidden="true"></span>
         </span>
       </a>
 
@@ -88,42 +92,77 @@ const isActive = (href: string) => pathname === href || pathname.startsWith(`${h
     </div>
   </Container>
 
-  {/* The panel is inside the sticky header, so it stays reachable while scrolled.
-      It scrolls internally in case a short landscape viewport cannot hold it. */}
+  {/* Absolutely positioned against the sticky header (its containing block),
+      so the opening panel overlays the page instead of growing the header and
+      pushing `<main>` down. Closed state is `grid-rows-[0fr]` + `opacity-0`
+      rather than `hidden`, so the open/close is an animated height+fade instead
+      of an instant cut; `inert` keeps the collapsed links out of tab order
+      without a `display: none` jump. */}
   <nav
     id="mobile-nav"
     aria-label="Мобільне меню"
-    class="border-line hidden max-h-[calc(100dvh-var(--spacing-header))] overflow-y-auto border-t md:hidden"
+    inert
+    class="border-line bg-paper absolute inset-x-0 top-full grid grid-rows-[0fr] overflow-hidden border-t opacity-0 transition-[grid-template-rows,opacity] duration-300 ease-out md:hidden"
   >
-    <Container>
-      <ul class="flex flex-col py-2 text-base">
-        {
-          nav.map((item) => (
-            <li>
-              <a
-                href={item.href}
-                aria-current={isActive(item.href) ? 'page' : undefined}
-                class="text-ink-soft aria-[current=page]:text-brand flex min-h-touch items-center aria-[current=page]:font-medium"
-              >
-                {item.label}
-              </a>
-            </li>
-          ))
-        }
-      </ul>
-    </Container>
+    <div class="min-h-0 overflow-hidden">
+      <Container class="max-h-[calc(100dvh-var(--spacing-header))] overflow-y-auto">
+        <ul class="flex flex-col py-2 text-base">
+          {
+            nav.map((item) => (
+              <li>
+                <a
+                  href={item.href}
+                  aria-current={isActive(item.href) ? 'page' : undefined}
+                  class="text-ink-soft aria-[current=page]:text-brand flex min-h-touch items-center justify-center text-center aria-[current=page]:font-medium"
+                >
+                  {item.label}
+                </a>
+              </li>
+            ))
+          }
+        </ul>
+      </Container>
+    </div>
   </nav>
 </header>
 
 <script>
+  import { cartCountLabel } from '~/lib/i18n/cart';
+  import { cartCount } from '~/stores/cart';
+
+  const cartLink = document.querySelector<HTMLAnchorElement>('[data-cart-link]');
+  const badge = cartLink?.querySelector<HTMLElement>('[data-cart-count]');
+
+  if (cartLink && badge) {
+    /**
+     * The badge follows the *stored* cart, which is quantities only — no request
+     * is made to price it on every page. It converges on what is actually
+     * available the moment /cart or checkout revalidates.
+     *
+     * `hidden` and `inline-flex` are toggled as a pair rather than relying on one
+     * display utility beating the other in the stylesheet.
+     */
+    cartCount.subscribe((count) => {
+      badge.textContent = count > 99 ? '99+' : String(count);
+      badge.classList.toggle('hidden', count === 0);
+      badge.classList.toggle('inline-flex', count > 0);
+      cartLink.setAttribute('aria-label', cartCountLabel(count));
+    });
+  }
+
   const toggle = document.querySelector<HTMLButtonElement>('[data-menu-toggle]');
   const panel = document.querySelector<HTMLElement>('#mobile-nav');
 
   if (toggle && panel) {
+    const OPEN = ['grid-rows-[1fr]', 'opacity-100'];
+    const CLOSED = ['grid-rows-[0fr]', 'opacity-0'];
+
     const setOpen = (open: boolean) => {
       toggle.setAttribute('aria-expanded', String(open));
       toggle.setAttribute('aria-label', open ? 'Закрити меню' : 'Відкрити меню');
-      panel.classList.toggle('hidden', !open);
+      panel.classList.remove(...(open ? CLOSED : OPEN));
+      panel.classList.add(...(open ? OPEN : CLOSED));
+      panel.toggleAttribute('inert', !open);
     };
 
     toggle.addEventListener('click', () => {

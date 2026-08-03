@@ -1,0 +1,451 @@
+---
+import BaseLayout from '~/layouts/BaseLayout.astro';
+import Container from '~/components/Container.astro';
+import Breadcrumbs from '~/components/Breadcrumbs.astro';
+import Button from '~/components/Button.astro';
+import QuantityStepper from '~/components/QuantityStepper.astro';
+import { MAX_ITEM_QUANTITY } from '~/lib/validation/cart';
+
+export const prerender = false;
+
+/**
+ * The cart lives in `localStorage`, so the server has nothing to render it from:
+ * every row on this page is built in the browser from `/api/cart`, which is what
+ * turns a list of variant ids into titles, prices and availability. The page
+ * itself ships the empty frame and the row template.
+ *
+ * That also means the four states below (loading / error / empty / cart) are
+ * toggled with the `hidden` attribute rather than a class. Deliberate: an
+ * element carrying a Tailwind display utility (`flex`, `grid`) beats a `hidden`
+ * class depending on which lands later in the stylesheet, so every panel root is
+ * class-free and the layout lives on a child.
+ */
+---
+
+{/* A cart is per-visitor and worth nothing to a crawler, so it stays out of the
+    index after launch too — same reasoning as /search. */}
+<BaseLayout title="Кошик" noindex>
+  <Container class="py-8 sm:py-12">
+    <Breadcrumbs items={[{ label: 'Головна', href: '/' }, { label: 'Кошик' }]} />
+
+    <h1 class="mt-5 text-3xl sm:mt-6 sm:text-4xl lg:text-5xl">Кошик</h1>
+
+    <div data-cart>
+      {/* Anything the server corrected on the way in: a sold-out line dropped, a
+          quantity clamped. Announced politely — it appears after a fetch, not
+          after a click, so nothing is stealing focus. */}
+      <ul data-notices class="mt-5 space-y-2" role="status" hidden></ul>
+
+      <div data-state="loading" class="mt-8">
+        <p class="text-ink-muted">Завантажуємо кошик…</p>
+      </div>
+
+      <div data-state="error" class="mt-8" hidden>
+        <p class="text-ink">Не вдалося показати кошик.</p>
+        <p class="text-ink-muted mt-2 text-sm">
+          Перевірте зʼєднання та спробуйте ще раз — товари з кошика нікуди не зникли.
+        </p>
+        <Button type="button" variant="secondary" class="mt-6 w-full sm:w-auto" data-retry>
+          Спробувати ще раз
+        </Button>
+      </div>
+
+      <div data-state="empty" class="mt-8" hidden>
+        <p class="text-ink">У кошику поки порожньо.</p>
+        <p class="text-ink-muted mt-2 text-sm">Оберіть щось у каталозі — і воно зʼявиться тут.</p>
+        <Button href="/products" class="mt-6 w-full sm:w-auto">Перейти до каталогу</Button>
+      </div>
+
+      <div data-state="cart" hidden>
+        {/* One column on a phone: the items are the page, and the summary is
+            what you scroll to after reading them. The mockup's side-by-side
+            split needs ~20rem for the card alone, so it waits for lg. */}
+        <div class="mt-6 grid gap-8 sm:mt-8 lg:grid-cols-[minmax(0,1fr)_20rem] lg:gap-10">
+          <div class="min-w-0">
+            <ul data-lines class="border-line border-t"></ul>
+
+            <a
+              href="/products"
+              class="text-brand hover:text-brand-hover -my-2 mt-4 inline-flex min-h-touch items-center gap-2 text-sm transition-colors md:my-0 md:mt-6 md:min-h-0"
+            >
+              <span aria-hidden="true">←</span> Продовжити покупки
+            </a>
+          </div>
+
+          {/* self-start so the sticky card can actually stick: a stretched grid
+              item is as tall as the row and has nowhere to travel. */}
+          <aside
+            class="border-line bg-paper-raised rounded-card border p-5 sm:p-6 lg:sticky lg:top-[calc(var(--spacing-header)+1.5rem)] lg:self-start"
+            aria-labelledby="summary-heading"
+          >
+            <h2 id="summary-heading" class="text-lg sm:text-xl">Підсумок замовлення</h2>
+
+            <dl class="mt-4 space-y-3 text-sm">
+              <div class="flex items-baseline justify-between gap-4">
+                <dt class="text-ink-muted">Проміжний підсумок</dt>
+                <dd class="price" data-subtotal></dd>
+              </div>
+
+              {/* Open decision 1, decided 2026-08-03: the recipient pays Nova
+                  Poshta directly at the carrier's tariff, so the site never
+                  quotes a delivery price and «Разом» is the goods alone. */}
+              <div class="flex items-baseline justify-between gap-4">
+                <dt class="text-ink-muted shrink-0">Доставка</dt>
+                <dd class="text-ink-soft text-right">Нова Пошта — за тарифами перевізника</dd>
+              </div>
+            </dl>
+
+            <div class="border-line mt-4 flex items-baseline justify-between gap-4 border-t pt-4">
+              <span class="text-ink font-medium">Разом</span>
+              <span class="price text-xl sm:text-2xl" data-total></span>
+            </div>
+
+            <Button href="/checkout" size="lg" block class="mt-5">Оформити замовлення</Button>
+
+            <p class="text-ink-muted mt-3 text-xs">
+              Вартість доставки оплачує отримувач за тарифами Нової Пошти.
+            </p>
+          </aside>
+        </div>
+      </div>
+    </div>
+
+    {/* Cloned once per line by the script below. Markup stays here, in Astro,
+        rather than as a string in JavaScript — the classes stay visible to
+        Tailwind and to anyone reading the page. */}
+    <template data-line-template>
+      {/* Stacked on a phone — the row is 280px there and the stepper alone is
+          128px — and folded onto the mockup's single line from md:, where the
+          title, the stepper and the price fit side by side. */}
+      <li
+        class="border-line flex items-start gap-3 border-b py-4 sm:gap-4 sm:py-5 md:items-center"
+        data-line
+      >
+        <a
+          data-line-image-link
+          class="bg-line/50 rounded-card block size-20 shrink-0 overflow-hidden sm:size-24"
+        >
+          <img
+            data-line-image
+            alt=""
+            loading="lazy"
+            decoding="async"
+            class="h-full w-full object-cover"
+          />
+          <span
+            data-line-image-empty
+            class="text-ink-muted flex h-full w-full items-center justify-center text-[0.625rem]"
+          >
+            Фото
+          </span>
+        </a>
+
+        <div class="min-w-0 flex-1 md:flex md:items-center md:gap-6">
+          <div class="min-w-0 md:flex-1">
+            <a
+              data-line-title
+              class="font-display text-ink hover:text-brand text-base leading-snug font-bold transition-colors sm:text-lg"
+            ></a>
+
+            <p data-line-variant class="text-ink-muted mt-1 flex items-center gap-1.5 text-sm">
+              <span
+                data-line-swatch
+                class="border-line-strong size-3 shrink-0 rounded-full border"
+                aria-hidden="true"></span>
+              <span data-line-variant-name></span>
+            </p>
+
+            <p data-line-stock class="text-ink-muted mt-2 text-xs" hidden></p>
+          </div>
+
+          {/* Wraps at 320px: the stepper is 128px and the price needs the rest. */}
+          <div
+            class="mt-3 flex flex-wrap items-center justify-between gap-3 md:mt-0 md:shrink-0 md:justify-end md:gap-8"
+          >
+            <QuantityStepper max={MAX_ITEM_QUANTITY} />
+            <p class="price text-base sm:text-lg md:w-24 md:text-right" data-line-total></p>
+          </div>
+        </div>
+
+        {/* Negative margin gives the 44px hit area back to the layout so the ×
+            still sits in the corner of the row, not away from it. */}
+        <button
+          type="button"
+          data-line-remove
+          class="text-ink-muted hover:text-brand -mt-2.5 -mr-2.5 flex size-touch shrink-0 items-center justify-center transition-colors md:-mr-2 md:mt-0 md:size-10"
+        >
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+            <path
+              d="M2 2l10 10M12 2L2 12"
+              stroke="currentColor"
+              stroke-width="1.5"
+              stroke-linecap="round"></path>
+          </svg>
+        </button>
+      </li>
+    </template>
+  </Container>
+</BaseLayout>
+
+<script>
+  import type { CartLine, CartNotice, CartSummary } from '~/lib/cart';
+  import { fetchCartSummary } from '~/lib/cart/client';
+  import { cartNoticeText } from '~/lib/i18n/cart';
+  import { formatPrice } from '~/lib/money';
+  import { cartItems, removeFromCart, replaceCart, setCartQuantity } from '~/stores/cart';
+
+  const root = document.querySelector<HTMLElement>('[data-cart]');
+  const template = document.querySelector<HTMLTemplateElement>('[data-line-template]');
+  const list = root?.querySelector<HTMLUListElement>('[data-lines]');
+  const notices = root?.querySelector<HTMLUListElement>('[data-notices]');
+
+  if (root && template && list && notices) {
+    const panels = new Map<string, HTMLElement>();
+    for (const panel of root.querySelectorAll<HTMLElement>('[data-state]')) {
+      if (panel.dataset.state) panels.set(panel.dataset.state, panel);
+    }
+
+    const subtotalOutput = root.querySelector<HTMLElement>('[data-subtotal]');
+    const totalOutput = root.querySelector<HTMLElement>('[data-total]');
+    const retry = root.querySelector<HTMLButtonElement>('[data-retry]');
+
+    /**
+     * Below this the row says how many are left, which is also the explanation
+     * for a stepper that refuses to go higher.
+     */
+    const LOW_STOCK = 3;
+
+    /** Long enough that holding «+» is one request, short enough to feel immediate. */
+    const REVALIDATE_DELAY = 600;
+
+    /**
+     * The last authoritative answer, keyed by variant. Every price on screen is
+     * computed from this and never from anything the page stored earlier — the
+     * store holds quantities only.
+     */
+    let priced = new Map<string, CartLine>();
+    let deliveryTotal = 0;
+    let revalidateTimer: number | undefined;
+
+    const showState = (name: string) => {
+      for (const [key, panel] of panels) panel.hidden = key !== name;
+    };
+
+    const lineOf = (node: EventTarget | null) =>
+      node instanceof Element ? node.closest<HTMLElement>('[data-line]') : null;
+
+    const quantityOf = (item: HTMLElement) =>
+      item.querySelector<HTMLInputElement>('input[data-quantity]');
+
+    /** Everything on a row that depends on the quantity currently in its field. */
+    const paintLine = (item: HTMLElement, line: CartLine, quantity: number) => {
+      const lineTotal = item.querySelector<HTMLElement>('[data-line-total]');
+      if (lineTotal) lineTotal.textContent = formatPrice(line.unitPrice * quantity);
+
+      const stock = item.querySelector<HTMLElement>('[data-line-stock]');
+      if (stock) {
+        stock.textContent = line.available <= LOW_STOCK ? `Залишилось ${line.available} шт.` : '';
+        stock.hidden = line.available > LOW_STOCK;
+      }
+    };
+
+    /** Row fields that only change when the server says something new. */
+    const syncLine = (item: HTMLElement, line: CartLine) => {
+      const quantity = quantityOf(item);
+      if (quantity) {
+        quantity.max = String(Math.max(line.available, 1));
+        quantity.value = String(line.quantity);
+      }
+
+      paintLine(item, line, line.quantity);
+    };
+
+    const buildLine = (line: CartLine): HTMLElement | null => {
+      const fragment = template.content.cloneNode(true) as DocumentFragment;
+      const item = fragment.querySelector<HTMLElement>('[data-line]');
+      if (!item) return null;
+
+      item.dataset.variantId = line.variantId;
+
+      const href = `/products/${line.productSlug}`;
+      const imageLink = item.querySelector<HTMLAnchorElement>('[data-line-image-link]');
+      if (imageLink) imageLink.href = href;
+
+      // One of the two image nodes is removed rather than hidden: `hidden` loses
+      // to the placeholder's own `flex`, and there is nothing to toggle back to.
+      const image = item.querySelector<HTMLImageElement>('[data-line-image]');
+      const placeholder = item.querySelector<HTMLElement>('[data-line-image-empty]');
+      if (line.imageUrl && image) {
+        image.src = line.imageUrl;
+        image.alt = line.imageAlt ?? line.productTitle;
+        placeholder?.remove();
+      } else {
+        image?.remove();
+      }
+
+      const title = item.querySelector<HTMLAnchorElement>('[data-line-title]');
+      if (title) {
+        title.href = href;
+        title.textContent = line.productTitle;
+      }
+
+      const variant = item.querySelector<HTMLElement>('[data-line-variant]');
+      if (line.variantName) {
+        const swatch = item.querySelector<HTMLElement>('[data-line-swatch]');
+        if (swatch && line.variantHex) swatch.style.backgroundColor = line.variantHex;
+
+        const name = item.querySelector<HTMLElement>('[data-line-variant-name]');
+        if (name) name.textContent = line.variantName;
+      } else {
+        variant?.remove();
+      }
+
+      // Every row has a stepper and a remove button, so both need naming by the
+      // product they belong to or a screen reader hears the same label repeated.
+      quantityOf(item)?.setAttribute('aria-label', `Кількість: ${line.productTitle}`);
+      item
+        .querySelector('[data-line-remove]')
+        ?.setAttribute('aria-label', `Видалити з кошика: ${line.productTitle}`);
+
+      syncLine(item, line);
+      return item;
+    };
+
+    /** Re-adds up what is on screen. Display only — the server owns the real total. */
+    const paintTotals = () => {
+      let itemsTotal = 0;
+
+      for (const item of list.querySelectorAll<HTMLElement>('[data-line]')) {
+        const line = priced.get(item.dataset.variantId ?? '');
+        const quantity = quantityOf(item);
+        if (!line || !quantity) continue;
+
+        const value = Number(quantity.value) || 1;
+        itemsTotal += line.unitPrice * value;
+        paintLine(item, line, value);
+      }
+
+      if (subtotalOutput) subtotalOutput.textContent = formatPrice(itemsTotal);
+      if (totalOutput) totalOutput.textContent = formatPrice(itemsTotal + deliveryTotal);
+    };
+
+    const paintNotices = (items: readonly CartNotice[]) => {
+      notices.replaceChildren(
+        ...items.map((notice) => {
+          const item = document.createElement('li');
+          item.className =
+            'border-line-strong bg-paper-raised text-ink-soft rounded-card border px-4 py-3 text-sm';
+          item.textContent = cartNoticeText(notice);
+          return item;
+        }),
+      );
+
+      notices.hidden = items.length === 0;
+    };
+
+    const apply = (summary: CartSummary) => {
+      priced = new Map(summary.lines.map((line) => [line.variantId, line]));
+      deliveryTotal = summary.deliveryTotal;
+
+      // The stored cart converges on what the server says exists, so the badge on
+      // every other page stops counting something that has sold out.
+      replaceCart(summary.lines.map(({ variantId, quantity }) => ({ variantId, quantity })));
+      paintNotices(summary.notices);
+
+      if (summary.lines.length === 0) {
+        list.replaceChildren();
+        showState('empty');
+        return;
+      }
+
+      // Rows already on screen are updated in place, never rebuilt: a
+      // revalidation lands right after the customer pressed «+», and replacing
+      // the row would take the focus out from under their finger.
+      const existing = new Map<string, HTMLElement>();
+      for (const item of list.querySelectorAll<HTMLElement>('[data-line]')) {
+        if (item.dataset.variantId) existing.set(item.dataset.variantId, item);
+      }
+
+      let cursor = list.firstElementChild;
+      for (const line of summary.lines) {
+        const item = existing.get(line.variantId);
+
+        if (!item) {
+          const created = buildLine(line);
+          if (created) list.insertBefore(created, cursor);
+          continue;
+        }
+
+        existing.delete(line.variantId);
+        syncLine(item, line);
+
+        // Already in the right place — the ordinary case, and the one that
+        // touches no DOM at all.
+        if (item === cursor) cursor = cursor.nextElementSibling;
+        else list.insertBefore(item, cursor);
+      }
+
+      for (const stale of existing.values()) stale.remove();
+
+      paintTotals();
+      showState('cart');
+    };
+
+    const refresh = async (initial: boolean) => {
+      if (cartItems.get().length === 0) {
+        priced.clear();
+        list.replaceChildren();
+        paintNotices([]);
+        showState('empty');
+        return;
+      }
+
+      if (initial) showState('loading');
+
+      try {
+        apply(await fetchCartSummary());
+      } catch (error) {
+        console.error(error);
+        // A failed background revalidation must not blank a cart the customer is
+        // in the middle of using; only the first load has nothing to fall back on.
+        if (initial) showState('error');
+      }
+    };
+
+    const scheduleRevalidate = () => {
+      window.clearTimeout(revalidateTimer);
+      revalidateTimer = window.setTimeout(() => void refresh(false), REVALIDATE_DELAY);
+    };
+
+    // Bubbles up from the stepper, which has already clamped itself to `max`.
+    list.addEventListener('quantity:change', (event) => {
+      const item = lineOf(event.target);
+      const quantity = item && quantityOf(item);
+      if (!item?.dataset.variantId || !quantity) return;
+
+      setCartQuantity(item.dataset.variantId, Number(quantity.value) || 1);
+      paintTotals();
+      scheduleRevalidate();
+    });
+
+    list.addEventListener('click', (event) => {
+      if (!(event.target instanceof Element)) return;
+
+      const button = event.target.closest('[data-line-remove]');
+      const item = button && lineOf(button);
+      if (!item?.dataset.variantId) return;
+
+      removeFromCart(item.dataset.variantId);
+      priced.delete(item.dataset.variantId);
+      item.remove();
+
+      // No revalidation: removing a line cannot change what the others cost.
+      if (list.children.length === 0) showState('empty');
+      else paintTotals();
+    });
+
+    retry?.addEventListener('click', () => void refresh(true));
+
+    void refresh(true);
+  }
+</script>

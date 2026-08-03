@@ -2,6 +2,7 @@
 import { Font } from 'astro:assets';
 import SiteHeader from '~/components/SiteHeader.astro';
 import SiteFooter from '~/components/SiteFooter.astro';
+import CartPopup from '~/components/CartPopup.astro';
 import '~/styles/global.css';
 
 /**
@@ -79,5 +80,6 @@ const ogImageUrl = ogImage ? new URL(ogImage, Astro.site ?? Astro.url).href : un
     </main>
 
     <SiteFooter />
+    <CartPopup />
   </body>
 </html>

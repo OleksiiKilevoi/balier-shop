@@ -12,12 +12,17 @@ These come from the mockups in `/design` contradicting or extending the plan bel
 changes scope, so they are recorded here rather than guessed at. Nothing downstream is built on
 an assumed answer.
 
-1. **Delivery cost.** The cart mockup shows "Нова Пошта — за тарифами перевізника", i.e. the
-   customer pays the carrier and the site never quotes a price. If confirmed, this removes delivery
-   quoting, per-product weight/dimensions, and delivery cost in the order total from Phase 3 — and
-   means Monobank is only ever charged for goods.
+*None outstanding.*
 
 ### Decided
+
+- **Delivery cost — the site never quotes one** (2026-08-03, was open decision 1). Nova Poshta is
+  paid by the recipient at the carrier's own tariff, exactly as the cart mockup says, so the summary
+  shows «Нова Пошта — за тарифами перевізника» as text and «Разом» is the goods alone.
+  Consequences, all of them removals: no delivery quoting, no per-product weight or dimensions, no
+  delivery cost in the order total, and **Monobank is only ever charged for goods**.
+  `CartSummary.deliveryTotal` exists and is always 0 — `orders.delivery_total` is in the schema
+  either way, and free delivery over a threshold would need somewhere to live.
 
 - **Newsletter signup — removed from the footer** (2026-08-03). It is not a release feature, and a
   field that silently does nothing is worse than no field. The footer is now three columns instead
@@ -202,8 +207,21 @@ content item and a Monobank gate, not a build one.
 
 The heaviest phase by a wide margin. Consider splitting notifications out.
 
-- [ ] Cart (nanostores + persist), server-side validation of prices and stock before checkout
-- [ ] `/cart` page
+- [x] **Cart (nanostores + persist), server-side validation of prices and stock** — `src/stores/cart.ts`
+      stores `{ variantId, quantity }` and nothing else, so a hand-edited `localStorage` entry can
+      change what someone intends to buy but never what it costs. `POST /api/cart` resolves those ids
+      against the DB (`findCartVariants`) and `buildCartSummary` prices them, clamps each quantity to
+      `available`, drops what is gone and returns a notice for every correction. The stored cart is
+      then overwritten with the server's answer, so the header badge converges too. Not yet rate
+      limited — that is its own item below, waiting on the KV namespace
+- [x] `/cart` page — entirely client-rendered (the cart lives in `localStorage`, so the server has
+      nothing to render from): four states toggled by `hidden`, rows cloned from a `<template>` so the
+      markup stays in Astro. A quantity change repaints instantly from the last server price and
+      revalidates on a 600 ms debounce, which collapses a burst of «+» presses into one request; rows
+      are updated in place rather than rebuilt, or the revalidation would take focus off the stepper
+      the customer is still pressing. `QuantityStepper` moved to delegated listeners for the same
+      reason — a per-element binding leaves every cloned row dead. Verified at 320 px and 1280 px
+      against Neon, including the sold-out, clamped, network-failure and empty paths
 - [ ] `/checkout` page
 - [ ] Create the KV namespaces (`CACHE`, `RATE_LIMIT`) and uncomment the bindings in `wrangler.jsonc`
 - [ ] Cron for syncing Nova Poshta reference data — handler stubbed in `workers/cron/`
@@ -217,10 +235,14 @@ The heaviest phase by a wide margin. Consider splitting notifications out.
 - [ ] Telegram notifications about new orders
 - [ ] Bot protection: Cloudflare Turnstile on the checkout form
 - [ ] Rate limiting on API routes
-- [?] Delivery cost calculation — see open decision 1; may be removed entirely
+- [x] ~~Delivery cost calculation~~ — **removed**, see the decision above. The recipient pays the
+      carrier; nothing about delivery enters a total
 
 Write tests alongside, not in Phase 5: order total calculation and webhook signature verification
-are the two places where a bug costs money.
+are the two places where a bug costs money. The runner is **Vitest** (`pnpm test`), configured in
+`vitest.config.ts` without the Astro config so a unit test never depends on the deploy target.
+`src/lib/cart/index.test.ts` covers the first half of the order total: pricing from the database,
+clamping to stock, and every way a stored cart can be malformed.
 
 ## Phase 4 — Admin panel (2 days)
 

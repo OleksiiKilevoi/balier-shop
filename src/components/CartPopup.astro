@@ -1,0 +1,309 @@
+---
+import Button from './Button.astro';
+
+/**
+ * Mounted once in `BaseLayout`. `~/lib/cartPopup`'s `openCartPopup()` fires a
+ * DOM event this listens for — no reference to this component is ever needed,
+ * same wiring the toast it replaced used.
+ *
+ * Replaces the add-to-cart toast: instead of a passive confirmation, the whole
+ * cart (fetched fresh from `/api/cart`, same as the `/cart` page) surfaces
+ * immediately with a straight line to checkout — the Rozetka-style pattern.
+ *
+ * A centered dialog rather than a corner dropdown: it works identically at
+ * 320px and on desktop without a second layout, and this codebase has no
+ * existing anchored-popover pattern to extend.
+ */
+---
+
+<div class="fixed inset-0 z-50" hidden data-cart-popup>
+  <div
+    class="absolute inset-0 bg-ink/40 opacity-0 transition-opacity duration-200"
+    data-cart-popup-backdrop
+  >
+  </div>
+
+  <div
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="cart-popup-heading"
+    class="border-line bg-paper rounded-card absolute inset-x-4 top-1/2 flex max-h-[85vh] w-auto -translate-y-1/2 scale-95 flex-col overflow-hidden border opacity-0 shadow-xl transition-all duration-200 ease-out sm:inset-x-auto sm:right-6 sm:left-auto sm:top-[calc(var(--spacing-header)+1rem)] sm:w-96 sm:translate-y-0"
+    data-cart-popup-panel
+  >
+    <div class="border-line flex shrink-0 items-center gap-3 border-b px-5 py-4">
+      <svg class="text-brand size-5 shrink-0" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+        <circle cx="10" cy="10" r="9" stroke="currentColor" stroke-width="1.5"></circle>
+        <path
+          d="m6.5 10.5 2.2 2.2L14 8"
+          stroke="currentColor"
+          stroke-width="1.5"
+          stroke-linecap="round"
+          stroke-linejoin="round"></path>
+      </svg>
+      <h2 id="cart-popup-heading" class="text-ink flex-1 text-base font-medium">
+        Товар додано до кошика
+      </h2>
+      <button
+        type="button"
+        aria-label="Закрити"
+        class="text-ink-muted hover:text-brand -mr-2 flex size-touch shrink-0 items-center justify-center transition-colors md:size-8"
+        data-cart-popup-close
+      >
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+          <path
+            d="M2 2l10 10M12 2L2 12"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linecap="round"></path>
+        </svg>
+      </button>
+    </div>
+
+    {/* Same corrected-on-the-way-in notices as /cart: a line clamped to what's
+        left in stock, or dropped because nothing is. */}
+    <ul class="shrink-0 space-y-2 px-5 pt-4" data-cart-popup-notices role="status" hidden></ul>
+
+    <p class="text-ink-muted px-5 py-6 text-center text-sm" data-cart-popup-status hidden></p>
+
+    <ul class="min-h-0 overflow-y-auto px-5" data-cart-popup-lines></ul>
+
+    <div class="border-line shrink-0 border-t px-5 py-4" data-cart-popup-footer hidden>
+      <div class="flex items-baseline justify-between gap-4 text-sm">
+        <span class="text-ink-muted">Разом</span>
+        <span class="price text-lg" data-cart-popup-total></span>
+      </div>
+      <Button href="/checkout" block class="mt-4" data-cart-popup-checkout>Оформити замовлення</Button>
+      <a
+        href="/cart"
+        class="text-brand hover:text-brand-hover -my-2 mt-3 flex min-h-touch items-center justify-center text-sm transition-colors md:my-0 md:mt-3 md:min-h-0"
+      >
+        Переглянути кошик
+      </a>
+    </div>
+  </div>
+</div>
+
+<template data-cart-popup-line-template>
+  <li class="border-line flex items-start gap-3 border-b py-3 last:border-b-0">
+    <a data-line-image-link class="bg-line/50 rounded-card block size-14 shrink-0 overflow-hidden">
+      <img
+        data-line-image
+        alt=""
+        loading="lazy"
+        decoding="async"
+        class="h-full w-full object-cover"
+      />
+      <span
+        data-line-image-empty
+        class="text-ink-muted flex h-full w-full items-center justify-center text-[0.5625rem]"
+      >
+        Фото
+      </span>
+    </a>
+
+    <div class="min-w-0 flex-1">
+      <a data-line-title class="text-ink hover:text-brand text-sm font-medium leading-snug transition-colors"
+      ></a>
+
+      <p data-line-variant class="text-ink-muted mt-1 flex items-center gap-1.5 text-xs">
+        <span
+          data-line-swatch
+          class="border-line-strong size-2.5 shrink-0 rounded-full border"
+          aria-hidden="true"></span>
+        <span data-line-variant-name></span>
+      </p>
+
+      <p class="text-ink-muted mt-1 text-xs" data-line-qty></p>
+    </div>
+
+    <p class="price shrink-0 text-sm" data-line-total></p>
+  </li>
+</template>
+
+<script>
+  import { fetchCartSummary } from '~/lib/cart/client';
+  import type { CartLine, CartNotice, CartSummary } from '~/lib/cart';
+  import { cartNoticeText } from '~/lib/i18n/cart';
+  import { formatPrice } from '~/lib/money';
+  import { CART_POPUP_EVENT } from '~/lib/cartPopup';
+  import { replaceCart } from '~/stores/cart';
+
+  const popup = document.querySelector<HTMLElement>('[data-cart-popup]');
+  const backdrop = popup?.querySelector<HTMLElement>('[data-cart-popup-backdrop]');
+  const panel = popup?.querySelector<HTMLElement>('[data-cart-popup-panel]');
+  const closeButton = popup?.querySelector<HTMLButtonElement>('[data-cart-popup-close]');
+  const notices = popup?.querySelector<HTMLUListElement>('[data-cart-popup-notices]');
+  const status = popup?.querySelector<HTMLElement>('[data-cart-popup-status]');
+  const list = popup?.querySelector<HTMLUListElement>('[data-cart-popup-lines]');
+  const footer = popup?.querySelector<HTMLElement>('[data-cart-popup-footer]');
+  const totalOutput = popup?.querySelector<HTMLElement>('[data-cart-popup-total]');
+  const template = document.querySelector<HTMLTemplateElement>('[data-cart-popup-line-template]');
+
+  if (
+    popup &&
+    backdrop &&
+    panel &&
+    closeButton &&
+    notices &&
+    status &&
+    list &&
+    footer &&
+    totalOutput &&
+    template
+  ) {
+    const BACKDROP_HIDDEN = ['opacity-0'];
+    const BACKDROP_VISIBLE = ['opacity-100'];
+    const PANEL_HIDDEN = ['opacity-0', 'scale-95'];
+    const PANEL_VISIBLE = ['opacity-100', 'scale-100'];
+
+    let previouslyFocused: HTMLElement | null = null;
+    let requestId = 0;
+
+    const buildLine = (line: CartLine): HTMLElement | null => {
+      const fragment = template.content.cloneNode(true) as DocumentFragment;
+      const item = fragment.querySelector<HTMLElement>('li');
+      if (!item) return null;
+
+      const href = `/products/${line.productSlug}`;
+      const imageLink = item.querySelector<HTMLAnchorElement>('[data-line-image-link]');
+      if (imageLink) imageLink.href = href;
+
+      const image = item.querySelector<HTMLImageElement>('[data-line-image]');
+      const placeholder = item.querySelector<HTMLElement>('[data-line-image-empty]');
+      if (line.imageUrl && image) {
+        image.src = line.imageUrl;
+        image.alt = line.imageAlt ?? line.productTitle;
+        placeholder?.remove();
+      } else {
+        image?.remove();
+      }
+
+      const title = item.querySelector<HTMLAnchorElement>('[data-line-title]');
+      if (title) {
+        title.href = href;
+        title.textContent = line.productTitle;
+      }
+
+      const variant = item.querySelector<HTMLElement>('[data-line-variant]');
+      if (line.variantName) {
+        const swatch = item.querySelector<HTMLElement>('[data-line-swatch]');
+        if (swatch && line.variantHex) swatch.style.backgroundColor = line.variantHex;
+
+        const name = item.querySelector<HTMLElement>('[data-line-variant-name]');
+        if (name) name.textContent = line.variantName;
+      } else {
+        variant?.remove();
+      }
+
+      const qty = item.querySelector<HTMLElement>('[data-line-qty]');
+      if (qty) qty.textContent = `${line.quantity} шт. × ${formatPrice(line.unitPrice)}`;
+
+      const total = item.querySelector<HTMLElement>('[data-line-total]');
+      if (total) total.textContent = formatPrice(line.lineTotal);
+
+      return item;
+    };
+
+    const paintNotices = (items: readonly CartNotice[]) => {
+      notices.replaceChildren(
+        ...items.map((notice) => {
+          const item = document.createElement('li');
+          item.className =
+            'border-line-strong bg-paper-raised text-ink-soft rounded-card border px-4 py-3 text-sm';
+          item.textContent = cartNoticeText(notice);
+          return item;
+        }),
+      );
+
+      notices.hidden = items.length === 0;
+    };
+
+    const render = (summary: CartSummary) => {
+      paintNotices(summary.notices);
+      list.replaceChildren(...summary.lines.map(buildLine).filter((item): item is HTMLElement => item !== null));
+
+      if (summary.lines.length === 0) {
+        status.textContent = 'У кошику порожньо.';
+        status.hidden = false;
+        footer.hidden = true;
+        return;
+      }
+
+      status.hidden = true;
+      footer.hidden = false;
+      totalOutput.textContent = formatPrice(summary.total);
+    };
+
+    const load = async () => {
+      const id = ++requestId;
+      status.textContent = 'Оновлюємо кошик…';
+      status.hidden = false;
+      footer.hidden = true;
+      list.replaceChildren();
+
+      try {
+        const summary = await fetchCartSummary();
+        if (id !== requestId) return; // superseded by a later open
+
+        replaceCart(summary.lines.map(({ variantId, quantity }) => ({ variantId, quantity })));
+        render(summary);
+      } catch (error) {
+        if (id !== requestId) return;
+        console.error(error);
+        status.textContent = 'Не вдалося оновити кошик. Перейдіть у кошик, щоб спробувати ще раз.';
+        status.hidden = false;
+      }
+    };
+
+    const siblings = () => [...document.body.children].filter((el) => el !== popup);
+
+    const close = () => {
+      backdrop.classList.remove(...BACKDROP_VISIBLE);
+      backdrop.classList.add(...BACKDROP_HIDDEN);
+      panel.classList.remove(...PANEL_VISIBLE);
+      panel.classList.add(...PANEL_HIDDEN);
+
+      for (const el of siblings()) el.removeAttribute('inert');
+      document.documentElement.classList.remove('overflow-hidden');
+      document.removeEventListener('keydown', onKeydown);
+
+      panel.addEventListener(
+        'transitionend',
+        () => {
+          popup.hidden = true;
+        },
+        { once: true },
+      );
+
+      previouslyFocused?.focus();
+    };
+
+    const onKeydown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') close();
+    };
+
+    const open = () => {
+      previouslyFocused = document.activeElement as HTMLElement | null;
+
+      popup.hidden = false;
+      for (const el of siblings()) el.setAttribute('inert', '');
+      document.documentElement.classList.add('overflow-hidden');
+
+      requestAnimationFrame(() => {
+        backdrop.classList.remove(...BACKDROP_HIDDEN);
+        backdrop.classList.add(...BACKDROP_VISIBLE);
+        panel.classList.remove(...PANEL_HIDDEN);
+        panel.classList.add(...PANEL_VISIBLE);
+      });
+
+      closeButton.focus();
+      document.addEventListener('keydown', onKeydown);
+
+      void load();
+    };
+
+    document.addEventListener(CART_POPUP_EVENT, open);
+    closeButton.addEventListener('click', close);
+    backdrop.addEventListener('click', close);
+  }
+</script>
