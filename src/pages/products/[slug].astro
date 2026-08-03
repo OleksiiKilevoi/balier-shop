@@ -76,14 +76,30 @@ const showCompareAt =
       <div class="min-w-0">
         <h1 class="text-2xl sm:text-3xl lg:text-4xl">{product.title}</h1>
 
+        {/* The pill links to the category listing when one exists; the visual
+            stays on the inner span so the phone-sized hit area (min-h-touch,
+            compacting at md like the footer links) does not inflate the pill.
+            -my-2 gives most of that height back to the layout. */}
         {
-          product.categoryTitle && (
-            <p class="mt-3">
-              <span class="bg-tag text-tag-ink rounded-full px-3 py-1 text-xs">
-                {product.categoryTitle}
-              </span>
-            </p>
-          )
+          product.categoryTitle &&
+            (product.categorySlug ? (
+              <p class="mt-3">
+                <a
+                  href={`/products/category/${product.categorySlug}`}
+                  class="-my-2 inline-flex min-h-touch items-center md:my-0 md:min-h-0"
+                >
+                  <span class="bg-tag text-tag-ink hover:bg-tag/70 rounded-full px-3 py-1 text-xs transition-colors">
+                    {product.categoryTitle}
+                  </span>
+                </a>
+              </p>
+            ) : (
+              <p class="mt-3">
+                <span class="bg-tag text-tag-ink rounded-full px-3 py-1 text-xs">
+                  {product.categoryTitle}
+                </span>
+              </p>
+            ))
         }
 
         <p class="mt-5 flex items-baseline gap-3">

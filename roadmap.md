@@ -153,6 +153,15 @@ content item and a Monobank gate, not a build one.
       **«Додати до кошика» is markup only** — styled and stock-aware (disabled when the chosen
       variant has none available), but wired to nothing until the cart store lands in Phase 3.
       An unknown or non-`active` slug rewrites to the new `src/pages/404.astro`
+- [x] Category pages — `/products/category/[slug]`, reached from the category pill on
+      `/products/[slug]`, which is now a link (with the phone-sized hit area, compacting at `md:`
+      like the footer links). Same card grid, ordering and count header as `/products`, via the
+      shared `selectProductCards` path (`getCategoryBySlug` in `queries/categories.ts`,
+      `listProductsInCategory` in `queries/products.ts`; `LOCALE` moved to `queries/locale.ts` so it
+      stays one constant). An unknown, deactivated or untranslated category slug 404s; deactivating
+      a category keeps the pill's text on the product page but drops the link, since the page it
+      would point at 404s. There is deliberately no category nav on `/products` yet — it was not asked for, and it is a
+      one-component addition later
 - [x] Product search — `/search`, which the header icon now actually reaches. A plain GET form, so
       the query lives in the URL and the page works before any script does; there is no autocomplete
       and no API route. `searchProducts` in `src/lib/db/queries/products.ts` matches **substrings**,

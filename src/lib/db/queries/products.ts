@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import type { Db } from '../index';
 import {
+  categories,
   categoryTranslations,
   productImages,
   productTranslations,
@@ -8,14 +9,8 @@ import {
   products,
 } from '../schema';
 import type { Kopiykas } from '~/lib/money';
+import { LOCALE } from './locale';
 import { availableStock } from './stock';
-
-/**
- * The catalog ships Ukrainian only (see roadmap.md — the language switcher was
- * removed). The translation tables stay, so this constant is the single place a
- * request locale gets threaded through in Phase 6.
- */
-const LOCALE = 'uk' as const;
 
 /** A single buyable row. `id` is what the cart and every order reference. */
 export interface ProductVariantData {
@@ -48,6 +43,8 @@ export interface ProductDetailData {
   metaTitle: string | null;
   metaDescription: string | null;
   categoryTitle: string | null;
+  /** NULL when there is no category *page* to link to (none set, or deactivated). */
+  categorySlug: string | null;
   /** Free text exactly as written on the card, e.g. `30х17х10 см`. */
   dimensions: string | null;
   compareAtPrice: Kopiykas | null;
@@ -196,6 +193,18 @@ export async function listActiveProducts(db: Db): Promise<ProductCardData[]> {
   return hydrateProductCards(db, rows);
 }
 
+/** The `/products/category/[slug]` grid: one category, same order as `/products`. */
+export async function listProductsInCategory(
+  db: Db,
+  categoryId: string,
+): Promise<ProductCardData[]> {
+  const rows = await selectProductCards(db)
+    .where(and(eq(products.status, 'active'), eq(products.categoryId, categoryId)))
+    .orderBy(asc(products.position), desc(products.createdAt));
+
+  return hydrateProductCards(db, rows);
+}
+
 /**
  * The homepage row.
  *
@@ -303,6 +312,7 @@ export async function getProductBySlug(db: Db, slug: string): Promise<ProductDet
       metaTitle: productTranslations.metaTitle,
       metaDescription: productTranslations.metaDescription,
       categoryTitle: categoryTranslations.title,
+      categorySlug: categories.slug,
     })
     .from(products)
     .innerJoin(
@@ -318,6 +328,12 @@ export async function getProductBySlug(db: Db, slug: string): Promise<ProductDet
         eq(categoryTranslations.categoryId, products.categoryId),
         eq(categoryTranslations.locale, LOCALE),
       ),
+    )
+    // Deactivating a category keeps the pill's text but drops its link — the
+    // page it would point at 404s, and the product itself must not vanish.
+    .leftJoin(
+      categories,
+      and(eq(categories.id, products.categoryId), eq(categories.isActive, true)),
     )
     .where(and(eq(products.slug, slug), eq(products.status, 'active')))
     .limit(1);
@@ -361,6 +377,7 @@ export async function getProductBySlug(db: Db, slug: string): Promise<ProductDet
     metaTitle: row.metaTitle,
     metaDescription: row.metaDescription,
     categoryTitle: row.categoryTitle,
+    categorySlug: row.categorySlug,
     dimensions: row.dimensions,
     compareAtPrice: row.compareAtPrice,
     variants: variants.map((variant) => ({

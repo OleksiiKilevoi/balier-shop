@@ -1,0 +1,79 @@
+---
+import { env } from 'cloudflare:workers';
+import BaseLayout from '~/layouts/BaseLayout.astro';
+import Container from '~/components/Container.astro';
+import Breadcrumbs from '~/components/Breadcrumbs.astro';
+import ProductCard from '~/components/ProductCard.astro';
+import { createDb } from '~/lib/db';
+import { getCategoryBySlug } from '~/lib/db/queries/categories';
+import { listProductsInCategory } from '~/lib/db/queries/products';
+import { pluralUk } from '~/lib/i18n/plural';
+
+export const prerender = false;
+
+const db = createDb(env.DATABASE_URL);
+const category = await getCategoryBySlug(db, Astro.params.slug ?? '');
+if (!category) return Astro.rewrite('/404');
+
+const products = await listProductsInCategory(db, category.id);
+
+// Same reasoning as /products: only the two cards of the first phone row load eagerly.
+const EAGER_CARDS = 2;
+
+const countLabel = `${products.length} ${pluralUk(products.length, {
+  one: 'товар',
+  few: 'товари',
+  many: 'товарів',
+})}`;
+---
+
+<BaseLayout
+  title={category.title}
+  description={category.description ??
+    `${category.title} ручної роботи від balier. Обмежені партії, доставка Новою Поштою по всій Україні.`}
+>
+  <Container class="py-8 sm:py-12">
+    <Breadcrumbs
+      items={[
+        { label: 'Головна', href: '/' },
+        { label: 'Товари', href: '/products' },
+        { label: category.title },
+      ]}
+    />
+
+    <header class="mt-5 sm:mt-6">
+      <h1 class="text-3xl sm:text-4xl lg:text-5xl">{category.title}</h1>
+      <p class="text-ink-muted mt-1.5 text-sm">{countLabel}</p>
+      {category.description && <p class="text-ink-muted mt-3 max-w-prose">{category.description}</p>}
+    </header>
+
+    {
+      products.length > 0 ? (
+        /* Mirrors /products: two columns down to 320px, the mockup's four at lg. */
+        <div class="mt-6 grid grid-cols-2 gap-3 sm:mt-8 sm:gap-5 md:grid-cols-3 lg:grid-cols-4 lg:gap-6">
+          {products.map((product, index) => (
+            <ProductCard
+              slug={product.slug}
+              title={product.title}
+              category={product.categoryTitle}
+              price={product.price}
+              compareAtPrice={product.compareAtPrice}
+              imageUrl={product.imageUrl}
+              imageAlt={product.imageAlt}
+              swatches={product.swatches}
+              soldOut={!product.inStock}
+              eager={index < EAGER_CARDS}
+            />
+          ))}
+        </div>
+      ) : (
+        <p class="text-ink-muted mt-8">
+          У цій категорії поки немає товарів.{' '}
+          <a href="/products" class="text-brand hover:text-brand-hover underline underline-offset-2">
+            Переглянути всі товари
+          </a>
+        </p>
+      )
+    }
+  </Container>
+</BaseLayout>
