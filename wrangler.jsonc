@@ -9,13 +9,30 @@
   "images": {
     "binding": "IMAGES"
   },
+  // Product photography, prepared at the right size before upload — one file is
+  // one object is one URL, nothing is resized here. Served through the app Worker
+  // at `/media/**`, never over the bucket's public `r2.dev` URL (rate-limited,
+  // and documented as unsuitable for production).
+  //   wrangler r2 bucket create balier-media
+  "r2_buckets": [
+    {
+      "binding": "MEDIA",
+      "bucket_name": "balier-media"
+    }
+  ],
   // Secrets are NOT set here. Locally they live in `.dev.vars`; in production
   // they are set with `wrangler secret put <NAME>`.
   //   DATABASE_URL, MONOBANK_TOKEN, MONOBANK_WEBHOOK_URL,
   //   NOVAPOSHTA_API_KEY, TURNSTILE_SECRET_KEY,
   //   TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
   "vars": {
-    "PUBLIC_SITE_URL": "https://balier.ua"
+    "PUBLIC_SITE_URL": "https://balier.ua",
+    // Telegram account the product page's «Замовити через Телеграм» deep-links
+    // to. Public by definition — it ends up in an href. PLACEHOLDER: the real
+    // manager account is a Phase 0 item and does not exist yet, so this handle
+    // is a guess and the button currently points at nothing. `orderDeepLink`
+    // validates it, so an empty value hides the button rather than breaking it.
+    "PUBLIC_TELEGRAM_MANAGER": "balier_ua"
   }
 
   // Added in Phase 3, once the namespaces exist:

@@ -1,5 +1,6 @@
 ---
-import { formatPrice, type Kopiykas } from '~/lib/money';
+import Price from './Price.astro';
+import type { Kopiykas } from '~/lib/money';
 
 interface Props {
   slug: string;
@@ -29,8 +30,6 @@ const {
   soldOut = false,
   eager = false,
 } = Astro.props;
-
-const showCompareAt = typeof compareAtPrice === 'number' && compareAtPrice > price;
 ---
 
 <article
@@ -54,29 +53,24 @@ const showCompareAt = typeof compareAtPrice === 'number' && compareAtPrice > pri
           </div>
         )
       }
+      {/* 17 characters do not fit on one 12px line inside a 320px two-column card,
+          and a wrapped pill reads as a broken badge — so the badge shrinks instead. */}
       {
         soldOut && (
-          <span class="bg-paper/95 text-ink absolute top-3 left-3 rounded-full px-2.5 py-1 text-xs">
+          <span class="bg-paper/95 text-ink absolute top-2 left-2 rounded-full px-2 py-0.5 text-[0.625rem] whitespace-nowrap sm:top-3 sm:left-3 sm:px-2.5 sm:py-1 sm:text-xs">
             Немає в наявності
           </span>
         )
       }
     </div>
 
-    <div class="space-y-1 p-4">
-      <h3 class="font-display text-ink text-lg leading-snug font-bold">{title}</h3>
-      {category && <p class="text-ink-muted text-sm">{category}</p>}
+    {/* A two-column phone grid leaves ~135px per card at 320px, so the padding
+        and the title step down rather than eating the line. */}
+    <div class="space-y-1 p-3 sm:p-4">
+      <h3 class="font-display text-ink text-base leading-snug font-bold sm:text-lg">{title}</h3>
+      {category && <p class="text-ink-muted text-xs sm:text-sm">{category}</p>}
 
-      <div class="flex items-baseline gap-2 pt-1.5">
-        <p class="price text-base">{formatPrice(price)}</p>
-        {
-          showCompareAt && (
-            <p class="text-ink-muted text-sm line-through tabular-nums">
-              {formatPrice(compareAtPrice)}
-            </p>
-          )
-        }
-      </div>
+      <Price amount={price} compareAt={compareAtPrice} class="pt-1.5" />
 
       {
         swatches.length > 1 && (

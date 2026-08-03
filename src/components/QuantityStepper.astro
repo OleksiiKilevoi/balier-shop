@@ -1,0 +1,111 @@
+---
+/**
+ * −/value/+ control. Self-contained: it clamps its own value and announces
+ * changes with a bubbling `quantity:change`, so the product page (and the cart
+ * page in Phase 3) only has to listen.
+ *
+ * `max` is set by the caller and may be rewritten at runtime when the chosen
+ * variant has a different amount available.
+ */
+interface Props {
+  max: number;
+  name?: string;
+  class?: string;
+}
+
+const { max, name = 'quantity', class: className } = Astro.props;
+---
+
+<div
+  class:list={[
+    'border-line-strong rounded-btn inline-flex items-center border bg-white',
+    className,
+  ]}
+  data-stepper
+>
+  <button
+    type="button"
+    data-step="-1"
+    class="text-ink-soft hover:text-brand flex size-touch items-center justify-center transition-colors disabled:opacity-40 md:size-10"
+    aria-label="Зменшити кількість"
+  >
+    <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+      <path d="M2 7h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></path>
+    </svg>
+  </button>
+
+  {/* text-base until md: under 16px iOS Safari zooms the viewport on focus and
+      never zooms back — and this is the field right above the buy button. */}
+  <input
+    type="number"
+    name={name}
+    value="1"
+    min="1"
+    max={max}
+    step="1"
+    inputmode="numeric"
+    autocomplete="off"
+    data-quantity
+    aria-label="Кількість"
+    class="text-ink w-10 border-0 bg-transparent p-0 text-center text-base font-medium tabular-nums outline-none md:text-sm"
+  />
+
+  <button
+    type="button"
+    data-step="1"
+    class="text-ink-soft hover:text-brand flex size-touch items-center justify-center transition-colors disabled:opacity-40 md:size-10"
+    aria-label="Збільшити кількість"
+  >
+    <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+      <path d="M7 2v10M2 7h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"
+      ></path>
+    </svg>
+  </button>
+</div>
+
+<style>
+  /* The native spinners fight the −/+ buttons for the same job and make the
+     field wider than the mockup on desktop. */
+  input[type='number'] {
+    appearance: textfield;
+  }
+
+  input[type='number']::-webkit-outer-spin-button,
+  input[type='number']::-webkit-inner-spin-button {
+    appearance: none;
+    margin: 0;
+  }
+</style>
+
+<script>
+  for (const stepper of document.querySelectorAll<HTMLElement>('[data-stepper]')) {
+    const input = stepper.querySelector<HTMLInputElement>('input[data-quantity]');
+    if (!input) continue;
+
+    /**
+     * The single way the value changes. Deliberately dispatches a custom event
+     * rather than `change`: re-dispatching the event we also listen for would
+     * loop.
+     */
+    const setValue = (next: number) => {
+      const max = Math.max(Number(input.max) || 1, 1);
+      const value = Math.min(Math.max(Math.round(next) || 1, 1), max);
+
+      input.value = String(value);
+      stepper.dispatchEvent(
+        new CustomEvent('quantity:change', { bubbles: true, detail: { value } }),
+      );
+    };
+
+    for (const button of stepper.querySelectorAll<HTMLButtonElement>('button[data-step]')) {
+      button.addEventListener('click', () => {
+        setValue(Number(input.value) + Number(button.dataset.step));
+      });
+    }
+
+    // `change` alone misses a typed value that is never blurred on mobile, where
+    // the keyboard is dismissed rather than the field left.
+    input.addEventListener('change', () => setValue(Number(input.value)));
+    input.addEventListener('blur', () => setValue(Number(input.value)));
+  }
+</script>

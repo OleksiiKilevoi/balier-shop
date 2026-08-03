@@ -77,6 +77,12 @@ export const products = pgTable(
     basePrice: integer('base_price').notNull(),
     /** Kopiykas. Crossed-out "old" price, shown only when set and higher than the effective price. */
     compareAtPrice: integer('compare_at_price'),
+    /**
+     * Free-form, as written on the product card: `30х17х10 см`, `19х11 см`.
+     * Not translated — the digits carry the meaning and `см` reads the same in
+     * every locale we plan to ship. Rendered as its own block on the product page.
+     */
+    dimensions: text('dimensions'),
     status: productStatus('status').notNull().default('draft'),
     isFeatured: boolean('is_featured').notNull().default(false),
     position: integer('position').notNull().default(0),

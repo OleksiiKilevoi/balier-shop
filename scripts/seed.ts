@@ -1,8 +1,16 @@
+import { readFile } from 'node:fs/promises';
 import { config as loadEnv } from 'dotenv';
 import { neon } from '@neondatabase/serverless';
 import { drizzle } from 'drizzle-orm/neon-http';
+import { eq } from 'drizzle-orm';
 import * as schema from '../src/lib/db/schema';
 import { hryvnias } from '../src/lib/money';
+import {
+  MANIFEST_PATH,
+  TEST_CATEGORIES,
+  TEST_PRODUCTS,
+  type MediaManifest,
+} from './test-catalog';
 
 loadEnv({ path: '.dev.vars', quiet: true });
 loadEnv({ quiet: true });
@@ -126,6 +134,8 @@ async function seed() {
       .onConflictDoNothing();
   }
 
+  await seedTestProducts();
+
   console.log('Seeding settings…');
   await db
     .insert(schema.settings)
@@ -138,6 +148,123 @@ async function seed() {
     .onConflictDoNothing();
 
   console.log('Done.');
+}
+
+/**
+ * The three products actually photographed for the store, with the imagery that
+ * `pnpm media:ingest` put in R2. Run that first — without a manifest the
+ * products still seed, they just render the "Фото незабаром" placeholder.
+ *
+ * The synthetic products above are kept on purpose: between them they cover the
+ * two paths the real three do not — a product with several colour variants, and
+ * a product with no photography at all.
+ */
+async function seedTestProducts() {
+  const manifest = await readManifest();
+  if (!manifest) {
+    console.warn(`  no ${MANIFEST_PATH} — run \`pnpm media:ingest\` to attach images`);
+  }
+
+  console.log('Seeding photographed test products…');
+
+  const categoryIds = new Map<string, string>();
+  for (const category of TEST_CATEGORIES) {
+    const [inserted] = await db
+      .insert(schema.categories)
+      .values({ slug: category.slug, position: category.position, isActive: true })
+      .onConflictDoNothing()
+      .returning();
+
+    const id =
+      inserted?.id ??
+      (await db.query.categories.findFirst({ where: (c, { eq: is }) => is(c.slug, category.slug) }))
+        ?.id;
+    if (!id) throw new Error(`Could not resolve category ${category.slug}`);
+
+    await db
+      .insert(schema.categoryTranslations)
+      .values({ categoryId: id, locale: 'uk', title: category.title })
+      .onConflictDoNothing();
+
+    categoryIds.set(category.slug, id);
+  }
+
+  for (const product of TEST_PRODUCTS) {
+    const categoryId = categoryIds.get(product.categorySlug);
+    if (!categoryId) throw new Error(`Unknown category ${product.categorySlug}`);
+
+    const [inserted] = await db
+      .insert(schema.products)
+      .values({
+        slug: product.slug,
+        categoryId,
+        basePrice: hryvnias(product.priceUah),
+        dimensions: product.dimensions,
+        status: 'active',
+        isFeatured: product.isFeatured,
+      })
+      .onConflictDoNothing()
+      .returning();
+
+    const productId =
+      inserted?.id ??
+      (await db.query.products.findFirst({ where: (p, { eq: is }) => is(p.slug, product.slug) }))
+        ?.id;
+    if (!productId) throw new Error(`Could not resolve product ${product.slug}`);
+
+    await db
+      .insert(schema.productTranslations)
+      .values({
+        productId,
+        locale: 'uk',
+        title: product.title,
+        description: product.description,
+        details: product.details ?? null,
+      })
+      .onConflictDoNothing();
+
+    // One variant, no colour choice — the selector stays hidden. Still a row:
+    // stock, SKU and every cart/order reference hang off the variant, always.
+    await db
+      .insert(schema.productVariants)
+      .values({ productId, sku: product.sku, stock: product.stock, isActive: true })
+      .onConflictDoNothing();
+
+    if (!manifest) continue;
+
+    const images = Object.entries(manifest)
+      .filter(([key]) => key.startsWith(`${product.folder}/`))
+      .sort(([a], [b]) => a.localeCompare(b, 'en', { numeric: true }));
+
+    // `product_images` has no natural unique column, so replace rather than
+    // upsert — otherwise re-running the seed stacks duplicate galleries.
+    await db.delete(schema.productImages).where(eq(schema.productImages.productId, productId));
+
+    if (images.length > 0) {
+      await db.insert(schema.productImages).values(
+        images.map(([, entry], index) => ({
+          productId,
+          // NULL: shared by every variant. These products have only one anyway.
+          variantId: null,
+          url: entry.url,
+          alt: product.title,
+          width: entry.width,
+          height: entry.height,
+          position: index,
+        })),
+      );
+    }
+
+    console.log(`  ${product.slug}: ${images.length} image(s)`);
+  }
+}
+
+async function readManifest(): Promise<MediaManifest | null> {
+  try {
+    return JSON.parse(await readFile(MANIFEST_PATH, 'utf8')) as MediaManifest;
+  } catch {
+    return null;
+  }
 }
 
 seed().catch((error) => {

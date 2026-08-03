@@ -35,3 +35,8 @@ yarn-error.log*
 # os
 .DS_Store
 Thumbs.db
+
+# local product photography used to seed the dev catalog, plus the manifest
+# `pnpm media:ingest` writes from it. Real imagery is uploaded through the admin
+# panel and lives in R2, never in the repository.
+test-products/

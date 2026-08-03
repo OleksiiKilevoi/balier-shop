@@ -48,6 +48,8 @@ pnpm db:generate      # drizzle-kit generate — SQL migration from the schema (
 pnpm db:migrate       # apply migrations (needs DATABASE_URL)
 pnpm db:studio        # drizzle studio
 pnpm db:seed          # populate with development data (idempotent)
+pnpm media:ingest     # upload test-products/ to the LOCAL R2 + write the seed manifest
+pnpm media:push       # copy those objects to the REAL bucket (dev convenience, needs login)
 pnpm cron:dev         # run the cron worker locally with --test-scheduled
 pnpm cron:deploy      # deploy the cron worker
 ```
@@ -157,8 +159,34 @@ The schema handles both with one shape — **there is no "product without varian
 - Cart items, order items and stock reservations reference `variantId`, never `productId`.
 - `product_images.variant_id` is nullable: `NULL` means the image is shared across all variants,
   a set value means it belongs to that colour only. Selecting a colour swaps the gallery.
+- `products.dimensions` is free text exactly as written on the card (`30х17х10 см`), not structured
+  numbers — the wallet has two dimensions and the bags have three.
 - The variant selector is hidden in the UI when a product has a single variant. That is a rendering
   decision only — it changes nothing in the data model or the checkout logic.
+
+### Images
+
+Product photography lives in the **`balier-media` R2 bucket** (`MEDIA` binding) and is served by
+`src/pages/media/[...key].ts`.
+
+- **Images are prepared at the right size before upload. We do not resize.** One uploaded file is
+  one stored object is one URL. `/media/**` is a byte pump and **must never call the Images binding
+  to transform**: Cloudflare bills *unique* transformations per month and, on the free plan, errors
+  instead of billing once the allowance is spent — a per-request transform would put a monthly quota
+  in front of every product photo. (`IMAGES.info()` for intrinsic width/height is fine, and is the
+  only use of the binding in `src/lib/media/`.)
+- **Keys are content hashes**, so objects are immutable and `/media/**` ships
+  `max-age=31536000, immutable`. Replacing a photo produces a new URL; nothing is ever invalidated.
+- **`product_images.url` is a site-relative path** (`/media/<hash>.<ext>`), never an absolute URL.
+  Build it with `mediaUrl` from `src/lib/media`. This is what keeps the Phase 5 move to the client's
+  account from touching a single database row.
+- **Never link the bucket's public `r2.dev` URL.** Cloudflare rate-limits it and documents it as
+  unsuitable for production.
+- Accepted formats are the keys of `MEDIA_FORMATS` (webp, avif, jpg, png). Anything else is rejected
+  at upload and 404s on the way out.
+- `pnpm media:ingest` seeds the dev catalog from `test-products/` against the **local** R2
+  simulator, so it needs no Cloudflare login. `test-products/` is gitignored — imagery belongs in
+  R2, not the repository.
 
 ### Orders
 

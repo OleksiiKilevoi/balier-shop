@@ -16,18 +16,36 @@ an assumed answer.
    customer pays the carrier and the site never quotes a price. If confirmed, this removes delivery
    quoting, per-product weight/dimensions, and delivery cost in the order total from Phase 3 — and
    means Monobank is only ever charged for goods.
-2. **"Замовити через Телеграм" on the product page.** A second ordering path parallel to checkout
-   that bypasses cart, stock reservation and payment. Is it a plain deep link with the product
-   prefilled, or does it create a real order record?
-3. **Newsletter signup in the footer.** A Phase 6 item that appears at launch in the mockups.
-   Currently rendered but non-submitting — no endpoint, no storage. Carries consent obligations
-   worth handling deliberately.
 
 ### Decided
 
+- **Newsletter signup — removed from the footer** (2026-08-03). It is not a release feature, and a
+  field that silently does nothing is worse than no field. The footer is now three columns instead
+  of the mockup's four. Email campaigns stay in Phase 6; bringing the form back means bringing back
+  the storage, the endpoint and the consent record together, not just the markup.
+
+- **"Замовити через Телеграм" is a plain deep link, not a second ordering path** (2026-08-03).
+  `t.me/<manager>?text=…` with the title, colour, SKU, unit price, quantity and product URL
+  prefilled; the manager takes the conversation from there. It writes no order row, reserves no
+  stock and touches no payment, so it stays entirely inside Phase 2 and pulls nothing from Phase 3.
+  Built in `src/lib/telegram/`, imported by both the page and its client script so the message a
+  customer sends cannot drift from the one rendered server-side.
+  The manager account itself is still a Phase 0 item: `PUBLIC_TELEGRAM_MANAGER` in `wrangler.jsonc`
+  holds a **placeholder handle**, and `orderDeepLink` validates it, so clearing the var hides the
+  button rather than shipping a link to a stranger.
 - **EN/UA language switcher — removed.** English is not planned for release, so the toggle shown in
   the mockups is gone from the header (2026-08-03). The site ships Ukrainian only; i18n stays in
   Phase 6 and the DB translation tables stay in the schema, unused for now.
+- **Product images live in R2, and we do not resize them** (2026-08-03). Photography is prepared at
+  the right size before upload, so one file is one object is one URL. `/media/**` serves bytes
+  straight out of the `balier-media` bucket and never calls the Images binding to transform:
+  Cloudflare bills *unique* transformations monthly and, on the free plan, **errors instead of
+  billing** once the 5 000/month allowance is gone, which would put a monthly quota in front of
+  every product photo.
+  Two details that exist to keep Phase 5 cheap: keys are content hashes (immutable, so cache
+  invalidation never arises), and `product_images.url` holds a **site-relative path**, so moving to
+  the client's bucket and domain rewrites no rows. Committing images to the repo was rejected —
+  Workers static assets are written at deploy time, so the admin panel could never manage them.
 
 ---
 
@@ -39,17 +57,33 @@ the critical path and nothing here is under our control.
 - [ ] Register for Monobank Acquiring
 - [ ] Nova Poshta API (NP account, business account), configure cash on delivery, decide who pays
       the transfer commission
-- [ ] Neon project, EU Frankfurt — **blocks `db:migrate` and `db:seed`**
-- [~] Cloudflare account — done, deploying through Workers Builds (dashboard, not CLI). Secrets are
-      still unset; nothing reads one yet, so this no longer blocks a deploy
+> **The Neon project and the Cloudflare account are the developer's own, for development only.**
+> The store ships on the client's accounts, stood up again during Phase 5. Nothing in the current
+> setup is production: plan limits, retention and backups are decisions for that account, and the
+> data here is seed data. Keep the setup reproducible — that is the part being handed over.
+
+- [x] Neon project, EU Frankfurt — created 2026-08-03 on the Free plan, Postgres 18. Database is
+      the default `neondb` (not `balier`). `DATABASE_URL` in `.dev.vars` is the **pooled** string;
+      `db:migrate` and `db:seed` both ran clean through it. The same pooled string is set as the
+      `DATABASE_URL` secret on the deployed app Worker. The cron Worker needs its own copy in
+      Phase 3 — secrets are per-Worker and do not carry over
+- [~] Cloudflare account — done, deploying through Workers Builds (dashboard, not CLI). `DATABASE_URL`
+      is set on the app Worker; the remaining secrets wait on Phase 0's other items. Note the local
+      wrangler login has expired, so secrets are managed in the dashboard, not by `wrangler secret put`
+- [x] **R2 bucket `balier-media`** — created 2026-08-03, wrangler login restored. The 16 dev photos
+      were pushed to it with `pnpm media:push` and verified byte-for-byte. Note this is still the
+      *developer's* account: Phase 5 creates the bucket again on the client's and re-pushes, exactly
+      like Neon
 - [ ] Telegram: manager account for the deep link, bot and chat for notifications
-- [ ] Confirm Neon plan covers the backup/PITR window we need (moved up from Phase 5)
+- [ ] Confirm Neon plan covers the backup/PITR window we need — **applies to the client's project,
+      not this dev one**, so it moves back to Phase 5. Free gives 6 h restore and 0.5 GB, Launch
+      7 days, Scale 30 days. 6 h is too thin once real orders exist; the upgrade needs no code change
 
 ## Phase 1 — Foundation (2–3 days) — done
 
 - [x] Create the repository: astro, typescript, wrangler, drizzle
 - [x] DB schema and initial migration (`migrations/0000_late_omega_flight.sql`), seed script
-      — migration and seed cannot be *run* until the Neon project exists
+      — applied to Neon 2026-08-03: 15 tables, seed gives 1 category, 2 products, 4 variants
 - [x] Reusable design components: `Container`, `Button`, `Price`, `ProductCard`, `Breadcrumbs`,
       `SiteHeader`, `SiteFooter`
 - [x] Types and ports (`src/lib/ports.ts`): payment, shipping, notifier, captcha
@@ -73,15 +107,53 @@ Decisions locked during this phase:
 
 Full mockups exist for every page here, so there is little left to design.
 
+- [x] **Image storage and the dev catalog** — R2 bucket binding (`MEDIA`), `src/lib/media/`
+      (content-hash keys, format allowlist, the shared `storeImage`), the `/media/[...key]` route,
+      and `pnpm media:ingest`. Three real products seeded from `test-products/` with 16 photos:
+      Lunet (5500 ₴), Space (4800 ₴), гаманець (1950 ₴). The two synthetic Phase 1 products are kept
+      deliberately — between them they cover the multi-variant selector and the "no photography"
+      placeholder, which the real three do not. Ingest runs against the **local** R2 simulator, so
+      it needs no Cloudflare login; the real bucket does not exist yet (see Phase 0)
 - [ ] Homepage — replace placeholder sections with featured products from the DB
-- [ ] `/products` page — breadcrumbs, product count, 4-column grid
-- [ ] `/products/[slug]` page — gallery with thumbnail strip, category pill, description,
-      dimensions block, quantity stepper, add-to-cart + Telegram CTAs (see open decision 2)
-- [ ] Product search (the header search icon currently points at a nonexistent `/search`)
+- [x] `/products` page — breadcrumbs, product count, grid. `src/lib/db/queries/products.ts`
+      (`listActiveProducts`) and `src/lib/db/queries/stock.ts` (the one definition of
+      `available = stock − unexpired reservations`, which Phase 3 reuses). Two columns on a phone,
+      three at `md`, the mockup's four at `lg`. Grid ordering is `position`, then newest first
+- [x] `/products/[slug]` page — `ProductGallery` (a gapless CSS scroll-snap carousel: swipe is the
+      browser's own, script only mirrors the scroll position into the dots and thumbnails and drives
+      the reverse on a thumbnail click; dots on a phone, the mockup's thumbnail strip from `sm:`),
+      category pill, description, details list, dimensions block, `QuantityStepper`, and the two
+      CTAs. The colour selector is rendered
+      for every product and carries `hidden` when there is only one variant, so the client script
+      always has one place to read the current variant from.
+      **«Додати до кошика» is markup only** — styled and stock-aware (disabled when the chosen
+      variant has none available), but wired to nothing until the cart store lands in Phase 3.
+      An unknown or non-`active` slug rewrites to the new `src/pages/404.astro`
+- [x] Product search — `/search`, which the header icon now actually reaches. A plain GET form, so
+      the query lives in the URL and the page works before any script does; there is no autocomplete
+      and no API route. `searchProducts` in `src/lib/db/queries/products.ts` matches **substrings**,
+      not Postgres FTS: Postgres ships no Ukrainian dictionary and the `simple` configuration only
+      lowercases, so «сумки» would not find «сумка» — the exact lookup a shopper types. All tokens
+      must match, each anywhere in the title, description, category, colour name or SKU, and title
+      hits rank first. The `/products` grid and the results grid now share one card-assembly path,
+      so they cannot drift. Verified against Neon: colour and SKU lookups hit, LIKE metacharacters
+      (`%`, `_`) are escaped and match literally, and 320px lays out with no overflow.
+      If the catalog ever outgrows a sequential scan, the fix is a `pg_trgm` GIN index over the same
+      expression — not a different matching rule
 - [ ] Static pages: `/about`, `/care`, `/delivery`, `/returns`, `/contacts`, `/offer`, `/privacy`
       — all currently 404 and linked from the header and footer.
       **The legal ones are a hard gate for Monobank approval, not decoration.**
-- [ ] Mobile layout
+- [~] Mobile layout — the catalog and product pages are written phone-first and verified to lay out
+      inside 320px with no horizontal overflow. Two traps worth remembering:
+      **(1)** a horizontal scroller inside a grid item still widens the track. `overflow-x` only
+      zeroes the *automatic minimum size* of flex/grid items, and a plain block scroller is neither,
+      so the thumbnail strip forced both columns to 352px in a 320px viewport until `min-w-0` went
+      on the grid children.
+      **(2)** headless Chrome cannot be screenshotted at 320px with `--window-size` — Windows clamps
+      the browser window to a minimum width of roughly 500px and the page silently lays out wider.
+      Use CDP `Emulation.setDeviceMetricsOverride` and check `Page.getLayoutMetrics.cssContentSize`.
+      `/search` is verified the same way, in all three states (no query, results, nothing found).
+      Still to do: the remaining Phase 2 pages once they exist
 
 ## Phase 3 — Cart and payment (3 days — realistically 5–6)
 
@@ -111,6 +183,10 @@ are the two places where a bug costs money.
 
 - [ ] Cloudflare Access, plus a server-side check of the Access JWT in the app itself
 - [ ] Managing orders, products, content
+- [ ] Image upload — POST the file to an admin route and call `storeImage`, the same code path
+      `pnpm media:ingest` uses. Since nothing is resized server-side, the form has to state the
+      expected dimensions and reject anything wildly off, or the storefront inherits whatever the
+      uploader happened to export
 - [ ] Configuring the cash-on-delivery limit
 
 ## Phase 5 — Launch (2–3 days)
@@ -121,9 +197,14 @@ are the two places where a bug costs money.
 - [ ] Filling in content
 - [ ] Testing
 - [ ] Replacing the Monobank test token with the client's token
+- [ ] **Migrate off the dev accounts** — a Neon project (EU Frankfurt) and a Cloudflare account owned
+      by the client: run the migrations there, set every secret again, repoint Workers Builds, attach
+      the domain. Development so far has run on personal accounts, so this is a full second setup,
+      not a transfer. Only the schema and migrations carry over; the seed data does not
+- [ ] Pick the Neon plan on that project — see the PITR note in Phase 0
 - [ ] Training the client on the admin panel
 - [ ] Analytics coverage
-- [ ] Verify DB backups (setup moved to Phase 0)
+- [ ] Verify DB backups on the client's project
 
 ## Phase 6 — Improvements (as needed)
 
@@ -132,8 +213,9 @@ are the two places where a bug costs money.
 - [ ] Admin action log
 - [ ] Site multilingual support — post-launch; the header switcher was removed, so adding a language
       means reintroducing it together with English copy for every product and static page
-- [ ] Email campaigns to customers (promotions, restocks, abandoned cart, etc.)
-      — see open decision 3
+- [ ] Email campaigns to customers (promotions, restocks, abandoned cart, etc.). The footer signup
+      was removed for release, so this starts with collecting addresses at all — storage, a
+      double opt-in and a consent record, not just a form
 - [ ] Customer registration on the site, personal account (wishlist, browsing history,
       recommendations, reviews)
 
@@ -143,7 +225,16 @@ are the two places where a bug costs money.
 
 Raised during the Phase 1 review and still unowned:
 
-- **Product image hosting.** R2, Cloudflare Images, or committed assets? Needed before Phase 2 can
-  show real products.
-- **Where product photos come from.** The mockups use lifestyle shots from Instagram; someone has to
-  crop them to the square card ratio.
+- **Where the rest of the product photos come from, and at what size.** Three products are covered
+  (see Phase 2); the remaining catalog is not. Since nothing is resized server-side, this now also
+  means agreeing an export size with whoever prepares the shots — see the note below.
+- **One file serves both the card and the gallery.** The test photography is 1440×1920 at
+  ~200–700 KB, which is right for the product page and heavy for a grid card (~300 px on desktop,
+  ~160 px on a two-column phone). The audience arrives from Instagram on a phone, so this is worth
+  settling during the `/products` grid work: either the prepared exports get smaller, or a product
+  gets a separately prepared card image — `product_images` already holds many rows per product, so
+  it needs no schema change either way.
+  **Still open after the grid shipped.** `/products` renders the same 1440×1920 files into ~135 px
+  card slots on a 320 px phone, so a first view downloads roughly 2 MB of photography to paint
+  thumbnails. Only the first two cards load eagerly, which limits the damage but does not fix it.
+  Nothing about this is a code change — it is an agreement on export sizes, and then a re-ingest.

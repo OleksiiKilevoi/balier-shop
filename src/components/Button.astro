@@ -24,7 +24,7 @@ const {
 } = Astro.props;
 
 const base =
-  'inline-flex items-center justify-center gap-2 rounded-btn text-center font-medium transition-colors duration-150 disabled:pointer-events-none disabled:opacity-50';
+  'inline-flex cursor-pointer items-center justify-center gap-2 rounded-btn text-center font-medium transition-colors duration-150 disabled:pointer-events-none disabled:opacity-50';
 
 const variants: Record<Variant, string> = {
   primary: 'bg-brand text-white hover:bg-brand-hover',
@@ -35,10 +35,16 @@ const variants: Record<Variant, string> = {
 
 // `sm` is the only size that falls under the 44px touch minimum, so it renders
 // at full height on touch widths and compacts to the mockup size from `md:` up.
+//
+// `lg` is a *minimum* height, not a fixed one: «Замовити через Телеграм» needs
+// ~267px on one line and a 320px viewport gives the label 198px, so it wraps to
+// two lines there. With a fixed `h-13` that second line would spill out of the
+// button. The padding also loosens only from `sm:` up, where the mockup's
+// one-line version actually fits.
 const sizes: Record<Size, string> = {
   sm: 'h-touch px-4 text-sm md:h-9',
   md: 'h-touch px-6 text-sm',
-  lg: 'h-13 px-7 text-base',
+  lg: 'min-h-13 px-5 py-2.5 text-base sm:px-7',
 };
 
 const Tag = href ? 'a' : 'button';

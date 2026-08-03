@@ -1,0 +1,71 @@
+---
+import { env } from 'cloudflare:workers';
+import BaseLayout from '~/layouts/BaseLayout.astro';
+import Container from '~/components/Container.astro';
+import Breadcrumbs from '~/components/Breadcrumbs.astro';
+import ProductCard from '~/components/ProductCard.astro';
+import { createDb } from '~/lib/db';
+import { listActiveProducts } from '~/lib/db/queries/products';
+import { pluralUk } from '~/lib/i18n/plural';
+
+export const prerender = false;
+
+// Per request — never a module-scope singleton, every request is a fresh isolate.
+const db = createDb(env.DATABASE_URL);
+const products = await listActiveProducts(db);
+
+/**
+ * The first row is two cards on a phone, so only those two skip lazy loading.
+ * Eagerly loading four would fetch two full-size photos below the fold on the
+ * viewport that can least afford them — the audience arrives from Instagram.
+ */
+const EAGER_CARDS = 2;
+
+// Built here rather than as two adjacent expressions in the markup — the
+// whitespace between those is collapsed away and the count runs into the noun.
+const countLabel = `${products.length} ${pluralUk(products.length, {
+  one: 'товар',
+  few: 'товари',
+  many: 'товарів',
+})}`;
+---
+
+<BaseLayout
+  title="Товари"
+  description="Шкіряні сумки та гаманці ручної роботи. Обмежені партії, доставка Новою Поштою по всій Україні."
+>
+  <Container class="py-8 sm:py-12">
+    <Breadcrumbs items={[{ label: 'Головна', href: '/' }, { label: 'Товари' }]} />
+
+    <header class="mt-5 sm:mt-6">
+      <h1 class="text-3xl sm:text-4xl lg:text-5xl">Наша колекція</h1>
+      <p class="text-ink-muted mt-1.5 text-sm">{countLabel}</p>
+    </header>
+
+    {
+      products.length > 0 ? (
+        /* Two columns down to 320px: one full-width card per row wastes the
+           screen, and three squeezes the title to two words a line. The mockup's
+           four arrive at lg. */
+        <div class="mt-6 grid grid-cols-2 gap-3 sm:mt-8 sm:gap-5 md:grid-cols-3 lg:grid-cols-4 lg:gap-6">
+          {products.map((product, index) => (
+            <ProductCard
+              slug={product.slug}
+              title={product.title}
+              category={product.categoryTitle}
+              price={product.price}
+              compareAtPrice={product.compareAtPrice}
+              imageUrl={product.imageUrl}
+              imageAlt={product.imageAlt}
+              swatches={product.swatches}
+              soldOut={!product.inStock}
+              eager={index < EAGER_CARDS}
+            />
+          ))}
+        </div>
+      ) : (
+        <p class="text-ink-muted mt-8">Товарів поки немає. Зазирніть, будь ласка, трохи пізніше.</p>
+      )
+    }
+  </Container>
+</BaseLayout>

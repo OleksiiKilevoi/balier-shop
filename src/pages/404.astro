@@ -1,0 +1,28 @@
+---
+import BaseLayout from '~/layouts/BaseLayout.astro';
+import Container from '~/components/Container.astro';
+import Button from '~/components/Button.astro';
+
+export const prerender = false;
+
+/**
+ * Also the rewrite target for a product slug that does not resolve, so the
+ * status is set here rather than left to the routing — a rewritten response
+ * would otherwise carry the 200 of a page that rendered fine.
+ */
+Astro.response.status = 404;
+---
+
+<BaseLayout title="Сторінку не знайдено">
+  <Container class="flex min-h-[50dvh] flex-col items-center justify-center py-16 text-center">
+    <p class="font-display text-brand text-5xl font-bold">404</p>
+
+    <h1 class="mt-4 text-2xl sm:text-3xl">Такої сторінки немає</h1>
+
+    <p class="text-ink-muted mt-3 max-w-sm">
+      Можливо, товар більше не продається або в адресі є помилка.
+    </p>
+
+    <Button href="/products" size="lg" class="mt-8 w-full sm:w-auto">До каталогу</Button>
+  </Container>
+</BaseLayout>
