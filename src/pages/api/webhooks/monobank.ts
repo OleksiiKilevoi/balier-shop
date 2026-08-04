@@ -2,6 +2,7 @@ import { env } from 'cloudflare:workers';
 import type { APIRoute } from 'astro';
 import { createTxDb } from '~/lib/db';
 import { createMonobankPayment } from '~/lib/monobank';
+import { createEmailNotifier } from '~/lib/notify/email';
 import { createTelegramNotifier } from '~/lib/notify/telegram';
 import { confirmPayment } from '~/lib/orders/confirmPayment';
 
@@ -18,11 +19,12 @@ export const prerender = false;
  *  4. transition the order inside a transaction (`confirmPayment`), if valid;
  *  5. respond quickly.
  *
- * The manager's «Оплачено» Telegram message is sent from here, on the `paid`
- * transition only — `confirmPayment`'s idempotency means a redelivered webhook
- * reports `unchanged` and so can't produce a second message. It goes through
- * `waitUntil` rather than being awaited: Monobank wants a fast 200, and the
- * notifier is best-effort by contract anyway.
+ * The manager's «Оплачено» Telegram message and the customer's order-
+ * confirmation email are both sent from here, on the `paid` transition only —
+ * `confirmPayment`'s idempotency means a redelivered webhook reports
+ * `unchanged` and so can't produce a second message. Both go through
+ * `waitUntil` rather than being awaited: Monobank wants a fast 200, and both
+ * notifiers are best-effort by contract anyway.
  */
 export const POST: APIRoute = async ({ request, locals }) => {
   const rawBody = await request.text();
@@ -55,7 +57,9 @@ export const POST: APIRoute = async ({ request, locals }) => {
       console.warn(`Monobank webhook: no payment found for invoice ${invoiceId}`);
     } else if (result.transitioned === 'paid') {
       const notifier = createTelegramNotifier(env.TELEGRAM_BOT_TOKEN, env.TELEGRAM_CHAT_ID);
+      const email = createEmailNotifier(env.EMAIL, env.ORDER_EMAIL_FROM);
       locals.cfContext.waitUntil(notifier.orderPaid({ order: result.order, items: result.items }));
+      locals.cfContext.waitUntil(email.orderPaid({ order: result.order, items: result.items }));
     }
   } finally {
     locals.cfContext.waitUntil(close());

@@ -4,7 +4,39 @@
 
 ## 📍 CURRENT STATE (overwrite this block; keep tight)
 
-- **Last done:** **API rate limiting** — `src/middleware.ts` (new) runs a per-IP, per-route
+- **Last done:** **order-confirmation email** — the last open Phase 3 item, and the reason the
+  Cloudflare plan was upgraded to Workers Paid this session (Email Sending needs it). Reused the
+  existing `NotifierPort` shape rather than adding a new port type: `src/lib/notify/email.ts`
+  (`createEmailNotifier`, tested) implements it against the new `send_email` binding
+  (`EMAIL: SendEmail` in `wrangler.jsonc`), the same three call sites `src/lib/notify/telegram.ts`
+  already used (`createOrder`'s two branches, the webhook's `paid` transition) now call both
+  notifiers — `CreateOrderDeps` gained an `email: NotifierPort` field alongside `notifier`.
+  `DELIVERY_METHOD_LABELS`/`PAYMENT_METHOD_LABELS`/`deliveryDestination` were pulled out of
+  `telegram.ts` into a new `src/lib/notify/format.ts` so the two adapters share one copy.
+  Two decisions closed by explicit ask rather than guessed (`CLAUDE.md` rule 5):
+  - **Trigger point differs from Telegram's, per payment method.** Cash on delivery is genuinely
+    confirmed the moment the order is created, so `orderCreated` sends then, same call site as
+    Telegram's «Нове замовлення». A card order is not confirmed until Monobank actually reports
+    success, so the email adapter's `orderCreated` is a no-op for `card` — only `orderPaid`, fired
+    from the webhook's `paid` transition, sends. If a customer abandons payment, no email ever goes
+    out for that order, which is correct: nothing was confirmed. The call sites themselves are
+    identical to Telegram's for both branches; the payment-method branching lives inside the email
+    adapter, not in `create.ts` or the webhook route.
+  - **No domain onboarded — sending is built but not live.** `wrangler email sending list` returns
+    none; `balier.ua`'s DNS isn't on this Cloudflare account (still a Phase 5 item). Rather than
+    picking a throwaway personal domain, `ORDER_EMAIL_FROM` in `wrangler.jsonc` is set to
+    `noreply@balier.ua` — the real address — so the code needs no change once
+    `wrangler email sending enable balier.ua` is run, whenever a domain actually sits on the
+    account that will hold this. Until then every send fails closed with `E_SENDER_NOT_VERIFIED`,
+    caught and logged like any `NotifierPort` failure, never thrown into checkout.
+  `customerEmail` needed no new plumbing — it was already an optional field on the checkout form,
+  validation schema, and `orders` table from a prior session; both `orderCreated`/`orderPaid` are
+  silent no-ops when it's absent.
+  `pnpm check` (0 errors)/`pnpm test` (74/74, 8 new)/`pnpm build` clean. **Not verified live**:
+  `/api/checkout` is gated by the real Turnstile secret, which curl can't satisfy, so a real
+  COD-with-email order (to see the send attempt and its graceful failure end to end) needs an
+  actual browser pass — same recurring gap as the rest of `/checkout`.
+- **Before that:** **API rate limiting** — `src/middleware.ts` (new) runs a per-IP, per-route
   fixed-window counter (`src/lib/rateLimit/`, KV-backed) ahead of every route
   `docs/CONVENTIONS.md` names (checkout, both Nova Poshta search endpoints) plus `/api/cart` and
   `/api/checkout/limits`, which each already carried their own "not yet rate limited" note.
@@ -20,7 +52,7 @@
   (58/58, 4 new)/`pnpm build` clean; verified live against the running dev server — tripped the
   limit on `/api/checkout/limits`, got a 429 with a correct `retry-after`, and confirmed the webhook
   keeps answering its own 403 rather than being rate-limited.
-- **Before that:** the **`orderPaid` Telegram notification** — the last piece of the notification port
+- **Earlier:** the **`orderPaid` Telegram notification** — the last piece of the notification port
   that had been implemented but wired to nothing. `confirmPayment` now `.returning()`s the updated
   order row and carries it (with its already-loaded items) out in the `paid` result, and
   `src/pages/api/webhooks/monobank.ts` sends «Оплачено» to the manager group on that transition only.
@@ -74,18 +106,24 @@
   `X-Sign`, is **now verified** (see the webhook entry above) — that entry is finally closed. Testing this from
   plain `localhost` would still need a tunnel; testing against the deployed dev Worker doesn't, and
   that is the route that worked.
-- **In progress:** Phase 3, and only one deliberately-deferred extra is left in it now:
-  order-confirmation email. The admin-editable cash-on-delivery limit moved to Phase 4 (admin
-  panel) — Phase 3's job was only to read and enforce the seeded `settings.cod_limit`, which is
-  already done.
+- **In progress:** Phase 3 is now **code-complete** — every checklist item is built, including the
+  order-confirmation email. What's left is not code: a domain needs to sit on a Cloudflare account
+  with `wrangler email sending enable` run against it before the email actually delivers, and a
+  real browser pass through `/checkout` (Turnstile-gated, so curl can't do it) would confirm the
+  send attempt live. The admin-editable cash-on-delivery limit moved to Phase 4 (admin panel) —
+  Phase 3's job was only to read and enforce the seeded `settings.cod_limit`, which is already done.
   Phase 2 still carries its own leftover: the seven static pages render a heading, a lead and a
   `ContentPlaceholder`. Writing them is a Phase 5 content item, and the legal ones gate Monobank.
-- **Next step:** the order-confirmation email — the last open Phase 3 item. `balier-cron` is
-  deployed and rate limiting is done (see Last done for both), so nothing else in this phase is
-  blocked on infrastructure anymore.
+- **Next step:** either a real browser checkout pass (COD, with an email address, to watch the
+  confirmation email attempt and its graceful `E_SENDER_NOT_VERIFIED` failure), or start Phase 4
+  (admin panel) — Phase 3 has nothing code-shaped left in it.
 - **Blockers (waiting on me):**
   - Phase 0 externals unchanged: Monobank Acquiring registration, Nova Poshta business account +
     cash-on-delivery setup, Telegram manager account / bot / chat.
+  - **No domain onboarded for Email Sending** — `wrangler email sending list` returns none, and
+    `balier.ua` isn't attached to this Cloudflare account (still nominally a Phase 5 item). Order-
+    confirmation emails are fully wired but fail closed until either `balier.ua`'s DNS moves here
+    ahead of schedule, or a different already-owned domain gets onboarded for dev testing.
   - `PUBLIC_TELEGRAM_MANAGER` in `wrangler.jsonc` is a **placeholder handle**.
   - ~~`DATABASE_URL` missing as a Worker secret~~ — resolved; it is set, and as of 2026-08-04 so are
     the other five runtime secrets.
@@ -98,10 +136,11 @@
 - [~] Phase 0 — Preparation (Neon + R2 done; Monobank, Nova Poshta, Telegram outstanding)
 - [x] Phase 1 — Foundation (schema, migrations, seed, design components, deploy verified)
 - [~] Phase 2 — Catalog / storefront (every page built; static-page copy outstanding)
-- [~] Phase 3 — Cart and payment (the money path is done and verified live end to end: cart,
-      `/checkout`, both payment methods, Turnstile, the webhook, both Telegram notifications, and
-      now rate limiting. `balier-cron` is deployed. Only the confirmation email and the admin
-      COD-limit UI (Phase 4's item) are still open)
+- [~] Phase 3 — Cart and payment (code-complete: cart, `/checkout`, both payment methods,
+      Turnstile, the webhook, both Telegram notifications, rate limiting, and now the order-
+      confirmation email. `balier-cron` is deployed. Only external/non-code items remain: onboarding
+      a domain for Email Sending, and a live browser pass through `/checkout`. The admin COD-limit
+      UI is Phase 4's item, not this one)
 - [ ] Phase 4 — Admin panel
 - [ ] Phase 5 — Launch (incl. migrating off the dev Neon/Cloudflare accounts)
 - [ ] Phase 6 — Improvements
@@ -109,6 +148,34 @@
 ---
 
 ## 🗒️ SESSION LOG (newest first; 3–6 lines each)
+
+### 2026-08-04 — order-confirmation email
+
+- Did, on request (after upgrading Cloudflare to Workers Paid specifically for this — Email
+  Sending isn't on Free): `src/lib/notify/email.ts` implements the existing `NotifierPort`
+  interface against the new `send_email` binding, rather than inventing a new port type — the
+  shape (`orderCreated`/`orderPaid`, best-effort, never throws) already fit. Wired at the exact
+  same three call sites `telegram.ts` uses: both branches of `createOrder` (`CreateOrderDeps`
+  gained an `email` field) and the webhook's `paid` transition. Extracted the label maps and
+  `deliveryDestination` both adapters need into `src/lib/notify/format.ts` so they share one copy
+  instead of two.
+- Decisions, both closed by asking rather than guessing: **(1)** card orders only email on
+  `orderPaid`, not `orderCreated` — COD is genuinely confirmed at creation (same call site as
+  Telegram's «Нове замовлення»), a card order isn't confirmed until Monobank actually reports
+  success, and emailing "confirmed" before that would be wrong. The branching lives inside the
+  email adapter itself, so `create.ts`'s call sites stay identical to Telegram's. **(2)** no domain
+  is onboarded (`wrangler email sending list` is empty; `balier.ua` isn't on this Cloudflare
+  account yet) and user chose to hold off rather than onboard a throwaway personal domain — so
+  `ORDER_EMAIL_FROM` is set to the real `noreply@balier.ua` in `wrangler.jsonc`, and sending fails
+  closed with `E_SENDER_NOT_VERIFIED` (caught, logged, never thrown into checkout) until
+  `wrangler email sending enable balier.ua` is eventually run against whichever account holds that
+  zone. Nothing about the code depends on which account that ends up being.
+- Verified: `pnpm check` (0 errors)/`pnpm test` (74/74, 8 new)/`pnpm build` clean; the dev server
+  boots cleanly with the new `EMAIL: SendEmail` binding. **Not verified live** — `/api/checkout` is
+  gated by the real Turnstile secret, which curl can't satisfy, so placing a real COD order with an
+  email address (to watch the send attempt and its graceful failure) needs an actual browser pass,
+  same recurring gap as the rest of `/checkout`.
+- Next: a real browser checkout pass, or start Phase 4 — Phase 3 is code-complete.
 
 ### 2026-08-04 — API rate limiting
 

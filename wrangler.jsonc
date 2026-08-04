@@ -25,6 +25,15 @@
       "bucket_name": "balier-media"
     }
   ],
+  // Cloudflare Email Sending — order-confirmation emails to customers
+  // (`src/lib/notify/email.ts`). Requires Workers Paid (enabled 2026-08-04).
+  // PLACEHOLDER: no domain is onboarded yet (`wrangler email sending list`
+  // returns none) — `balier.ua`'s DNS isn't on this Cloudflare account (Phase 5
+  // item). Sends fail closed with `E_SENDER_NOT_VERIFIED` (caught, logged,
+  // never thrown into checkout — same best-effort contract as `NotifierPort`)
+  // until `wrangler email sending enable balier.ua` has been run against
+  // whichever account actually holds that zone.
+  "send_email": [{ "name": "EMAIL" }],
   // Secrets are NOT set here. Locally they live in `.dev.vars`; in production
   // they are set with `wrangler secret put <NAME>`.
   //   DATABASE_URL, MONOBANK_TOKEN, MONOBANK_WEBHOOK_URL,
@@ -32,6 +41,10 @@
   //   TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
   "vars": {
     "PUBLIC_SITE_URL": "https://balier.ua",
+    // `from` address for order-confirmation emails. Not `PUBLIC_` — server-only,
+    // never sent to the client. See the `send_email` binding comment above:
+    // this does nothing until the domain is onboarded.
+    "ORDER_EMAIL_FROM": "noreply@balier.ua",
     // Telegram account the product page's «Замовити через Телеграм» deep-links
     // to. Public by definition — it ends up in an href. PLACEHOLDER: the real
     // manager account is a Phase 0 item and does not exist yet, so this handle

@@ -3,6 +3,7 @@ import type { APIRoute } from 'astro';
 import { createDb, createTxDb } from '~/lib/db';
 import { getCodLimitKopiykas, getReservationTtlMinutes } from '~/lib/db/queries/settings';
 import { createMonobankPayment } from '~/lib/monobank';
+import { createEmailNotifier } from '~/lib/notify/email';
 import { createTelegramNotifier } from '~/lib/notify/telegram';
 import { createOrder } from '~/lib/orders/create';
 import { createTurnstileCaptcha } from '~/lib/turnstile';
@@ -63,6 +64,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
       {
         payment: createMonobankPayment(env.MONOBANK_TOKEN),
         notifier: createTelegramNotifier(env.TELEGRAM_BOT_TOKEN, env.TELEGRAM_CHAT_ID),
+        email: createEmailNotifier(env.EMAIL, env.ORDER_EMAIL_FROM),
         redirectBaseUrl: new URL(request.url).origin,
         webhookUrl: new URL('/api/webhooks/monobank', new URL(request.url).origin).toString(),
         reservationTtlMinutes,

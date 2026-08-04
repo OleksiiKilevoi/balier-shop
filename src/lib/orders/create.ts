@@ -33,7 +33,15 @@ export interface CreateOrderInput {
 
 export interface CreateOrderDeps {
   payment: PaymentPort;
+  /** Manager-facing Telegram notifications. */
   notifier: NotifierPort;
+  /**
+   * Customer-facing order-confirmation email. Same `NotifierPort` shape as
+   * `notifier`, but its `orderCreated` only actually sends for `cod` — a card
+   * order isn't confirmed until `orderPaid` fires from the webhook (see
+   * `src/lib/notify/email.ts`).
+   */
+  email: NotifierPort;
   /**
    * Origin the customer's browser is actually on — e.g. `http://localhost:4321`
    * or `https://balier-dev.mykhailoshulezhko.workers.dev` — used to build the
@@ -221,6 +229,7 @@ export async function createOrder(
 
   if (input.paymentMethod === 'cod') {
     await deps.notifier.orderCreated({ order: created.order, items: created.items });
+    await deps.email.orderCreated({ order: created.order, items: created.items });
     return {
       ok: true,
       orderNumber: created.orderNumber,
@@ -262,6 +271,7 @@ export async function createOrder(
     if (!updatedOrder) throw new Error('order update returned no row');
 
     await deps.notifier.orderCreated({ order: updatedOrder, items: created.items });
+    await deps.email.orderCreated({ order: updatedOrder, items: created.items });
 
     return { ok: true, orderNumber: created.orderNumber, redirectUrl: invoice.pageUrl };
   } catch {

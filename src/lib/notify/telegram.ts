@@ -1,6 +1,6 @@
-import type { DeliveryMethod, Order, PaymentMethod } from '~/lib/db/schema';
 import { formatPrice } from '~/lib/money';
 import type { NotifierPort, OrderNotification } from '~/lib/ports';
+import { DELIVERY_METHOD_LABELS, deliveryDestination, PAYMENT_METHOD_LABELS } from './format';
 
 /**
  * Telegram Bot API adapter for `NotifierPort`. Sends into the manager chat the
@@ -11,24 +11,6 @@ import type { NotifierPort, OrderNotification } from '~/lib/ports';
  * outage never fails order placement (`docs/OVERVIEW.md`, "Turnstile,
  * Telegram, email").
  */
-
-const DELIVERY_METHOD_LABELS: Record<DeliveryMethod, string> = {
-  np_warehouse: 'Відділення Нової Пошти',
-  np_postomat: 'Поштомат',
-  np_courier: 'Кур’єром',
-};
-
-const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
-  card: 'Карткою онлайн',
-  cod: 'Готівкою при отриманні',
-};
-
-function deliveryDestination(order: Order): string {
-  if (order.deliveryMethod === 'np_courier') {
-    return [order.npSettlementName, order.npAddress].filter(Boolean).join(', ');
-  }
-  return [order.npSettlementName, order.npWarehouseName].filter(Boolean).join(', ');
-}
 
 export function formatOrderMessage(heading: string, notification: OrderNotification): string {
   const { order, items } = notification;
