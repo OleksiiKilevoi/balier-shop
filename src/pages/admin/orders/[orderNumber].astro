@@ -6,6 +6,7 @@ import { createDb, createTxDb } from '~/lib/db';
 import { findAdminOrder } from '~/lib/db/queries/orders';
 import {
   ADMIN_ORDER_MESSAGES,
+  ORDER_REVERT_FROM_REFUNDED_WARNING,
   ORDER_REVERT_HINTS,
   ORDER_REVERT_LABELS,
   ORDER_REVERT_PAYMENT_WARNING,
@@ -71,7 +72,7 @@ if (Astro.request.method === 'POST') {
     if (result.reason === 'not_found') {
       return new Response('Замовлення не знайдено', { status: 404 });
     }
-    return done(result.reason === 'stale' ? 'stale' : 'invalid_transition');
+    return done(result.reason);
   } finally {
     Astro.locals.cfContext.waitUntil(close());
   }
@@ -90,6 +91,7 @@ const message =
 /** The keys that report a refusal rather than a success. */
 const FAILURES = new Set<AdminOrderMessage>([
   'invalid_transition',
+  'insufficient_stock',
   'stale',
   'invalid_tracking_number',
   'bad_request',
@@ -102,6 +104,15 @@ const forward = transitions.filter(
 );
 const exits = transitions.filter((next) => next === 'cancelled' || next === 'refunded');
 const revertWarning = order && revert && revertCrossesPayment(order) ? ORDER_REVERT_PAYMENT_WARNING : null;
+const revertFromRefundedWarning =
+  order && revert && order.status === 'refunded' ? ORDER_REVERT_FROM_REFUNDED_WARNING : null;
+/**
+ * Undoing `cancelled`/`refunded` re-decrements stock and can fail — a real
+ * side effect, unlike the plain forward-chain revert — so it gets the same
+ * two-click disclosure gate as the exits it undoes, rather than sitting next
+ * to the ungated `packed`/`shipped`/`delivered` revert button.
+ */
+const leavingTerminal = order?.status === 'cancelled' || order?.status === 'refunded';
 ---
 
 <AdminLayout title={order ? `Замовлення ${order.orderNumber}` : 'Замовлення не знайдено'}>
@@ -169,9 +180,11 @@ const revertWarning = order && revert && revertCrossesPayment(order) ? ORDER_REV
               ))}
 
               {/* Undoing a wrong click, not a sale — no stock or reservation
-                  moves either way (see `revertTarget`'s doc), so unlike the
-                  exits below this needs no disclosure gate. */}
-              {revert && (
+                  moves, so unlike the exits below this needs no disclosure
+                  gate. Only ever rendered here for `packed`/`shipped`/
+                  `delivered`; leaving `cancelled`/`refunded` renders its own
+                  gated form below instead (`leavingTerminal`). */}
+              {revert && !leavingTerminal && (
                 <form method="post" action={selfUrl} class="mt-3">
                   <input type="hidden" name="intent" value="status" />
                   <input type="hidden" name="from" value={order.status} />
@@ -192,12 +205,33 @@ const revertWarning = order && revert && revertCrossesPayment(order) ? ORDER_REV
               )}
 
               {/* A disclosure rather than a confirm dialog: these are terminal
-                  and there is no script on this page. Two deliberate clicks. */}
-              {exits.length > 0 && (
+                  (or undo a terminal state, which re-touches stock the same way
+                  exiting it did) and there is no script on this page. Two
+                  deliberate clicks. */}
+              {(exits.length > 0 || (revert && leavingTerminal)) && (
                 <details class="border-line mt-4 border-t pt-4">
                   <summary class="text-ink-muted hover:text-ink min-h-touch flex cursor-pointer items-center text-sm">
                     Інші дії
                   </summary>
+                  {revert && leavingTerminal && (
+                    <form method="post" action={selfUrl} class="mt-3">
+                      <input type="hidden" name="intent" value="status" />
+                      <input type="hidden" name="from" value={order.status} />
+                      <input type="hidden" name="next" value={revert} />
+                      {ORDER_REVERT_HINTS[revert] && (
+                        <p class="text-ink-muted mb-2 text-sm">{ORDER_REVERT_HINTS[revert]}</p>
+                      )}
+                      {revertFromRefundedWarning && (
+                        <p class="text-ink-muted mb-2 text-sm">{revertFromRefundedWarning}</p>
+                      )}
+                      <button
+                        type="submit"
+                        class="border-line-strong text-ink hover:border-ink rounded-btn h-touch w-full cursor-pointer border px-6 text-sm font-medium sm:w-auto"
+                      >
+                        {ORDER_REVERT_LABELS[revert]}
+                      </button>
+                    </form>
+                  )}
                   {exits.map((next) => (
                     <form method="post" action={selfUrl} class="mt-3">
                       <input type="hidden" name="intent" value="status" />

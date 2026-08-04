@@ -193,6 +193,16 @@ export const orders = pgTable(
     updatedAt,
     paidAt: timestamp('paid_at', { withTimezone: true }),
     cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
+    /**
+     * The status this order held immediately before it became `cancelled` or
+     * `refunded` — written only by the admin panel's own write path
+     * (`~/lib/orders/updateStatus.ts`), never by the webhook or checkout's own
+     * cancellation paths (those only ever cancel from `pending`/
+     * `awaiting_payment`, which is never a useful revert target — see
+     * `~/lib/orders/status.ts`). `null` outside `cancelled`/`refunded`, and
+     * cleared back to `null` on a successful revert out of either.
+     */
+    statusBeforeExit: orderStatus('status_before_exit'),
   },
   (t) => [index('orders_status_idx').on(t.status), index('orders_created_at_idx').on(t.createdAt)],
 );

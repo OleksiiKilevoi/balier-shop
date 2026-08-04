@@ -13,25 +13,33 @@ import {
  * The admin panel's half of the order state machine. Worth testing on its own
  * because two of its rules are invisible at the call site and expensive to get
  * wrong: which target statuses the panel may never *produce as new* (`paid` —
- * the webhook is its only writer, except when reverting `packed` restores a
- * `paid`/`confirmed` the order already demonstrably passed through), and when
- * undoing an order has to put stock back.
+ * the webhook is its only writer, except when a revert restores a `paid`/
+ * `confirmed`/other `STOCK_COMMITTED` status the order already demonstrably
+ * passed through), and when undoing an order has to move stock, in which
+ * direction.
  */
 
 const ALL_STATUSES = orderStatus.enumValues;
 const METHODS: PaymentMethod[] = ['card', 'cod'];
+const STOCK_COMMITTED_STATUSES: OrderStatus[] = [
+  'confirmed',
+  'paid',
+  'packed',
+  'shipped',
+  'delivered',
+];
 
-function order(status: OrderStatus, paymentMethod: PaymentMethod) {
-  return { status, paymentMethod };
+function order(status: OrderStatus, paymentMethod: PaymentMethod, statusBeforeExit?: OrderStatus | null) {
+  return { status, paymentMethod, statusBeforeExit };
 }
 
 describe('allowedTransitions', () => {
-  it('offers `paid` in exactly one place: reverting a card order out of `packed`', () => {
+  it('offers `paid` in exactly one place among forward-chain statuses: reverting a card order out of `packed`', () => {
     // `docs/CONVENTIONS.md`: an order becomes paid only in the webhook handler.
     // This isn't the panel deciding an order is paid — a card order's only
     // forward path to `packed` was through the webhook's `paid`, so reverting
     // restores a status the order demonstrably already held.
-    for (const status of ALL_STATUSES) {
+    for (const status of STOCK_COMMITTED_STATUSES) {
       for (const method of METHODS) {
         const next = allowedTransitions(order(status, method));
         const shouldOffer = status === 'packed' && method === 'card';
@@ -40,8 +48,8 @@ describe('allowedTransitions', () => {
     }
   });
 
-  it('offers `confirmed` in exactly one place: reverting a cash order out of `packed`', () => {
-    for (const status of ALL_STATUSES) {
+  it('offers `confirmed` in exactly one place among forward-chain statuses: reverting a cash order out of `packed`', () => {
+    for (const status of STOCK_COMMITTED_STATUSES) {
       for (const method of METHODS) {
         const next = allowedTransitions(order(status, method));
         const shouldOffer = status === 'packed' && method === 'cod';
@@ -53,9 +61,11 @@ describe('allowedTransitions', () => {
   it('never offers `pending` or `awaiting_payment` — nothing before them is ever revertable', () => {
     for (const status of ALL_STATUSES) {
       for (const method of METHODS) {
-        const next = allowedTransitions(order(status, method));
-        expect(next).not.toContain('pending');
-        expect(next).not.toContain('awaiting_payment');
+        for (const statusBeforeExit of [...ALL_STATUSES, undefined, null]) {
+          const next = allowedTransitions(order(status, method, statusBeforeExit));
+          expect(next).not.toContain('pending');
+          expect(next).not.toContain('awaiting_payment');
+        }
       }
     }
   });
@@ -74,10 +84,24 @@ describe('allowedTransitions', () => {
     expect(allowedTransitions(order('delivered', 'cod'))).toEqual(['shipped', 'refunded']);
   });
 
-  it('offers nothing at all from a terminal status', () => {
+  it('offers nothing from `cancelled`/`refunded` when no eligible `statusBeforeExit` is recorded', () => {
     for (const method of METHODS) {
+      // Never recorded at all (e.g. an order cancelled outside the admin
+      // panel, by `create.ts`/`confirmPayment.ts` on a payment failure).
       expect(allowedTransitions(order('cancelled', method))).toEqual([]);
       expect(allowedTransitions(order('refunded', method))).toEqual([]);
+      // Recorded, but not `STOCK_COMMITTED` — nothing useful to go back to.
+      expect(allowedTransitions(order('cancelled', method, 'pending'))).toEqual([]);
+      expect(allowedTransitions(order('cancelled', method, 'awaiting_payment'))).toEqual([]);
+    }
+  });
+
+  it('offers exactly the recorded `statusBeforeExit` — nothing else — when it is `STOCK_COMMITTED`', () => {
+    for (const status of STOCK_COMMITTED_STATUSES) {
+      expect(allowedTransitions(order('cancelled', 'card', status))).toEqual([status]);
+      expect(allowedTransitions(order('refunded', 'card', status))).toEqual([status]);
+      expect(allowedTransitions(order('cancelled', 'cod', status))).toEqual([status]);
+      expect(allowedTransitions(order('refunded', 'cod', status))).toEqual([status]);
     }
   });
 
@@ -147,6 +171,13 @@ describe('canTransition', () => {
     expect(canTransition(order('packed', 'card'), 'confirmed')).toBe(false);
     expect(canTransition(order('packed', 'cod'), 'paid')).toBe(false);
   });
+
+  it('allows reverting `cancelled`/`refunded` only onto the exact recorded `statusBeforeExit`', () => {
+    expect(canTransition(order('refunded', 'card', 'paid'), 'paid')).toBe(true);
+    expect(canTransition(order('refunded', 'card', 'paid'), 'packed')).toBe(false);
+    expect(canTransition(order('cancelled', 'cod', 'confirmed'), 'confirmed')).toBe(true);
+    expect(canTransition(order('cancelled', 'cod', 'confirmed'), 'paid')).toBe(false);
+  });
 });
 
 describe('revertTarget', () => {
@@ -162,13 +193,27 @@ describe('revertTarget', () => {
     }
   });
 
-  it('has no target anywhere else', () => {
+  it('has no target for `packed`/`shipped`/`delivered`’s siblings', () => {
     for (const status of ALL_STATUSES) {
-      if (status === 'packed' || status === 'shipped' || status === 'delivered') continue;
+      if (['packed', 'shipped', 'delivered', 'cancelled', 'refunded'].includes(status)) continue;
       for (const method of METHODS) {
         expect(revertTarget(order(status, method))).toBeNull();
       }
     }
+  });
+
+  it('restores `statusBeforeExit` for `cancelled`/`refunded`, exactly when it is `STOCK_COMMITTED`', () => {
+    for (const status of ALL_STATUSES) {
+      const eligible = STOCK_COMMITTED_STATUSES.includes(status);
+      for (const terminal of ['cancelled', 'refunded'] as const) {
+        expect(revertTarget(order(terminal, 'card', status))).toBe(eligible ? status : null);
+      }
+    }
+  });
+
+  it('has no target for `cancelled`/`refunded` when nothing was recorded', () => {
+    expect(revertTarget(order('cancelled', 'card'))).toBeNull();
+    expect(revertTarget(order('refunded', 'card', null))).toBeNull();
   });
 });
 
@@ -187,6 +232,17 @@ describe('revertCrossesPayment', () => {
     expect(revertCrossesPayment(order('shipped', 'cod'))).toBe(false);
     expect(revertCrossesPayment(order('packed', 'card'))).toBe(false);
     expect(revertCrossesPayment(order('packed', 'cod'))).toBe(false);
+  });
+
+  it('is false reverting out of `cancelled`/`refunded`, for every recorded `statusBeforeExit`', () => {
+    // The target is always the exact status that decided which exit was
+    // offered in the first place, so it can never disagree with itself.
+    for (const status of STOCK_COMMITTED_STATUSES) {
+      for (const method of METHODS) {
+        expect(revertCrossesPayment(order('cancelled', method, status))).toBe(false);
+        expect(revertCrossesPayment(order('refunded', method, status))).toBe(false);
+      }
+    }
   });
 });
 

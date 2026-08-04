@@ -30,6 +30,7 @@ function order(overrides: Partial<Order> = {}): Order {
     updatedAt: new Date(),
     paidAt: null,
     cancelledAt: null,
+    statusBeforeExit: null,
     ...overrides,
   };
 }

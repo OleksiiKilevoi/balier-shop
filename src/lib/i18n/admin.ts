@@ -47,15 +47,19 @@ export const ORDER_TRANSITION_HINTS: Partial<Record<OrderStatus, string>> = {
  * *progress* going forward but as *undo* going back — «Позначити зібраним»
  * would be a strange thing to click while looking at a `shipped` order.
  *
- * `paid` and `confirmed` only ever appear here as the two faces of reverting
- * `packed` — never as a forward transition (`ORDER_TRANSITION_LABELS` has no
- * entry for either, on purpose).
+ * `paid` and `confirmed` appear here two ways: as the two faces of reverting
+ * `packed`, and as one of the possible landings when undoing a `cancelled`/
+ * `refunded` that started from `paid`/`confirmed` directly. Neither is ever a
+ * forward transition (`ORDER_TRANSITION_LABELS` has no entry for either, on
+ * purpose). `delivered` only appears here for the second case — undoing an
+ * exit taken from `delivered` — since nothing else ever reverts onto it.
  */
 export const ORDER_REVERT_LABELS: Partial<Record<OrderStatus, string>> = {
   paid: 'Повернути до «Оплачено»',
   confirmed: 'Повернути до «Підтверджено»',
   packed: 'Повернути до «Зібрано»',
   shipped: 'Повернути до «Відправлено»',
+  delivered: 'Повернути до «Доставлено»',
 };
 
 /**
@@ -78,12 +82,25 @@ export const ORDER_REVERT_HINTS: Partial<Record<OrderStatus, string>> = {
   paid: 'Оплату вже підтверджено Monobank раніше — це лише виправляє статус, гроші нікуди не звертаються.',
 };
 
+/**
+ * Shown whenever the revert button would move an order *out of* `refunded`,
+ * regardless of what it lands on (that varies with the order's own history —
+ * see `orders.statusBeforeExit`). Money for a genuinely refunded order has
+ * already left the business, by hand, in Monobank's dashboard — this button
+ * only corrects the record for an order marked refunded *before* that
+ * actually happened, and says so, so it is never mistaken for clawing money
+ * back automatically.
+ */
+export const ORDER_REVERT_FROM_REFUNDED_WARNING =
+  'Використовуйте, лише якщо кошти ще не повернено в Monobank. Ця дія не скасовує сам платіж — лише виправляє статус замовлення.';
+
 /** Result of a POST, carried back through the redirect so a refresh is harmless. */
 export const ADMIN_ORDER_MESSAGES = {
   status_updated: 'Статус замовлення оновлено.',
   ttn_updated: 'Номер накладної збережено.',
   ttn_cleared: 'Номер накладної видалено.',
   invalid_transition: 'Цей перехід недоступний для замовлення в такому статусі.',
+  insufficient_stock: 'Недостатньо товару на складі, щоб повернути це замовлення — частину вже продано.',
   stale: 'Замовлення вже змінилося — сторінку оновлено, спробуйте ще раз.',
   invalid_tracking_number: 'Номер накладної має складатися з 14 цифр.',
   bad_request: 'Не вдалося виконати дію.',

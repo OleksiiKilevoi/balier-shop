@@ -5,47 +5,58 @@
 ## 📍 CURRENT STATE (overwrite this block; keep tight)
 
 - **Last done:** **status revert on `/admin/orders/[orderNumber]`**, on report that a wrong click
-  was unrecoverable — done in two passes in the same session, the second widening the first after
-  a direct follow-up ask. `src/lib/orders/status.ts` gained `revertTarget(order)` (one step back, or
-  `null`) and `revertCrossesPayment(order)` (does the step change whether money counts as
-  collected); `allowedTransitions` now returns `[forward, back, exit].filter(...)` instead of
-  `[forward, exit]`.
-  - **Revert reaches `shipped → packed`, `delivered → shipped`, and — as of the second pass —
-    `packed → paid` (card) / `packed → confirmed` (cash on delivery).** The first pass stopped at
-    `packed`, reasoning that `paid`/`confirmed` are hard-off-limits (`docs/CONVENTIONS.md` hard rule
-    2: `paid` is the webhook's alone; `confirmed` is `create.ts`'s). Asked to extend it to
-    `packed → paid` anyway. The extension is still safe against that same rule, not an exception to
-    it: `FORWARD` maps only `paid` and `confirmed` to `packed` and nothing else does (confirmed by
-    grepping for any other write of `status: 'packed'` — there is none), so an order sitting at
-    `packed` necessarily passed through the one matching its payment method already. Reverting to it
-    restores a status the order demonstrably already held — a card order was verified paid by the
-    real webhook to get there — rather than the panel independently declaring one paid, which is the
-    thing hard rule 2 actually forbids. `revertTarget` picks the target by `paymentMethod` for
-    exactly this reason, so a cash order can never land on `paid` nor a card order on `confirmed`
-    (both directions verified live and unit-tested).
-  - **No stock or reservation ever moves on any revert.** `confirmed`/`paid`/`shipped`/`packed`/
-    `delivered` are all in `STOCK_COMMITTED`; moving among them doesn't touch `updateOrderStatus`'s
-    `undoing` branch at all (still keyed on `next === 'cancelled' || next === 'refunded'`, unchanged)
-    — so `updateStatus.ts` needed no edit for this feature at all.
-  - **Two informational notes, both conditional.** `ORDER_REVERT_PAYMENT_WARNING` shows only when
-    `revertCrossesPayment` is true — in practice only cash on delivery leaving `delivered`, since
-    money lands for COD on hand-off and nowhere else, so stepping back flips the exit button that
-    follows from «Повернено» to «Скасувати». `ORDER_REVERT_HINTS.paid` shows only on the `paid`
-    target, clarifying the button doesn't call Monobank — added because that's the one label where
-    "restoring a record" could be misread as "taking an action."
-  - Rendered as its own secondary-styled button (not inside the `<details>` disclosure the terminal
-    actions use) — undoing a click is corrective, not destructive, so it doesn't need the extra gate.
-    `ORDER_REVERT_LABELS` in `i18n/admin.ts` gives every revert target its own verb copy rather than
-    reusing `ORDER_TRANSITION_LABELS`, since the same status reads as *progress* from the forward
-    button and as *undo* from this one.
-  `pnpm check` (0 errors)/`pnpm test` (105/105, 8 new)/`pnpm build` clean, both passes. Verified live
-  against the real dev Neon DB, both passes, on `B260804-DAMN7` (card): first pass — reverted
-  `delivered → shipped → packed` (offered no further revert there at the time), forged
-  `packed → paid` refused, walked forward back to `delivered`. Second pass — walked back down to
-  `packed` again, forged the *other* payment method's target (`packed → confirmed` on this card
-  order) and confirmed it's still refused, then did the real `packed → paid` revert, confirmed `paid`
-  itself offers no further revert, and walked forward again to restore `delivered`. No stock change
-  at any step in either pass.
+  was unrecoverable — built in three passes in one session, each widening the last on a direct
+  follow-up ask. Final shape: `src/lib/orders/status.ts`'s `revertTarget(order)` (one step back, or
+  `null`) and `revertCrossesPayment(order)`; `allowedTransitions` folds `[forward, back, exit]`
+  instead of the old `[forward, exit]`, and terminal statuses (`cancelled`/`refunded`) now return
+  `[back]` or `[]` instead of always `[]`.
+  - **Pass 1 — the safe middle of the chain: `shipped → packed`, `delivered → shipped`.** No schema
+    change, no stock movement (both ends are already `STOCK_COMMITTED`), rendered as an ungated
+    secondary button next to the forward one.
+  - **Pass 2 — `packed → paid` (card) / `packed → confirmed` (cash on delivery).** Looked like it
+    broke hard rule 2 (`paid` is the webhook's alone) and was nearly built wrong for exactly that
+    reason on the first attempt — caught before it shipped. It's actually still safe: `FORWARD` maps
+    only `paid` and `confirmed` to `packed`, and nothing else ever writes `status: 'packed'`
+    (confirmed by grep), so an order sitting at `packed` necessarily already passed through whichever
+    one matches its `paymentMethod`. Reverting restores a status the order demonstrably held — a card
+    order was verified paid by the real webhook to get there — rather than the panel inventing one.
+    `revertTarget` picks by `paymentMethod` so the wrong method can never reach the other's landing
+    (verified live and unit-tested both directions). Still no schema change, still no stock movement.
+  - **Pass 3 — reverting out of `cancelled`/`refunded` entirely**, on the direct follow-up "can we
+    revert from refunded back to what it was." Needed real design discussion first (asked three
+    questions, all answered with the recommended option) because this one is qualitatively different
+    from passes 1–2: there was no record of what an order was *before* it became `cancelled`/
+    `refunded`, and reverting has to move stock in the direction nothing before this ever did.
+    - **Migration `0003`: `orders.status_before_exit` (nullable `order_status`).** Written by
+      `updateOrderStatus` only — never by `create.ts`'s or `confirmPayment.ts`'s own cancellations,
+      both of which only ever cancel from `pending`/`awaiting_payment`, and `revertTarget` only
+      honours the recording when it is `STOCK_COMMITTED`, so those stay correctly unrevertable (same
+      principle as `pending`/`awaiting_payment` in passes 1–2 — verified against the pre-migration
+      cancelled orders `L6NJG`/`LHB7A`, which correctly show no revert option since the column is
+      `null` on them). Cleared back to `null`, and `cancelledAt` back to `null`, on a successful
+      revert.
+    - **Stock now moves on both sides of a revert**, not just forward into `cancelled`/`refunded`:
+      leaving either re-decrements the same items, locked `FOR UPDATE` and checked against current
+      stock first — refused whole-transaction with a new `insufficient_stock` result/message if
+      another sale has since taken the units, rather than oversold. `updateOrderStatus` gained a
+      `leavingExit` branch alongside the existing `enteringExit` one for this.
+    - **Scoped to "correcting a mis-click before the real Monobank refund was sent," by explicit
+      answer** — reverting the *status* never un-sends money, since nothing in this codebase calls
+      Monobank to refund (that's manual, in Monobank's own dashboard, unchanged from how `refunded`
+      already worked). `ORDER_REVERT_FROM_REFUNDED_WARNING` says so on the button. This revert also
+      sits behind the same `<details>` disclosure as the cancel/refund buttons it undoes (unlike
+      passes 1–2's ungated button) — it has a real, possibly-failing side effect now, so it earns the
+      same two-click gate.
+  `pnpm check` (0 errors)/`pnpm test` (110/110, 13 new across all three passes)/`pnpm build` clean.
+  Verified live against the real dev Neon DB, all three passes, mostly on `B260804-DAMN7` (card):
+  pass 1 — `delivered → shipped → packed` and back. Pass 2 — `packed → paid`, the cross-payment-method
+  forgery (`packed → confirmed` on this card order) refused, walked forward back to `delivered`. Pass
+  3 — refunded `DAMN7` from `delivered` (stock 3 → 4, `statusBeforeExit: delivered`), reverted it back
+  (stock 4 → 3, `statusBeforeExit: null`); separately zeroed `SPACE`'s stock by hand mid-refund and
+  confirmed the revert was refused with `insufficient_stock` and nothing changed, then restored stock
+  and completed the revert for real; separately cancelled cod order `BYP3K` from `confirmed` (stock
+  11 → 12) and reverted it back (stock 12 → 11); confirmed the pre-migration cancelled orders
+  (`L6NJG`/`LHB7A`) still correctly show no revert option.
 - **Before that:** **the admin orders screen — Phase 4's second item.** `/admin/orders` (list) and
   `/admin/orders/[orderNumber]` (detail), behind the gate below, with the status transitions the
   order state machine allows and the Nova Poshta tracking number.
@@ -330,6 +341,30 @@
   walked back down to `packed`, forged `packed → confirmed` on this **card** order (refused), did
   the real `packed → paid` revert, confirmed `paid` offers no further revert, walked forward back to
   `delivered`. No stock change.
+- **Same session, second follow-up ask: "we also need to revert from refunded back to what it was."**
+  This one got a real design discussion first (three questions asked, all answered with the
+  recommended option) rather than a quick correction, because it's a different kind of change: no
+  existing column records what an order was before `cancelled`/`refunded`, and undoing either has to
+  move stock in the direction nothing before this needed to. Added migration `0003`
+  (`orders.status_before_exit`, nullable `order_status`), written by `updateOrderStatus` only —
+  `create.ts`/`confirmPayment.ts`'s own cancellations (always from `pending`/`awaiting_payment`) never
+  touch it, and `revertTarget` only honours the recording when it's `STOCK_COMMITTED`, so those stay
+  unrevertable on purpose, same as `pending`/`awaiting_payment` always have been. `updateOrderStatus`
+  gained a `leavingExit` branch that locks the relevant `product_variants` rows `FOR UPDATE`,
+  re-decrements them, and refuses the whole transaction with a new `insufficient_stock` result if any
+  unit has since been sold to someone else. Scoped explicitly to "correcting a mis-click before the
+  real Monobank refund was sent" — the button never un-sends money, since nothing here ever called
+  Monobank to refund in the first place; says so via `ORDER_REVERT_FROM_REFUNDED_WARNING`. This
+  revert sits behind the same `<details>` disclosure as the exits it undoes (unlike the ungated
+  packed/shipped/delivered revert above) since it now has a real, failable side effect.
+- Verified again: `pnpm check`/`pnpm test` (110/110, 5 more)/`pnpm build` clean, migration applied to
+  the real dev Neon DB. Live: refunded `DAMN7` from `delivered` (SPACE stock 3 → 4,
+  `statusBeforeExit: delivered`), reverted it back (4 → 3, `statusBeforeExit: null`); zeroed SPACE's
+  stock by hand mid-refund and confirmed the revert was refused with `insufficient_stock`, order and
+  stock untouched, then restored stock and completed the revert for real; cancelled cod order `BYP3K`
+  from `confirmed` (stock 11 → 12) and reverted it back (12 → 11); confirmed pre-migration cancelled
+  orders `L6NJG`/`LHB7A` still correctly show no revert option (`statusBeforeExit` is `null` on rows
+  that predate the column).
 - Next: unchanged — the rest of Phase 4 (products/content management, image upload, the COD limit).
 
 ### 2026-08-04 — Phase 4, part 2: the admin orders screen
