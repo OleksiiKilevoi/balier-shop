@@ -4,7 +4,30 @@
 
 ## 📍 CURRENT STATE (overwrite this block; keep tight)
 
-- **Last done:** **the admin panel has a typeface: Geist.** On request, and it reverses the "no web
+- **Last done:** **the status filter on `/admin/orders` is a select, in the search row.** It was a
+  row of nine pills that had to scroll sideways on a phone and ate a third of the first screen; it is
+  now one `<select name="status">` (Усі статуси + the ten `orderStatus` values) sitting in the same
+  GET form as the search box, so both halves of the view are chosen in one place and applied in one
+  submit. `statusHref`, `filterTabs` and the hidden `status` input are gone with it, and `page` still
+  resets on a new filter for free — a form submit only carries the form's own fields.
+  - **The one behaviour that changed, deliberately: the filter applies on «Знайти», not on click.**
+    Auto-submitting a `<select>` needs a script, and the theme switch is the panel's only sanctioned
+    exception; flagged at the time and left as a plain form.
+  - New `admin-select` utility — `admin-field`'s pill plus end-padding for a chevron the markup draws
+    as a sibling `<svg>` in `currentColor`. A `select` cannot render `::after`, and `appearance: none`
+    (inherited from `admin-field`, and required for the two controls to match) takes the native arrow
+    away; `currentColor` rather than a background image is what makes it follow the theme.
+  - Markup and CSS only — no route, query, schema or validation touched.
+  `pnpm check` (0 errors)/`pnpm test` (110/110, untouched)/`pnpm build` clean, with `admin-select`
+  confirmed present in the built `AdminLayout.*.css` rather than assumed compiled. Verified against
+  the dev server on the real dev Neon DB by reading the rendered HTML: `?status=packed&q=DAMN` comes
+  back with `selected` on `packed`, all ten options, and zero `?status=` links left anywhere on the
+  page. **Not eyeballed in a browser** — no CDP tool was attached this session, so unlike every entry
+  below this one the pixels are unverified.
+  - Committed as `5d0968b`, which also carries two edits made outside this change: `packed`'s label
+    is now «Упаковано» (was «Зібрано») in both `ORDER_STATUS_LABELS` and `ORDER_REVERT_LABELS`, and
+    `admin-badge` went 0.75rem → 0.8rem.
+- **Before that:** **the admin panel has a typeface: Geist.** On request, and it reverses the "no web
   font at all" decision two entries below — deliberately, and the reason that decision was made still
   holds: Geist is a neutral interface grotesque with a real Cyrillic cut, so it carries no business's
   brand and survives the lift into the next project, which is the same test the accent has to pass.
@@ -30,7 +53,7 @@
   all six faces `loaded`, computed `font-family` on `<body>`/`<h1>` resolving through `--font-geist`,
   Cyrillic measuring differently from Arial (so not silently falling back), and the orders list
   eyeballed at 1280 light *and* dark plus 320 (`cssContentSize.width` 320, no overflow).
-- **Before that:** **a light/dark switch in the admin header, and the panel's first client-side
+- **Earlier:** **a light/dark switch in the admin header, and the panel's first client-side
   JavaScript.** **Two states, light and dark**, flipped by one icon button and remembered in
   `localStorage`. **This retires the panel's "no client-side JavaScript at all" property**,
   deliberately and with the trade named: a chosen theme has to survive a page load, and nothing but
@@ -400,7 +423,8 @@
   via `storeImage`, and the **cash-on-delivery limit** (`settings.cod_limit` is read at checkout
   already; nothing writes it). All three are developed against `pnpm dev`, which bypasses the gate,
   and all three should be built out of `src/styles/admin.css`'s utilities (`admin-btn*`,
-  `admin-icon-btn`, `admin-field`, `admin-card`, `admin-badge`, `admin-tone-*`) — a storefront token
+  `admin-icon-btn`, `admin-field`, `admin-select`, `admin-card`, `admin-badge`, `admin-tone-*`) — a
+  storefront token
   appearing under `/admin` is now a bug, not a shortcut, and `source(none)` means it would silently
   compile to nothing anyway. Colours go in as `light-dark()` pairs on a token; nothing should read
   `prefers-color-scheme` directly, or it will ignore the theme switch. The no-script rule still
@@ -436,8 +460,9 @@
   - `PUBLIC_TELEGRAM_MANAGER` in `wrangler.jsonc` is a **placeholder handle**.
   - ~~`DATABASE_URL` missing as a Worker secret~~ — resolved; it is set, and as of 2026-08-04 so are
     the other five runtime secrets.
-- **Active branch:** `main` (only branch; tracks `origin/main`), pushed at `25457fc`; the orders
-  screen above is uncommitted working-tree changes on top of it.
+- **Active branch:** `main` (only branch; tracks `origin/main`). Working tree clean; local `main` is
+  at `5d0968b` and **one commit ahead of `origin/main` (`c144535`) — the select above is not pushed,
+  so it is not deployed.**
   A push to `main` deploys (Workers Builds is connected to `mykhailoshulezhko/balier`, production
   branch `main`, build `pnpm run build`, deploy `npx wrangler deploy`).
 
@@ -460,6 +485,29 @@
 ---
 
 ## 🗒️ SESSION LOG (newest first; 3–6 lines each)
+
+### 2026-08-04 — the orders status filter becomes a select
+
+- Did, on request ("the status filter is a list of items in a long row, transform it into a good
+  looking select and put it on the same row that search is in"): the nine-pill `<nav>` on
+  `/admin/orders` is now a `<select name="status">` inside the existing search form. `statusHref`,
+  `filterTabs` and the hidden `status` input deleted; form widened `max-w-xl → max-w-3xl` to hold
+  three controls, stacking to a column under `sm`.
+- Decisions: **`page` is left to reset itself** — a GET submit only carries the form's own fields, so
+  the old explicit `delete('page')` had nothing left to do. **The chevron is a sibling `<svg>` in
+  `currentColor`**, not a background image, because `appearance: none` (needed for the select to
+  match the input) removes the native arrow and `select::after` is not rendered — and a baked-in
+  image could not follow the theme. New `admin-select` utility carries only the end-padding, the
+  cursor and `text-overflow`.
+- **Named the one regression rather than silently fixing it with script:** the pills applied on
+  click, the select applies on «Знайти». `onchange`-submit would be a second exception to the panel's
+  no-JavaScript rule, and that is the user's call, not a default.
+- Verified: `pnpm check` (0 errors)/`pnpm test` (110/110, untouched — markup and CSS)/`pnpm build`
+  clean, with `admin-select` grepped out of the built `AdminLayout.*.css` rather than assumed. Dev
+  server against the real dev Neon DB: `?status=packed&q=DAMN` renders `selected` on `packed`, all
+  ten options, no `?status=` link left on the page. **No browser pass** — no CDP tool attached this
+  session, so the layout is unverified visually.
+- Next: unchanged — the rest of Phase 4 (products/content management, image upload, the COD limit).
 
 ### 2026-08-04 — the admin panel gets a typeface: Geist
 
