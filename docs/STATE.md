@@ -5,41 +5,47 @@
 ## 📍 CURRENT STATE (overwrite this block; keep tight)
 
 - **Last done:** **status revert on `/admin/orders/[orderNumber]`**, on report that a wrong click
-  was unrecoverable. `src/lib/orders/status.ts` gained `revertTarget(status)` (a step back, or
+  was unrecoverable — done in two passes in the same session, the second widening the first after
+  a direct follow-up ask. `src/lib/orders/status.ts` gained `revertTarget(order)` (one step back, or
   `null`) and `revertCrossesPayment(order)` (does the step change whether money counts as
   collected); `allowedTransitions` now returns `[forward, back, exit].filter(...)` instead of
   `[forward, exit]`.
-  - **Revert only goes as far back as `packed`: `shipped → packed`, `delivered → shipped`.**
-    `packed` itself has no revert target. Reason found while implementing, not assumed going in:
-    the natural predecessor of `packed` is `paid` or `confirmed`, and `docs/CONVENTIONS.md` hard
-    rule 2 (`paid` is the webhook's alone) plus `status.ts`'s existing comment (`confirmed` belongs
-    to `create.ts`) both forbid the panel from ever producing either — a revert button that could
-    set `paid` would be exactly the forging bug the whole state machine exists to prevent. Caught
-    this mid-implementation (first draft made `packed`'s predecessor payment-method-dependent,
-    `paid` for card / `confirmed` for cod) before it reached code, corrected before writing
-    `allowedTransitions`.
-  - **No stock or reservation ever moves on a revert.** `shipped`/`packed`/`delivered` are all in
-    `STOCK_COMMITTED`; moving between them doesn't touch `updateOrderStatus`'s `undoing` branch at
-    all (that branch is still keyed on `next === 'cancelled' || next === 'refunded'`, unchanged) —
-    so `updateStatus.ts` needed no edit for this.
-  - **One case needs a warning: cash-on-delivery leaving `delivered`.** Money lands for COD only at
-    `delivered` (the carrier collects on handoff), so reverting to `shipped` flips "has the money
-    arrived?" from yes to no — and the exit button that follows silently changes from «Повернено» to
-    «Скасувати». `revertCrossesPayment` is generic (compares `moneyCollected` before/after), not a
-    hardcoded cod/delivered check, and the panel shows `ORDER_REVERT_PAYMENT_WARNING` under the
-    button only when it's true. Card never trips it — every status from `paid` on already counts as
-    collected. Decided by asking first (two questions: scope of what's revertible, and whether to
-    warn), not guessed.
+  - **Revert reaches `shipped → packed`, `delivered → shipped`, and — as of the second pass —
+    `packed → paid` (card) / `packed → confirmed` (cash on delivery).** The first pass stopped at
+    `packed`, reasoning that `paid`/`confirmed` are hard-off-limits (`docs/CONVENTIONS.md` hard rule
+    2: `paid` is the webhook's alone; `confirmed` is `create.ts`'s). Asked to extend it to
+    `packed → paid` anyway. The extension is still safe against that same rule, not an exception to
+    it: `FORWARD` maps only `paid` and `confirmed` to `packed` and nothing else does (confirmed by
+    grepping for any other write of `status: 'packed'` — there is none), so an order sitting at
+    `packed` necessarily passed through the one matching its payment method already. Reverting to it
+    restores a status the order demonstrably already held — a card order was verified paid by the
+    real webhook to get there — rather than the panel independently declaring one paid, which is the
+    thing hard rule 2 actually forbids. `revertTarget` picks the target by `paymentMethod` for
+    exactly this reason, so a cash order can never land on `paid` nor a card order on `confirmed`
+    (both directions verified live and unit-tested).
+  - **No stock or reservation ever moves on any revert.** `confirmed`/`paid`/`shipped`/`packed`/
+    `delivered` are all in `STOCK_COMMITTED`; moving among them doesn't touch `updateOrderStatus`'s
+    `undoing` branch at all (still keyed on `next === 'cancelled' || next === 'refunded'`, unchanged)
+    — so `updateStatus.ts` needed no edit for this feature at all.
+  - **Two informational notes, both conditional.** `ORDER_REVERT_PAYMENT_WARNING` shows only when
+    `revertCrossesPayment` is true — in practice only cash on delivery leaving `delivered`, since
+    money lands for COD on hand-off and nowhere else, so stepping back flips the exit button that
+    follows from «Повернено» to «Скасувати». `ORDER_REVERT_HINTS.paid` shows only on the `paid`
+    target, clarifying the button doesn't call Monobank — added because that's the one label where
+    "restoring a record" could be misread as "taking an action."
   - Rendered as its own secondary-styled button (not inside the `<details>` disclosure the terminal
     actions use) — undoing a click is corrective, not destructive, so it doesn't need the extra gate.
-    `ORDER_REVERT_LABELS` in `i18n/admin.ts` gives it its own verb copy («Повернути до «Зібрано»»)
-    rather than reusing `ORDER_TRANSITION_LABELS`, since the same target status reads as *progress*
-    from the forward button and as *undo* from this one.
-  `pnpm check` (0 errors)/`pnpm test` (102/102, 5 new)/`pnpm build` clean. Verified live against the
-  real dev Neon DB on `B260804-DAMN7` (card, `delivered`): reverted to `shipped`, then to `packed`
-  (button correctly offered no further revert), forged `packed → paid` refused with
-  `invalid_transition` exactly as before, then walked forward again (`packed → shipped →
-  delivered`) to leave the order as it was. No stock change at any step, as expected.
+    `ORDER_REVERT_LABELS` in `i18n/admin.ts` gives every revert target its own verb copy rather than
+    reusing `ORDER_TRANSITION_LABELS`, since the same status reads as *progress* from the forward
+    button and as *undo* from this one.
+  `pnpm check` (0 errors)/`pnpm test` (105/105, 8 new)/`pnpm build` clean, both passes. Verified live
+  against the real dev Neon DB, both passes, on `B260804-DAMN7` (card): first pass — reverted
+  `delivered → shipped → packed` (offered no further revert there at the time), forged
+  `packed → paid` refused, walked forward back to `delivered`. Second pass — walked back down to
+  `packed` again, forged the *other* payment method's target (`packed → confirmed` on this card
+  order) and confirmed it's still refused, then did the real `packed → paid` revert, confirmed `paid`
+  itself offers no further revert, and walked forward again to restore `delivered`. No stock change
+  at any step in either pass.
 - **Before that:** **the admin orders screen — Phase 4's second item.** `/admin/orders` (list) and
   `/admin/orders/[orderNumber]` (detail), behind the gate below, with the status transitions the
   order state machine allows and the Nova Poshta tracking number.
@@ -308,6 +314,22 @@
   (correctly offered no further revert), a forged `packed → paid` still refused with
   `invalid_transition`, then walked forward again to `delivered` to restore it. No stock change at
   any step.
+- **Same session, follow-up ask: "we need an option to go from packed back to paid."** Re-examined
+  whether that's actually the forgery hard rule 2 forbids, rather than assuming it is because it
+  looked that way five minutes earlier. It isn't: `FORWARD` maps only `paid` and `confirmed` to
+  `packed`, and nothing else ever writes `status: 'packed'` (checked by grep) — so an order at
+  `packed` necessarily already passed through whichever one matches its `paymentMethod`. Reverting
+  restores a status the order demonstrably held, verified by the real webhook for card orders, not
+  the panel inventing one. Extended `revertTarget` to pick `paid`/`confirmed` for `packed` by
+  payment method (confirmed by asking one more scoping question first: should cod get the parallel
+  `packed → confirmed` too — yes), added `ORDER_REVERT_HINTS.paid` so the button can't be misread as
+  re-touching Monobank, and rewrote the now-inverted test (`allowedTransitions` used to assert `paid`
+  is *never* offered; now asserts it's offered in exactly the one place, and confirmed cross-checked
+  that the wrong payment method can never reach the other's target).
+- Verified again: `pnpm check`/`pnpm test` (105/105, 3 more)/`pnpm build` clean. Live, same order:
+  walked back down to `packed`, forged `packed → confirmed` on this **card** order (refused), did
+  the real `packed → paid` revert, confirmed `paid` offers no further revert, walked forward back to
+  `delivered`. No stock change.
 - Next: unchanged — the rest of Phase 4 (products/content management, image upload, the COD limit).
 
 ### 2026-08-04 — Phase 4, part 2: the admin orders screen

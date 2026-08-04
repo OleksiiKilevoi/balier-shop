@@ -6,6 +6,7 @@ import { createDb, createTxDb } from '~/lib/db';
 import { findAdminOrder } from '~/lib/db/queries/orders';
 import {
   ADMIN_ORDER_MESSAGES,
+  ORDER_REVERT_HINTS,
   ORDER_REVERT_LABELS,
   ORDER_REVERT_PAYMENT_WARNING,
   ORDER_STATUS_LABELS,
@@ -95,7 +96,7 @@ const FAILURES = new Set<AdminOrderMessage>([
 ]);
 
 const transitions = order ? allowedTransitions(order) : [];
-const revert = order ? revertTarget(order.status) : null;
+const revert = order ? revertTarget(order) : null;
 const forward = transitions.filter(
   (next) => next !== 'cancelled' && next !== 'refunded' && next !== revert,
 );
@@ -175,6 +176,9 @@ const revertWarning = order && revert && revertCrossesPayment(order) ? ORDER_REV
                   <input type="hidden" name="intent" value="status" />
                   <input type="hidden" name="from" value={order.status} />
                   <input type="hidden" name="next" value={revert} />
+                  {ORDER_REVERT_HINTS[revert] && (
+                    <p class="text-ink-muted mb-2 text-sm">{ORDER_REVERT_HINTS[revert]}</p>
+                  )}
                   {revertWarning && (
                     <p class="text-ink-muted mb-2 text-sm">{revertWarning}</p>
                   )}

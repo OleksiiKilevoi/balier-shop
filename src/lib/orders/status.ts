@@ -12,22 +12,21 @@ import type { OrderStatus, PaymentMethod } from '~/lib/db/schema';
  *   pending → awaiting_payment → paid → packed → shipped → delivered
  *   pending → confirmed → packed → shipped → delivered     (cash on delivery)
  *
- * Two entries in that list are deliberately unreachable from here, in either
- * direction:
+ * `paid` and `confirmed` are never *forward* targets from here — only the
+ * Monobank webhook may set `paid` (`docs/CONVENTIONS.md`, hard rule 2), and only
+ * `./create.ts` sets `confirmed` when the order is placed. A button that
+ * produced either as a fresh transition would be forging a payment or an order.
  *
- *  - **`paid` is never a legal target.** Only the Monobank webhook may set it
- *    (`docs/CONVENTIONS.md`, hard rule 2) — a button that marks an order paid is
- *    a button that forges a payment. There is a test asserting no reachable
- *    state offers it.
- *  - **`awaiting_payment` and `confirmed` are never targets either.** They are
- *    written by `./create.ts` as part of placing the order; there is nothing for
- *    an operator to do that should produce them afterwards.
- *
- * That is why undoing a wrong click (`revertTarget`) only goes as far back as
- * `packed`: `shipped → packed` and `delivered → shipped` are both statuses the
- * panel itself set, so stepping back onto one is admitting a mistake, not
- * producing anything new. `packed` itself has no revert target — its
- * predecessor is `paid` or `confirmed`, both off-limits for the reasons above.
+ * They *are* legal **revert** targets, but only from exactly one place each,
+ * because `FORWARD` maps both of them to `packed` and nothing else does: a
+ * card order can only have reached `packed` by first passing through the
+ * webhook's `paid`, and a cash order can only have reached `packed` by first
+ * passing through `create.ts`'s `confirmed`. So `revertTarget('packed', …)`
+ * is never inventing a status — it is restoring the one that got the order
+ * there in the first place, picked by `paymentMethod` since the two payment
+ * methods diverge at exactly this point. `awaiting_payment` and `pending`
+ * stay unreachable in every direction: nothing before `paid`/`confirmed` is
+ * ever revertable, because the panel has no earlier foothold to restore from.
  */
 
 /**
@@ -83,15 +82,22 @@ function moneyCollected(status: OrderStatus, paymentMethod: PaymentMethod): bool
 
 /**
  * The single step backward from each status, or `null` where undoing is not
- * offered. Deliberately shallow — see the module doc for why `packed` has no
- * entry: its predecessor is `paid` or `confirmed`, and the panel may never
- * produce either.
+ * offered.
  *
- * Depends only on `status`, not `paymentMethod`: both payment methods reach
- * `shipped`/`delivered` through the same last two links of the chain.
+ * `packed`'s target depends on `paymentMethod` — see the module doc: a card
+ * order's only path to `packed` was through the webhook's `paid`, a cash
+ * order's only path was through `create.ts`'s `confirmed`, and reverting
+ * restores whichever one actually happened rather than guessing. `shipped`
+ * and `delivered` don't need the split — both payment methods reach them
+ * through the same last two links of the chain.
  */
-export function revertTarget(status: OrderStatus): OrderStatus | null {
-  switch (status) {
+export function revertTarget(order: {
+  status: OrderStatus;
+  paymentMethod: PaymentMethod;
+}): OrderStatus | null {
+  switch (order.status) {
+    case 'packed':
+      return order.paymentMethod === 'cod' ? 'confirmed' : 'paid';
     case 'shipped':
       return 'packed';
     case 'delivered':
@@ -117,7 +123,7 @@ export function revertCrossesPayment(order: {
   status: OrderStatus;
   paymentMethod: PaymentMethod;
 }): boolean {
-  const target = revertTarget(order.status);
+  const target = revertTarget(order);
   if (!target) return false;
   return (
     moneyCollected(order.status, order.paymentMethod) && !moneyCollected(target, order.paymentMethod)
@@ -133,8 +139,8 @@ export function revertCrossesPayment(order: {
  * that was paid for must not be quietly *cancelled* with the money still held.
  * Both return committed stock; see `isStockCommitted`. The step back returns
  * neither — it only ever moves within `STOCK_COMMITTED`, so nothing to put
- * back or release either way (see `revertTarget`'s doc for why it never goes
- * further than `packed`).
+ * back or release either way (see `revertTarget`'s doc for how far back it
+ * goes and why that's still safe for `paid`/`confirmed`).
  */
 export function allowedTransitions(order: {
   status: OrderStatus;
@@ -143,7 +149,7 @@ export function allowedTransitions(order: {
   if (TERMINAL.has(order.status)) return [];
 
   const forward = FORWARD[order.status];
-  const back = revertTarget(order.status);
+  const back = revertTarget(order);
   const exit: OrderStatus = moneyCollected(order.status, order.paymentMethod)
     ? 'refunded'
     : 'cancelled';

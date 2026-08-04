@@ -46,8 +46,14 @@ export const ORDER_TRANSITION_HINTS: Partial<Record<OrderStatus, string>> = {
  * reusing `ORDER_TRANSITION_LABELS`, since the same target status reads as
  * *progress* going forward but as *undo* going back — «Позначити зібраним»
  * would be a strange thing to click while looking at a `shipped` order.
+ *
+ * `paid` and `confirmed` only ever appear here as the two faces of reverting
+ * `packed` — never as a forward transition (`ORDER_TRANSITION_LABELS` has no
+ * entry for either, on purpose).
  */
 export const ORDER_REVERT_LABELS: Partial<Record<OrderStatus, string>> = {
+  paid: 'Повернути до «Оплачено»',
+  confirmed: 'Повернути до «Підтверджено»',
   packed: 'Повернути до «Зібрано»',
   shipped: 'Повернути до «Відправлено»',
 };
@@ -60,6 +66,17 @@ export const ORDER_REVERT_LABELS: Partial<Record<OrderStatus, string>> = {
  */
 export const ORDER_REVERT_PAYMENT_WARNING =
   'Товар вважатиметься ще не отриманим — накладений платіж надходить лише при видачі. «Скасувати» з’явиться замість «Повернено».';
+
+/**
+ * A per-target note under the revert button, for the one case where the
+ * button's own label could be misread as an action rather than a correction:
+ * «Повернути до «Оплачено»» only ever appears for a card order stepping back
+ * out of `packed`, where the webhook already collected the money — this says
+ * so, so it isn't mistaken for re-charging or re-verifying anything.
+ */
+export const ORDER_REVERT_HINTS: Partial<Record<OrderStatus, string>> = {
+  paid: 'Оплату вже підтверджено Monobank раніше — це лише виправляє статус, гроші нікуди не звертаються.',
+};
 
 /** Result of a POST, carried back through the redirect so a refresh is harmless. */
 export const ADMIN_ORDER_MESSAGES = {
