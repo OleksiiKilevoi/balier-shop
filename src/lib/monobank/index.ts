@@ -5,15 +5,18 @@ import type { CreateInvoiceInput, Invoice, InvoiceStatus, PaymentPort } from '~/
 /**
  * Monobank Acquiring adapter. https://api.monobank.ua/docs/acquiring.html
  *
- * `verifyWebhook`'s signature format is the one detail this file could not
- * confirm against live documentation while planning (the docs page is a
- * JS-rendered SPA that returned only navigation, no schema). Monobank's own
- * sample verification code (Java/PHP) reads an ASN.1 DER-encoded ECDSA
- * signature, but Web Crypto's `ECDSA` verify only accepts raw IEEE-P1363
- * (r‖s) signatures — so this converts DER to raw, and also accepts an
- * already-raw 64-byte signature in case the header turns out not to be DER
- * after all. **This needs confirming against a real captured webhook before
- * it's trusted** — see `docs/STATE.md`.
+ * `verifyWebhook`'s wire formats could not be confirmed against live
+ * documentation while planning (the docs page is a JS-rendered SPA that
+ * returned only navigation, no schema), so both are handled defensively:
+ *
+ *  - **public key** — `GET /pubkey` returns `key` as base64 of a PEM document,
+ *    *not* of the DER bytes. Confirmed live 2026-08-04, after every real
+ *    webhook had been silently 403ing; `normalizePublicKey` unwraps it.
+ *  - **signature** — Monobank's own sample verification code (Java/PHP) reads
+ *    an ASN.1 DER-encoded ECDSA signature, but Web Crypto's `ECDSA` verify only
+ *    accepts raw IEEE-P1363 (r‖s), so `normalizeSignature` converts DER to raw
+ *    and passes an already-raw 64-byte signature through. Still unconfirmed
+ *    against a real captured webhook — see `docs/STATE.md`.
  */
 
 const BASE_URL = 'https://api.monobank.ua/api/merchant/';
@@ -76,7 +79,7 @@ export function createMonobankPayment(token: string): PaymentPort {
         // lib.dom.d.ts strictness bump, not a real runtime concern here.
         const publicKey = await crypto.subtle.importKey(
           'spki',
-          base64ToBytes(pubkeyBase64) as BufferSource,
+          normalizePublicKey(base64ToBytes(pubkeyBase64)) as BufferSource,
           { name: 'ECDSA', namedCurve: CURVE },
           false,
           ['verify'],
@@ -103,6 +106,27 @@ function base64ToBytes(base64: string): Uint8Array {
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
   return bytes;
+}
+
+/**
+ * `GET /pubkey` returns `key` as base64 of a **PEM document**, not of the DER
+ * bytes — confirmed live against the real API: the decoded payload starts with
+ * `0x2d` (`-`), i.e. `-----BEGIN PUBLIC KEY-----`. Web Crypto's `importKey`
+ * with format `spki` wants the DER, so unwrap the PEM armour and decode the
+ * body. A payload that is already DER (`SEQUENCE`, `0x30`) passes through, the
+ * same defensive shape `normalizeSignature` uses.
+ */
+function normalizePublicKey(bytes: Uint8Array): Uint8Array {
+  if (bytes[0] === 0x30) return bytes;
+
+  const pem = new TextDecoder().decode(bytes);
+  const body = pem
+    .replace(/-----BEGIN [^-]+-----/, '')
+    .replace(/-----END [^-]+-----/, '')
+    .replace(/\s+/g, '');
+
+  if (!body) throw new Error('pubkey is neither DER nor PEM');
+  return base64ToBytes(body);
 }
 
 /** Passes an already-raw r‖s signature through; converts a DER one. */

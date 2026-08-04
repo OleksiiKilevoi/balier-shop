@@ -11,11 +11,18 @@ import { createMonobankPayment } from './index';
  * check the implementation against itself.
  */
 
-function stubPubkeyFetch(publicKey: KeyObject): void {
-  const der = (publicKey.export({ type: 'spki', format: 'der' }) as Buffer).toString('base64');
+/**
+ * Mirrors the real API: `key` is base64 of a **PEM document** (confirmed live —
+ * the decoded bytes start with `-----BEGIN PUBLIC KEY-----`). The earlier
+ * version of this helper returned base64 of the DER, which made the suite agree
+ * with a broken implementation and let every real webhook 403 in production.
+ */
+function stubPubkeyFetch(publicKey: KeyObject, format: 'pem' | 'der' = 'pem'): void {
+  const exported = publicKey.export({ type: 'spki', format }) as Buffer | string;
+  const key = Buffer.from(exported).toString('base64');
   vi.stubGlobal(
     'fetch',
-    vi.fn(async () => new Response(JSON.stringify({ key: der }), { status: 200 })),
+    vi.fn(async () => new Response(JSON.stringify({ key }), { status: 200 })),
   );
 }
 
@@ -27,6 +34,20 @@ describe('verifyWebhook', () => {
   it('accepts a valid DER-encoded ECDSA signature over the raw body', async () => {
     const { publicKey, privateKey } = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
     stubPubkeyFetch(publicKey);
+
+    const body = JSON.stringify({ invoiceId: 'abc', status: 'success' });
+    const signature = nodeSign('sha256', Buffer.from(body), {
+      key: privateKey,
+      dsaEncoding: 'der',
+    }).toString('base64');
+
+    const payment = createMonobankPayment('test-token');
+    await expect(payment.verifyWebhook(body, signature)).resolves.toBe(true);
+  });
+
+  it('also accepts a pubkey delivered as bare DER rather than PEM', async () => {
+    const { publicKey, privateKey } = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+    stubPubkeyFetch(publicKey, 'der');
 
     const body = JSON.stringify({ invoiceId: 'abc', status: 'success' });
     const signature = nodeSign('sha256', Buffer.from(body), {
