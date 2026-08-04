@@ -14,30 +14,38 @@
   `/admin/**` and `/api/admin/**`; the identity lands on `Astro.locals.admin`. Also added, so the
   gate has something real to protect: `src/layouts/AdminLayout.astro` (its own shell — the panel must
   not inherit storefront chrome) and a placeholder `src/pages/admin/index.astro`.
-  - **Cloudflare Access itself cannot be configured yet, and this is a blocker, not an oversight.**
-    An Access application needs a hostname on a zone in the Cloudflare account, and `*.workers.dev`
-    cannot be one — so `balier-dev.mykhailoshulezhko.workers.dev` cannot sit behind Access at all.
-    Same root cause as the Email Sending blocker: no domain on this account. The gate is therefore
-    written to **fail closed** — unconfigured means deny, not allow — and the deployed Worker now
-    answers 403 to every `/admin` request, ours included. That is the intended failure direction,
-    and it is exactly why `docs/CONVENTIONS.md` asks for this check in the app rather than trusting
-    edge configuration: the Worker is reachable on a URL no Access policy covers.
+  - **The Cloudflare side is live too**, because `mlosko.dev` was bought mid-session and cleared the
+    blocker (see the entry below). Zero Trust team `mlosko`, a self-hosted application over the dev
+    Worker's custom domain, and **One-time PIN** as the login method.
+  - **Login is one-time PIN, deliberately.** A new Zero Trust org ships with a *Cloudflare*
+    identity provider as its only login method, which would have forced the client and every future
+    admin to hold a Cloudflare account. OTP was added instead (Zero Trust → Integrations → Identity
+    providers): the admin types their email, gets a 6-digit code, and is in — no account anywhere,
+    nothing to connect the client to. **Nothing in the app changed for this**: the gate verifies the
+    JWT, and which identity provider minted it is invisible to us. Adding admins later is adding
+    email addresses to the Allow policy; free tier covers 50.
+  - **The gate fails closed** — unconfigured means deny, not allow. That is what made it safe to
+    build and deploy this before Access existed, and it is why `docs/CONVENTIONS.md` wants the check
+    in the app rather than trusting edge configuration alone.
   - **`pnpm dev` bypasses the gate**, because nothing authenticates in front of it locally. The
     bypass is behind `import.meta.env.DEV`, a build-time constant — verified, not assumed:
     `dev@localhost` appears nowhere in `dist/` after a build, so it cannot become a production
     bypass. The whole panel is therefore developed locally against the real dev Neon DB.
-  - `CF_ACCESS_TEAM_DOMAIN` / `CF_ACCESS_AUD` are set per environment (`.dev.vars` locally,
-    `wrangler secret put` later), not in `wrangler.jsonc`. Neither is a credential — the gate rests
-    on the signature — but they are account-specific and do not exist yet. Learned along the way:
-    `wrangler types` derives `Env` from `.dev.vars`, **not** from `src/env.d.ts`'s declaration
-    merging, so a new secret has to exist in `.dev.vars` before `pnpm cf-typegen` will type it.
+  - `CF_ACCESS_TEAM_DOMAIN` (`mlosko.cloudflareaccess.com`) / `CF_ACCESS_AUD` are Worker secrets,
+    not `wrangler.jsonc` values. Neither is a credential — the gate rests on the signature — but
+    both are account-specific and get replaced in Phase 5. Learned along the way: `wrangler types`
+    derives `Env` from `.dev.vars`, **not** from `src/env.d.ts`'s declaration merging, so a new
+    secret has to exist in `.dev.vars` before `pnpm cf-typegen` will type it.
   `pnpm check` (0 errors)/`pnpm test` (84/84, 18 new)/`pnpm build` clean. Verified live in a built
-  Worker (`pnpm preview`): `/admin` → 403 text, `/admin/orders` → 403 (the gate runs before routing),
-  `/api/admin/anything` → 403 JSON, an `alg: none` forgery → 403, while `/`, `/cart` stay 200 and
-  `/administrative` still 404s rather than being swallowed by the prefix match. And on `pnpm dev`:
-  `/admin` renders, showing `dev@localhost`. **Not verified:** a real Access login end to end —
-  impossible until a domain is onboarded, so the JWKS wire format is still assumed from the docs
-  (`src/lib/access/index.test.ts` says so at the top, per the Monobank fixture lesson).
+  Worker before deploying (`pnpm preview`): `/admin` → 403 text, `/admin/orders` → 403 (the gate runs
+  before routing), `/api/admin/anything` → 403 JSON, an `alg: none` forgery → 403, while `/`, `/cart`
+  stay 200 and `/administrative` still 404s rather than being swallowed by the prefix match. On
+  `pnpm dev`, `/admin` renders as `dev@localhost`. Then live on `balier.mlosko.dev` after deploy:
+  `/admin` and `/api/admin/x` both 302 to `mlosko.cloudflareaccess.com` carrying our AUD, and
+  **Mykhailo completed a real OTP login in a browser** — which exercises both halves at once, since
+  a JWT our verifier rejected would have rendered «Доступ заборонено» instead of the panel. That
+  also retires the last assumption in `src/lib/access/index.test.ts`'s header note: the JWKS wire
+  format is now confirmed by a real login, not just taken from the docs.
 - **Before that:** **order-confirmation email** — the last open Phase 3 item, and the reason the
   Cloudflare plan was upgraded to Workers Paid this session (Email Sending needs it). Reused the
   existing `NotifierPort` shape rather than adding a new port type: `src/lib/notify/email.ts`
@@ -218,6 +226,16 @@
   `/` 200, `/admin` and `/api/admin/x` both 302 to `mlosko.cloudflareaccess.com` with our AUD.
   Email Sending is enabled on `mail.mlosko.dev` — a subdomain rather than the apex on purpose, so
   `mlosko.dev` can still take real inbound mail later without colliding MX records.
+- **Login method: one-time PIN, not Cloudflare accounts.** A new Zero Trust org arrives with a
+  *Cloudflare* identity provider as the only login method — which would have meant the client, and
+  every admin they ever add, needing a Cloudflare account. Added One-time PIN instead (Zero Trust →
+  Integrations → Identity providers; OTP is no longer added automatically, which is why it was
+  missing). The admin enters an email, receives a 6-digit code, and is in: no account, nothing
+  connecting the client to Cloudflare. Codes expire in 10 minutes and are single-use. **This needed
+  no code change** — the gate verifies the JWT and never sees which provider issued the identity —
+  and it is the reason not to hand-roll email+password auth in the app: OTP already delivers the
+  goal (the client needs only an email address) without password hashing, sessions, reset flows or
+  lockout logic in a Workers runtime with no native bcrypt/argon2.
 - **`workers.dev` is now off.** Adding a `routes` entry makes wrangler disable it by default;
   `balier-dev.mykhailoshulezhko.workers.dev` 404s. Kept that way and made explicit
   (`"workers_dev": false`) rather than left to a default — it was a second public surface no Access

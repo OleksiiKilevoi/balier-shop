@@ -11,8 +11,12 @@ Work plan, current phase, and open decisions: `docs/plans/roadmap.md`. Read it b
 scope — it also lists questions that are deliberately unanswered, and building on a guessed answer
 is worse than asking.
 
-Phase 1 (foundation), the Phase 2 storefront and the Phase 3 cart are built. Checkout and the admin
-panel do not exist yet — `/checkout` is linked from `/cart` and still 404s.
+Phase 1 (foundation), the Phase 2 storefront and Phase 3 (cart, checkout, both payment methods, the
+Monobank webhook, notifications, rate limiting) are built. Phase 4, the admin panel, has its auth
+gate and nothing else yet: `/admin` exists as a placeholder behind Cloudflare Access.
+
+The dev deployment lives at **`https://balier.mlosko.dev`**. The `workers.dev` URL is switched off —
+it was a second public surface no Access policy could cover.
 
 ## Stack
 
@@ -122,6 +126,19 @@ What exists in the repository today, as distinct from the target shape above.
 | `src/pages/cart.astro` | The cart — client-rendered from `/api/cart`; rows cloned from a `<template>` |
 | `src/pages/api/cart.ts` | Server-side pricing and stock validation; what checkout will also call |
 | `src/pages/media/[...key].ts` | Byte pump for R2 objects; immutable caching |
+| `src/pages/checkout.astro` + `checkout/{success,failure}.astro` | The order form and its two outcomes |
+| `src/pages/api/checkout.ts`, `api/checkout/*` | Order creation; the COD limit and the two Nova Poshta lookups |
+| `src/pages/api/webhooks/monobank.ts` | The only place an order becomes `paid` |
+| `src/pages/admin/index.astro` | Placeholder panel home — behind Access, shows the signed-in identity |
+| `src/layouts/AdminLayout.astro` | Admin shell; deliberately not `BaseLayout` (no storefront chrome) |
+| `src/middleware.ts` | Two gates in sequence: the `/admin/**` Access check, then per-IP rate limiting |
+| `src/lib/access/index.ts` | Access JWT verification — the app-side half of the admin gate (+ tests) |
+| `src/lib/orders/` | Order creation, the state machine, stock reservations |
+| `src/lib/monobank/index.ts` | `PaymentPort` — invoices, status, ECDSA webhook verification (+ tests) |
+| `src/lib/novaposhta/` | `ShippingPort` client + the reference-data sync the cron runs |
+| `src/lib/notify/` | `telegram.ts`, `email.ts` (both `NotifierPort`), shared `format.ts` |
+| `src/lib/turnstile/index.ts` | `CaptchaPort` — server-side siteverify at checkout |
+| `src/lib/rateLimit/index.ts` | KV fixed-window counter behind the middleware |
 | `src/pages/404.astro` | Rewrite target for unknown or non-`active` slugs |
 | `src/pages/{about,care,delivery,returns,contacts,offer,privacy}.astro` | The seven static pages; copy still pending |
 | `src/layouts/BaseLayout.astro` | Document shell, fonts, `SITE_IS_INDEXABLE` |
@@ -189,8 +206,25 @@ What exists in the repository today, as distinct from the target shape above.
 - `MEDIA` (R2 bucket `balier-media`), `IMAGES`, and the `RATE_LIMIT` KV namespace (backs
   `src/middleware.ts`) are bound in `wrangler.jsonc`. `CACHE` is still commented out — nothing
   needs it yet.
-- The Neon project and the Cloudflare account are the **developer's own, for development only**.
-  The store ships on the client's accounts, stood up again during Phase 5.
+- The Neon project, the Cloudflare account **and the `mlosko.dev` domain** are the developer's own,
+  for development only. The store ships on the client's accounts, stood up again during Phase 5.
+  `mlosko.dev` was bought because both Cloudflare Access and Email Sending need a *zone on the
+  account* and `*.workers.dev` cannot be one; `balier.ua` replaces it at launch.
+
+### Cloudflare Access — the admin gate
+
+- Zero Trust team `mlosko`; one self-hosted application over four destinations on
+  `balier.mlosko.dev`: `admin`, `admin/*`, `api/admin`, `api/admin/*`.
+- **Login is one-time PIN**, not a Cloudflare account: the admin types an email, receives a 6-digit
+  code, and is in. Adding an admin is adding an address to the Allow policy. This is why the app
+  does not hand-roll email/password auth — it would buy nothing and cost password hashing, sessions
+  and reset flows in a runtime with no native bcrypt/argon2.
+- Access authenticates at the edge; `src/middleware.ts` **independently verifies the JWT** it
+  forwards (`Cf-Access-Jwt-Assertion`, falling back to the `CF_Authorization` cookie). Unconfigured
+  means deny. `pnpm dev` bypasses the gate behind `import.meta.env.DEV`, a build-time constant that
+  is `false` in everything `pnpm build` emits.
+- `CF_ACCESS_TEAM_DOMAIN` and `CF_ACCESS_AUD` are Worker secrets. Neither is a credential — security
+  rests on the RS256 signature — but both are account-specific and change in Phase 5.
 
 ## Known sharp edges
 
@@ -205,6 +239,20 @@ Each of these has already cost time at least once.
   the dashboard as Text is silently dropped by the next push. This took the deployed site down
   once: `DATABASE_URL` vanished, every DB-backed route 500ed, and the homepage — which queries
   nothing — stayed green. Encrypted secrets live outside that file and are preserved.
+- **An Access path matches exactly, and a wildcard does not cover its own parent.** `admin` protects
+  `/admin` but *not* `/admin/orders`; `admin/*` protects `/admin/orders` but *not* `/admin`. Both
+  are needed, per path — which is why the application carries four destinations for what looks like
+  two. Getting this wrong leaves an admin route silently unprotected at the edge, with nothing in
+  the dashboard flagging it.
+- **Adding a `routes` entry silently disables the `workers.dev` URL.** wrangler defaults
+  `workers_dev` to `false` as soon as any route exists, so the first deploy with a custom domain
+  took the old test URL offline mid-session. That is the behaviour we want here, so it is now
+  written explicitly in `wrangler.jsonc` — but it arrives as a warning in deploy output, not an
+  error, and is easy to miss.
+- **`wrangler types` reads `.dev.vars`, not `src/env.d.ts`.** Declaration-merging `interface Env`
+  in `env.d.ts` does not reach the `env` imported from `cloudflare:workers` (that is typed against
+  `Cloudflare.Env`). A new secret has to exist in `.dev.vars` before `pnpm cf-typegen` will type it,
+  whatever `env.d.ts` says.
 - **`wrangler.jsonc`'s `name` must match the Worker being deployed to (`balier-dev`).** A mismatch
   does not error — `wrangler deploy` just creates a second, empty Worker under the config's name,
   leaving the live one untouched and the failure invisible.

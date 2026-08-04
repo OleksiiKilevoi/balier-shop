@@ -9,9 +9,10 @@ import { createAccessVerifier, extractAccessToken, normalizeTeamDomain } from '.
  * pubkey bug hid behind exactly this kind of stub for six green tests.
  *
  * The shape below (`keys[]` of RSA JWKs carrying `kid`) is the one Cloudflare
- * documents for `/cdn-cgi/access/certs`, but it has NOT been checked against a
- * live endpoint — no Zero Trust team exists on the account yet. The first real
- * Access login is what confirms it; see `docs/STATE.md`.
+ * documents for `/cdn-cgi/access/certs`. It was confirmed against the real
+ * endpoint on 2026-08-04 by the first genuine Access login through
+ * `mlosko.cloudflareaccess.com` — the verifier fetched, parsed and matched a
+ * real key set, which no fixture here could have proved on its own.
  */
 
 const TEAM_DOMAIN = 'https://balier.cloudflareaccess.com';
