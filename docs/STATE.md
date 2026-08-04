@@ -4,24 +4,32 @@
 
 ## 📍 CURRENT STATE (overwrite this block; keep tight)
 
-- **Last done:** fixed two real bugs reported live — (1) `/checkout/success` staying on "Очікуємо
-  підтвердження оплати" forever even after real payment, (2) the cart never clearing after a
-  successful order. Root cause of (1): last session's `webhookUrl` fix deliberately kept it pinned
-  to `PUBLIC_SITE_URL` (`https://balier.ua`) instead of making it request-derived like
-  `redirectBaseUrl` — reasonable-sounding at the time ("must stay a real reachable address"), but
-  `balier.ua` doesn't actually resolve yet (confirmed via DNS lookup — it isn't deployed), so
-  Monobank's webhook had nowhere real to land, ever, even when testing against the deployed
-  `balier-dev.workers.dev`. Fixed by making `webhookUrl` request-derived too (`src/pages/api/checkout.ts`),
-  same origin as `redirectBaseUrl` — confirmed with the user first since it reverses a prior
-  deliberate decision on the money path. Plain `localhost` testing still needs a tunnel (Monobank
-  can never reach `localhost` regardless of URL construction) — unchanged, same as before. Root
-  cause of (2): `clearCart()` (`src/stores/cart.ts`) existed but was never called anywhere — added
-  the call in `checkout.astro`'s submit handler right before the redirect on success.
-  `pnpm check`/`pnpm test` (51/51)/`pnpm build` all pass. **Not verified live** — no browser
-  automation available this session; worth a real card-payment run against the deployed dev Worker
-  to confirm the webhook now actually lands and the success page flips to "paid" on refresh, plus a
-  visual check that the cart badge/`/cart` empties after an order. All uncommitted (this and
-  everything before it — nothing in `/checkout`'s whole build-out has been committed yet).
+- **Last done:** 🎉 **the whole card money path is now verified live end to end on the deployed dev
+  Worker** — order `B260804-DAMN7` went card → Monobank → webhook → `paid`, with its `payments` row
+  at `success`. That is the first Monobank webhook that has *ever* completed the round trip, and it
+  also closes the long-standing "is `X-Sign` DER or raw?" question: `normalizeSignature`'s DER→raw
+  conversion works against a real Monobank signature. Getting there took fixing two separate bugs,
+  both found by testing live rather than locally:
+  1. **Every checkout on the deployed site returned `captcha_failed`.** The Worker had no runtime
+     `TURNSTILE_SECRET_KEY` — `wrangler secret list --name balier-dev` returned `DATABASE_URL` and
+     nothing else, so `createTurnstileCaptcha` posted an undefined secret to siteverify and failed
+     closed. The secrets *looked* present in the dashboard because they had been added under
+     **Settings → Build → Variables and secrets**, which is Workers Builds' *build-time* env (same
+     idea as Pages build vars) — those never become runtime bindings, and a `wrangler deploy`
+     doesn't turn them into any. Fixed by setting them as real runtime secrets with
+     `wrangler secret put`: `TURNSTILE_SECRET_KEY`, `MONOBANK_TOKEN`, `NOVAPOSHTA_API_KEY`,
+     `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`.
+  2. **`verifyWebhook` rejected every real webhook, always.** `GET /api/merchant/pubkey` returns
+     `key` as base64 of a **PEM document**, not of the DER bytes (confirmed live: the decoded
+     payload starts `0x2d`, i.e. `-----BEGIN PUBLIC KEY-----`). Those PEM text bytes went straight
+     into `crypto.subtle.importKey('spki', …)`, which threw, and the adapter's `catch` turned the
+     throw into "signature invalid" → 403. So the money moved at Monobank while the order sat in
+     `awaiting_payment` forever. Fixed with `normalizePublicKey` in `src/lib/monobank/index.ts`
+     (unwraps PEM armour; passes bare DER through, mirroring `normalizeSignature`).
+  The six existing tests passed throughout because `stubPubkeyFetch` exported the key as **DER** —
+  the fixture shared the implementation's wrong assumption, so the suite was confirming a broken
+  path against itself. It now stubs PEM like the real API, plus a new case for bare DER. Committed
+  and pushed as `611cb2f`; `pnpm check` (0 errors)/`pnpm test` (52/52)/`pnpm build` all clean.
 - **Also true (from the prior session, unchanged):** Phase 3's "core money path" —
   `/checkout` end to end, `src/lib/orders/`, `src/lib/monobank/` (`PaymentPort` incl. ECDSA
   signature verification), `src/lib/novaposhta/` (client + sync), the checkout/webhook API routes,
@@ -33,38 +41,39 @@
   (see `balier-infra-accounts-are-dev` memory) — **card payment confirmed working end to end
   including the paid transition and idempotency** (order `B260804-6DN8Q`). Test orders
   `B260804-BYP3K`, `B260804-S86Y7` (COD) and `B260804-6DN8Q` (card, paid) are real rows in the dev
-  DB, harmless, not cleaned up. **Still not verified:** the actual webhook HTTP *delivery*
-  (Monobank calling back over the network, incl. real `X-Sign`) — no tunnel tool installed to
-  expose `localhost`, and the deployed dev Worker still has the `DATABASE_URL` secret issue below.
-  `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID` are real (see below).
+  DB, harmless, not cleaned up. Webhook HTTP delivery over the real network, including a real
+  `X-Sign`, is **now verified** (see Last done) — that entry is finally closed. Testing this from
+  plain `localhost` would still need a tunnel; testing against the deployed dev Worker doesn't, and
+  that is the route that worked.
 - **In progress:** Phase 3. Deferred on purpose, per the reviewed plan: order-confirmation email,
   a Telegram `orderPaid` notification (the webhook still doesn't send one — only order creation
   does so far), general API rate limiting (needs the `RATE_LIMIT` KV namespace), the admin-editable
   cash-on-delivery limit (Phase 4; the seeded `settings.cod_limit` is read, not writable yet).
   Phase 2 still carries its own leftover: the seven static pages render a heading, a lead and a
   `ContentPlaceholder`. Writing them is a Phase 5 content item, and the legal ones gate Monobank.
-- **Next step:** verify today's two fixes live — place a real card order against the deployed
-  `balier-dev.workers.dev` and confirm the webhook now lands and `/checkout/success` flips to
-  "paid" on refresh, and confirm the cart empties after checkout. Pure `localhost` webhook testing
-  still needs a tunnel tool (`cloudflared`/`ngrok`) — unchanged. Otherwise, pick the next Phase 3
-  item: the `orderPaid` notification or rate limiting.
+- **Next step:** deploy `balier-cron` — it has **never been deployed** (`wrangler secret list --name
+  balier-cron` → "Worker not found"), so on the deployed dev site nothing releases expired stock
+  reservations and nothing refreshes the Nova Poshta cache. `pnpm cron:deploy`, then its own runtime
+  secrets (`DATABASE_URL`, `NOVAPOSHTA_API_KEY`) — runtime, not the Build section, see Last done.
+  After that, pick the next Phase 3 item: the `orderPaid` notification or rate limiting.
 - **Blockers (waiting on me):**
   - Phase 0 externals unchanged: Monobank Acquiring registration, Nova Poshta business account +
     cash-on-delivery setup, Telegram manager account / bot / chat.
-  - `DATABASE_URL` must exist as an **encrypted Secret** on the `balier-dev` Worker. On
-    2026-08-03 `wrangler secret list` returned `[]` and every DB-backed route 500ed. Local dev
-    reads `.dev.vars` and works, so this only bites the deployed site.
-    <!-- TODO: confirm whether this has since been set. -->
   - `PUBLIC_TELEGRAM_MANAGER` in `wrangler.jsonc` is a **placeholder handle**.
-- **Active branch:** `main` (only branch; tracks `origin/main`). A push to `main` deploys.
+  - ~~`DATABASE_URL` missing as a Worker secret~~ — resolved; it is set, and as of 2026-08-04 so are
+    the other five runtime secrets.
+- **Active branch:** `main` (only branch; tracks `origin/main`), clean and pushed at `611cb2f`.
+  A push to `main` deploys (Workers Builds is connected to `mykhailoshulezhko/balier`, production
+  branch `main`, build `pnpm run build`, deploy `npx wrangler deploy`).
 
 ## ✅ Phase tracker (high-level; detail in docs/plans/roadmap.md)
 
 - [~] Phase 0 — Preparation (Neon + R2 done; Monobank, Nova Poshta, Telegram outstanding)
 - [x] Phase 1 — Foundation (schema, migrations, seed, design components, deploy verified)
 - [~] Phase 2 — Catalog / storefront (every page built; static-page copy outstanding)
-- [~] Phase 3 — Cart and payment (cart, `/checkout`, both payment methods, webhook, both crons,
-      Turnstile done; `orderPaid` notification, rate limiting, admin COD-limit editing still open)
+- [~] Phase 3 — Cart and payment (cart, `/checkout`, both payment methods, Turnstile done; the
+      webhook is now verified live end to end. `orderPaid` notification, rate limiting, admin
+      COD-limit editing still open, and `balier-cron` is written but not deployed)
 - [ ] Phase 4 — Admin panel
 - [ ] Phase 5 — Launch (incl. migrating off the dev Neon/Cloudflare accounts)
 - [ ] Phase 6 — Improvements
@@ -72,6 +81,44 @@
 ---
 
 ## 🗒️ SESSION LOG (newest first; 3–6 lines each)
+
+### 2026-08-04 — live on the deployed Worker: captcha always failing, then the webhook always 403ing
+
+- Did, on report from live testing against `balier-dev.mykhailoshulezhko.workers.dev` ("captcha
+  keeps failing, submit stays on the page"): two independent bugs, both invisible to local testing.
+  - **`captcha_failed` on every submit** — the deployed Worker had no runtime `TURNSTILE_SECRET_KEY`.
+    Chased a false trail first (dashboard showed all six secrets, `wrangler secret list` showed one;
+    suspected a second Cloudflare account, since the wrangler login differs from the Claude login).
+    The wider dashboard screenshot settled it: that table sits **inside the Build section** — those
+    are Workers Builds *build-time* variables, not runtime bindings, which is why a redeploy also
+    changed nothing (`wrangler deploy` preserves runtime secrets, and there was only ever one to
+    preserve). Set all five properly with `wrangler secret put`. Ruled out a wrong secret first by
+    probing siteverify directly with the `.dev.vars` value: `invalid-input-response`, meaning
+    Cloudflare accepted the secret and rejected only the dummy token.
+  - **Order then stuck at `awaiting_payment` despite real payment** — `invoice/status` said
+    `success` while our `payments` row said `created`. The endpoint was reachable (an unsigned probe
+    returned 403, so routing was fine), which pointed at signature verification rejecting a genuine
+    webhook. Root cause: `GET /pubkey` returns `key` as base64 of a **PEM document**, not of DER —
+    decoded, byte 0 is `0x2d` (`-`). Feeding that to `importKey('spki', …)` threw, `verifyWebhook`'s
+    `catch` turned the throw into "invalid", and the handler answered 403. Every webhook, always,
+    since the code was written. Fixed with `normalizePublicKey`.
+- Decisions: the six existing monobank tests passed the whole time because `stubPubkeyFetch`
+  exported the key as DER — the fixture encoded the same wrong assumption as the implementation, so
+  the suite checked a broken path against itself. Changed the stub to PEM (the real shape) and added
+  a bare-DER case for the passthrough, so the test now constrains reality rather than agreeing with
+  the code. The generic lesson worth keeping: *a self-signed fixture cannot validate a wire format* —
+  every local check of this path (garbage token, self-generated keypair) returns the same answer
+  whether the format assumption is right or wrong.
+- Verified: `pnpm check` (0 errors)/`pnpm test` (52/52, 1 new)/`pnpm build` clean; the real Monobank
+  pubkey confirmed to import and reach `crypto.subtle.verify` (it previously never got that far).
+  Then live, the real thing: card order `B260804-DAMN7` → `paid`, payment row `success`. First
+  completed webhook round trip in the project's history, and it retires the "DER or raw `X-Sign`?"
+  unknown that `src/lib/monobank/index.ts`'s header comment had been carrying.
+- Also found, not fixed: `balier-cron` has never been deployed at all — see Next step. Earlier test
+  order `B260804-XGYJ5` is genuinely paid at Monobank but sits at `awaiting_payment` (its webhook
+  predates the fix and no retry landed); left alone deliberately, since only the webhook handler may
+  mark an order paid (`docs/CONVENTIONS.md`).
+- Next: deploy `balier-cron` with its own runtime secrets, then `orderPaid` / rate limiting.
 
 ### 2026-08-04 — fix payment status never updating + cart not clearing
 

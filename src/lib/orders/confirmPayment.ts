@@ -1,6 +1,7 @@
 import { eq, sql } from 'drizzle-orm';
 import type { TxDb } from '~/lib/db';
 import { findPaymentByInvoiceId } from '~/lib/db/queries/orders';
+import type { Order, OrderItem } from '~/lib/db/schema';
 import { orders, payments, productVariants, stockReservations } from '~/lib/db/schema';
 import type { Kopiykas } from '~/lib/money';
 import type { InvoiceStatus } from '~/lib/ports';
@@ -18,7 +19,14 @@ import type { InvoiceStatus } from '~/lib/ports';
  */
 
 export type ConfirmPaymentResult =
-  | { ok: true; transitioned: 'paid' | 'cancelled' | 'unchanged' }
+  /**
+   * The order *just* became paid — carries the post-update row and its items so
+   * the caller can notify without re-reading, and, more importantly, outside
+   * this function's transaction (a network call must never hold one open). Only
+   * ever returned once per order: a redelivered webhook lands on `unchanged`.
+   */
+  | { ok: true; transitioned: 'paid'; order: Order; items: readonly OrderItem[] }
+  | { ok: true; transitioned: 'cancelled' | 'unchanged' }
   | { ok: false; reason: 'invoice_not_found' };
 
 const TERMINAL_STATUSES = new Set(['paid', 'cancelled', 'refunded']);
@@ -45,10 +53,13 @@ export async function confirmPayment(
         .set({ status: 'success', amount: statusResult.amount, lastPayload: rawPayload, updatedAt: sql`now()` })
         .where(eq(payments.id, payment.id));
 
-      await tx
+      const [paidOrder] = await tx
         .update(orders)
         .set({ status: 'paid', paidAt: sql`now()`, updatedAt: sql`now()` })
-        .where(eq(orders.id, order.id));
+        .where(eq(orders.id, order.id))
+        .returning();
+
+      if (!paidOrder) throw new Error('order update returned no row');
 
       for (const item of order.items) {
         await tx
@@ -59,7 +70,7 @@ export async function confirmPayment(
 
       await tx.delete(stockReservations).where(eq(stockReservations.orderId, order.id));
 
-      return { ok: true, transitioned: 'paid' };
+      return { ok: true, transitioned: 'paid', order: paidOrder, items: order.items };
     }
 
     if (FAILURE_STATUSES.has(statusResult.status)) {

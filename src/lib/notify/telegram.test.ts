@@ -1,6 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Order, OrderItem } from '~/lib/db/schema';
-import { formatOrderMessage } from './telegram';
+import { createTelegramNotifier, formatOrderMessage } from './telegram';
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 function order(overrides: Partial<Order> = {}): Order {
   return {
@@ -80,5 +84,43 @@ describe('formatOrderMessage', () => {
     });
 
     expect(text).toContain('Кур’єром — м. Київ, вул. Хрещатик, 1');
+  });
+});
+
+describe('createTelegramNotifier', () => {
+  it('sends orderPaid to the manager chat with the paid heading', async () => {
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        new Response(JSON.stringify({ ok: true }), { status: 200 }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const notifier = createTelegramNotifier('bot-token', 'chat-id');
+    await notifier.orderPaid({
+      order: order({ status: 'paid', paymentMethod: 'card' }),
+      items: [item()],
+    });
+
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(String(url)).toBe('https://api.telegram.org/botbot-token/sendMessage');
+    const sent = JSON.parse(init!.body as string) as { chat_id: string; text: string };
+    expect(sent.chat_id).toBe('chat-id');
+    expect(sent.text.startsWith('Оплачено')).toBe(true);
+    expect(sent.text).toContain('B260804-TEST1');
+    expect(sent.text).toContain('Карткою онлайн');
+  });
+
+  it('never throws when Telegram is unreachable', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new Error('network down');
+      }),
+    );
+
+    const notifier = createTelegramNotifier('bot-token', 'chat-id');
+    await expect(
+      notifier.orderPaid({ order: order(), items: [item()] }),
+    ).resolves.toBeUndefined();
   });
 });
