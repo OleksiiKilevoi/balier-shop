@@ -6,6 +6,8 @@ import { createDb, createTxDb } from '~/lib/db';
 import { findAdminOrder } from '~/lib/db/queries/orders';
 import {
   ADMIN_ORDER_MESSAGES,
+  ORDER_REVERT_LABELS,
+  ORDER_REVERT_PAYMENT_WARNING,
   ORDER_STATUS_LABELS,
   ORDER_TRANSITION_HINTS,
   ORDER_TRANSITION_LABELS,
@@ -14,7 +16,7 @@ import {
 import type { AdminOrderMessage } from '~/lib/i18n/admin';
 import { formatPrice } from '~/lib/money';
 import { DELIVERY_METHOD_LABELS, PAYMENT_METHOD_LABELS, deliveryDestination } from '~/lib/notify/format';
-import { allowedTransitions } from '~/lib/orders/status';
+import { allowedTransitions, revertCrossesPayment, revertTarget } from '~/lib/orders/status';
 import { setOrderTrackingNumber, updateOrderStatus } from '~/lib/orders/updateStatus';
 import { TRACKING_NUMBER_LENGTH, adminOrderActionSchema } from '~/lib/validation/admin';
 
@@ -93,8 +95,12 @@ const FAILURES = new Set<AdminOrderMessage>([
 ]);
 
 const transitions = order ? allowedTransitions(order) : [];
-const forward = transitions.filter((next) => next !== 'cancelled' && next !== 'refunded');
+const revert = order ? revertTarget(order.status) : null;
+const forward = transitions.filter(
+  (next) => next !== 'cancelled' && next !== 'refunded' && next !== revert,
+);
 const exits = transitions.filter((next) => next === 'cancelled' || next === 'refunded');
+const revertWarning = order && revert && revertCrossesPayment(order) ? ORDER_REVERT_PAYMENT_WARNING : null;
 ---
 
 <AdminLayout title={order ? `Замовлення ${order.orderNumber}` : 'Замовлення не знайдено'}>
@@ -160,6 +166,26 @@ const exits = transitions.filter((next) => next === 'cancelled' || next === 'ref
                   </button>
                 </form>
               ))}
+
+              {/* Undoing a wrong click, not a sale — no stock or reservation
+                  moves either way (see `revertTarget`'s doc), so unlike the
+                  exits below this needs no disclosure gate. */}
+              {revert && (
+                <form method="post" action={selfUrl} class="mt-3">
+                  <input type="hidden" name="intent" value="status" />
+                  <input type="hidden" name="from" value={order.status} />
+                  <input type="hidden" name="next" value={revert} />
+                  {revertWarning && (
+                    <p class="text-ink-muted mb-2 text-sm">{revertWarning}</p>
+                  )}
+                  <button
+                    type="submit"
+                    class="border-line-strong text-ink hover:border-ink rounded-btn h-touch w-full cursor-pointer border px-6 text-sm font-medium sm:w-auto"
+                  >
+                    {ORDER_REVERT_LABELS[revert]}
+                  </button>
+                </form>
+              )}
 
               {/* A disclosure rather than a confirm dialog: these are terminal
                   and there is no script on this page. Two deliberate clicks. */}

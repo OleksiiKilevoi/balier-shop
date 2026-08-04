@@ -40,6 +40,27 @@ export const ORDER_TRANSITION_HINTS: Partial<Record<OrderStatus, string>> = {
   refunded: 'Кошти повертаються вручну в Monobank. Товар повернеться в наявність.',
 };
 
+/**
+ * The button that undoes a wrong click, keyed by the status it steps back to.
+ * A verb of its own (`~/lib/orders/status.ts`'s `revertTarget`) rather than
+ * reusing `ORDER_TRANSITION_LABELS`, since the same target status reads as
+ * *progress* going forward but as *undo* going back — «Позначити зібраним»
+ * would be a strange thing to click while looking at a `shipped` order.
+ */
+export const ORDER_REVERT_LABELS: Partial<Record<OrderStatus, string>> = {
+  packed: 'Повернути до «Зібрано»',
+  shipped: 'Повернути до «Відправлено»',
+};
+
+/**
+ * Shown under the revert button only when `revertCrossesPayment` says the step
+ * back changes whether the order counts as paid — currently just cash on
+ * delivery leaving `delivered`, since that is the only status where money
+ * collection depends on having reached it exactly.
+ */
+export const ORDER_REVERT_PAYMENT_WARNING =
+  'Товар вважатиметься ще не отриманим — накладений платіж надходить лише при видачі. «Скасувати» з’явиться замість «Повернено».';
+
 /** Result of a POST, carried back through the redirect so a refresh is harmless. */
 export const ADMIN_ORDER_MESSAGES = {
   status_updated: 'Статус замовлення оновлено.',

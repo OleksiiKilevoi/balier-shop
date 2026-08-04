@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { orderStatus } from '~/lib/db/schema';
 import type { OrderStatus, PaymentMethod } from '~/lib/db/schema';
-import { allowedTransitions, canTransition, isStockCommitted } from './status';
+import {
+  allowedTransitions,
+  canTransition,
+  isStockCommitted,
+  revertCrossesPayment,
+  revertTarget,
+} from './status';
 
 /**
  * The admin panel's half of the order state machine. Worth testing on its own
@@ -42,8 +48,18 @@ describe('allowedTransitions', () => {
   it('only ever moves one step forward through the fulfilment chain', () => {
     expect(allowedTransitions(order('paid', 'card'))).toEqual(['packed', 'refunded']);
     expect(allowedTransitions(order('confirmed', 'cod'))).toEqual(['packed', 'cancelled']);
+    // `packed` has no revert target (see below), so it is unaffected by revert.
     expect(allowedTransitions(order('packed', 'card'))).toEqual(['shipped', 'refunded']);
-    expect(allowedTransitions(order('shipped', 'cod'))).toEqual(['delivered', 'cancelled']);
+  });
+
+  it('also offers one step back, from `shipped` and `delivered` only', () => {
+    expect(allowedTransitions(order('shipped', 'cod'))).toEqual(['delivered', 'packed', 'cancelled']);
+    expect(allowedTransitions(order('shipped', 'card'))).toEqual(['delivered', 'packed', 'refunded']);
+    expect(allowedTransitions(order('delivered', 'card'))).toEqual(['shipped', 'refunded']);
+    expect(allowedTransitions(order('delivered', 'cod'))).toEqual(['shipped', 'refunded']);
+    // `packed`'s predecessor is `paid` or `confirmed` — both off-limits to the
+    // panel — so it has no revert target at all, either payment method.
+    expect(allowedTransitions(order('packed', 'cod'))).toEqual(['shipped', 'cancelled']);
   });
 
   it('offers nothing at all from a terminal status', () => {
@@ -57,13 +73,13 @@ describe('allowedTransitions', () => {
     // Card is taken up front…
     expect(allowedTransitions(order('awaiting_payment', 'card'))).toEqual(['cancelled']);
     expect(allowedTransitions(order('paid', 'card'))).toContain('refunded');
-    expect(allowedTransitions(order('delivered', 'card'))).toEqual(['refunded']);
+    expect(allowedTransitions(order('delivered', 'card'))).toContain('refunded');
 
     // …cash on delivery only when the carrier hands the parcel over, so an
     // order still in transit is cancelled: there is nothing to refund yet.
     expect(allowedTransitions(order('confirmed', 'cod'))).toContain('cancelled');
     expect(allowedTransitions(order('packed', 'cod'))).toEqual(['shipped', 'cancelled']);
-    expect(allowedTransitions(order('delivered', 'cod'))).toEqual(['refunded']);
+    expect(allowedTransitions(order('delivered', 'cod'))).toContain('refunded');
   });
 
   it('never offers both ways out at once', () => {
@@ -104,9 +120,43 @@ describe('canTransition', () => {
     expect(canTransition(order('confirmed', 'cod'), 'shipped')).toBe(false);
   });
 
-  it('rejects a move backwards', () => {
-    expect(canTransition(order('shipped', 'card'), 'packed')).toBe(false);
-    expect(canTransition(order('delivered', 'cod'), 'shipped')).toBe(false);
+  it('allows exactly one step backward, never further', () => {
+    expect(canTransition(order('shipped', 'card'), 'packed')).toBe(true);
+    expect(canTransition(order('delivered', 'cod'), 'shipped')).toBe(true);
+    // Two steps back, or onto anything the panel may never produce.
+    expect(canTransition(order('delivered', 'card'), 'packed')).toBe(false);
+    expect(canTransition(order('packed', 'card'), 'paid')).toBe(false);
+    expect(canTransition(order('packed', 'cod'), 'confirmed')).toBe(false);
+  });
+});
+
+describe('revertTarget', () => {
+  it('goes back exactly one step, only from `shipped` and `delivered`', () => {
+    expect(revertTarget('shipped')).toBe('packed');
+    expect(revertTarget('delivered')).toBe('shipped');
+  });
+
+  it('has no target anywhere else — notably `packed`, whose predecessor the panel may never set', () => {
+    for (const status of ALL_STATUSES) {
+      if (status === 'shipped' || status === 'delivered') continue;
+      expect(revertTarget(status)).toBeNull();
+    }
+  });
+});
+
+describe('revertCrossesPayment', () => {
+  it('is true only for cash on delivery stepping back out of `delivered`', () => {
+    expect(revertCrossesPayment(order('delivered', 'cod'))).toBe(true);
+  });
+
+  it('is false everywhere else, including the same step for card', () => {
+    // Card counts every status from `paid` on as collected, so stepping back
+    // within that range never flips the answer.
+    expect(revertCrossesPayment(order('delivered', 'card'))).toBe(false);
+    expect(revertCrossesPayment(order('shipped', 'card'))).toBe(false);
+    expect(revertCrossesPayment(order('shipped', 'cod'))).toBe(false);
+    // No revert target at all → nothing to cross.
+    expect(revertCrossesPayment(order('packed', 'cod'))).toBe(false);
   });
 });
 

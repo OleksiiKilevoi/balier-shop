@@ -4,7 +4,43 @@
 
 ## 📍 CURRENT STATE (overwrite this block; keep tight)
 
-- **Last done:** **the admin orders screen — Phase 4's second item.** `/admin/orders` (list) and
+- **Last done:** **status revert on `/admin/orders/[orderNumber]`**, on report that a wrong click
+  was unrecoverable. `src/lib/orders/status.ts` gained `revertTarget(status)` (a step back, or
+  `null`) and `revertCrossesPayment(order)` (does the step change whether money counts as
+  collected); `allowedTransitions` now returns `[forward, back, exit].filter(...)` instead of
+  `[forward, exit]`.
+  - **Revert only goes as far back as `packed`: `shipped → packed`, `delivered → shipped`.**
+    `packed` itself has no revert target. Reason found while implementing, not assumed going in:
+    the natural predecessor of `packed` is `paid` or `confirmed`, and `docs/CONVENTIONS.md` hard
+    rule 2 (`paid` is the webhook's alone) plus `status.ts`'s existing comment (`confirmed` belongs
+    to `create.ts`) both forbid the panel from ever producing either — a revert button that could
+    set `paid` would be exactly the forging bug the whole state machine exists to prevent. Caught
+    this mid-implementation (first draft made `packed`'s predecessor payment-method-dependent,
+    `paid` for card / `confirmed` for cod) before it reached code, corrected before writing
+    `allowedTransitions`.
+  - **No stock or reservation ever moves on a revert.** `shipped`/`packed`/`delivered` are all in
+    `STOCK_COMMITTED`; moving between them doesn't touch `updateOrderStatus`'s `undoing` branch at
+    all (that branch is still keyed on `next === 'cancelled' || next === 'refunded'`, unchanged) —
+    so `updateStatus.ts` needed no edit for this.
+  - **One case needs a warning: cash-on-delivery leaving `delivered`.** Money lands for COD only at
+    `delivered` (the carrier collects on handoff), so reverting to `shipped` flips "has the money
+    arrived?" from yes to no — and the exit button that follows silently changes from «Повернено» to
+    «Скасувати». `revertCrossesPayment` is generic (compares `moneyCollected` before/after), not a
+    hardcoded cod/delivered check, and the panel shows `ORDER_REVERT_PAYMENT_WARNING` under the
+    button only when it's true. Card never trips it — every status from `paid` on already counts as
+    collected. Decided by asking first (two questions: scope of what's revertible, and whether to
+    warn), not guessed.
+  - Rendered as its own secondary-styled button (not inside the `<details>` disclosure the terminal
+    actions use) — undoing a click is corrective, not destructive, so it doesn't need the extra gate.
+    `ORDER_REVERT_LABELS` in `i18n/admin.ts` gives it its own verb copy («Повернути до «Зібрано»»)
+    rather than reusing `ORDER_TRANSITION_LABELS`, since the same target status reads as *progress*
+    from the forward button and as *undo* from this one.
+  `pnpm check` (0 errors)/`pnpm test` (102/102, 5 new)/`pnpm build` clean. Verified live against the
+  real dev Neon DB on `B260804-DAMN7` (card, `delivered`): reverted to `shipped`, then to `packed`
+  (button correctly offered no further revert), forged `packed → paid` refused with
+  `invalid_transition` exactly as before, then walked forward again (`packed → shipped →
+  delivered`) to leave the order as it was. No stock change at any step, as expected.
+- **Before that:** **the admin orders screen — Phase 4's second item.** `/admin/orders` (list) and
   `/admin/orders/[orderNumber]` (detail), behind the gate below, with the status transitions the
   order state machine allows and the Nova Poshta tracking number.
   - **The state machine is a pure module, `src/lib/orders/status.ts` (13 tests).** Everything about
@@ -64,7 +100,7 @@
   `/admin/orders/<n>` and a POST transition all 403, and the order was still `confirmed` afterwards.
   **Note the dev DB was mutated by this testing** — `DAMN7` is now `delivered` with fake TTN
   `20450123456789`, `L6NJG` and `LHB7A` are `cancelled`. Harmless test rows, not cleaned up.
-- **Before that:** **the admin gate — Phase 4's first item, the app-side half of it.**
+- **Earlier:** **the admin gate — Phase 4's first item, the app-side half of it.**
   `src/lib/access/index.ts` (`createAccessVerifier`, `extractAccessToken`, `normalizeTeamDomain`,
   18 tests) verifies a Cloudflare Access JWT with Web Crypto: RS256 pinned from our side rather than
   read off the token, the signing key matched by `kid` against
@@ -250,6 +286,29 @@
 ---
 
 ## 🗒️ SESSION LOG (newest first; 3–6 lines each)
+
+### 2026-08-04 — status revert on the admin orders screen
+
+- Did, on report that a status change on `/admin/orders/[orderNumber]` was irreversible: added a
+  step-back action alongside the existing forward/cancel/refund ones. `revertTarget(status)` and
+  `revertCrossesPayment(order)` in `src/lib/orders/status.ts`; `allowedTransitions` now folds a
+  `back` value into what it already returned.
+- Decision, closed by asking rather than guessing (two questions: how far back, and whether to
+  warn): revert only reaches `packed` — `shipped → packed`, `delivered → shipped` — never further.
+  `packed`'s own predecessor is `paid` (webhook-only, hard rule 2) or `confirmed` (`create.ts`-only),
+  both of which the panel must never produce; a first draft that made `packed` revert to one or the
+  other depending on payment method was caught and corrected before it reached `allowedTransitions`,
+  not after. No stock ever moves on a revert — every status in play is already in
+  `STOCK_COMMITTED`, so `updateStatus.ts` needed no changes at all. One warning is shown: reverting
+  a cash-on-delivery order out of `delivered` flips whether money counts as collected (COD is only
+  "paid" at hand-off), so the exit button that follows would silently change from refund to cancel —
+  `revertCrossesPayment` catches this generically rather than hardcoding the one case.
+- Verified: `pnpm check` (0 errors)/`pnpm test` (102/102, 5 new)/`pnpm build` clean. Live against the
+  real dev Neon DB: `B260804-DAMN7` (card, `delivered`) reverted to `shipped`, then to `packed`
+  (correctly offered no further revert), a forged `packed → paid` still refused with
+  `invalid_transition`, then walked forward again to `delivered` to restore it. No stock change at
+  any step.
+- Next: unchanged — the rest of Phase 4 (products/content management, image upload, the COD limit).
 
 ### 2026-08-04 — Phase 4, part 2: the admin orders screen
 
