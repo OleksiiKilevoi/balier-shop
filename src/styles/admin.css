@@ -308,6 +308,21 @@
   }
 }
 
+/*
+ * A `<select>` wearing `admin-field`'s pill. `appearance: none` (inherited from
+ * that utility) is what makes it match the input beside it, and it also removes
+ * the native arrow — hence the padding here, and the chevron the markup draws
+ * over the right end. Drawn in `currentColor` at the call site rather than
+ * baked in as a background image, so it follows the theme like everything else.
+ */
+@utility admin-select {
+  padding-inline-end: 2.75rem;
+  cursor: pointer;
+  /* A long status must not push the chevron off the control on a narrow
+     screen. */
+  text-overflow: ellipsis;
+}
+
 /* Status pills, filter tabs, any small label. */
 @utility admin-badge {
   display: inline-flex;
@@ -315,7 +330,7 @@
   border-radius: var(--radius-control);
   padding-inline: 0.625rem;
   padding-block: 0.1875rem;
-  font-size: 0.75rem;
+  font-size: 0.8rem;
   font-weight: 500;
   white-space: nowrap;
   width: 100%;

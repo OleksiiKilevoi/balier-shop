@@ -7,7 +7,7 @@ export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
   awaiting_payment: 'Очікує оплати',
   paid: 'Оплачено',
   confirmed: 'Підтверджено',
-  packed: 'Зібрано',
+  packed: 'Упаковано',
   shipped: 'Відправлено',
   delivered: 'Доставлено',
   cancelled: 'Скасовано',
@@ -57,7 +57,7 @@ export const ORDER_TRANSITION_HINTS: Partial<Record<OrderStatus, string>> = {
 export const ORDER_REVERT_LABELS: Partial<Record<OrderStatus, string>> = {
   paid: 'Повернути до «Оплачено»',
   confirmed: 'Повернути до «Підтверджено»',
-  packed: 'Повернути до «Зібрано»',
+  packed: 'Повернути до «Упаковано»',
   shipped: 'Повернути до «Відправлено»',
   delivered: 'Повернути до «Доставлено»',
 };

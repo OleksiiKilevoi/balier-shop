@@ -46,25 +46,11 @@ function pageHref(next: number): string {
   return `${url.pathname}${url.search}`;
 }
 
-function statusHref(next: OrderStatus | null): string {
-  const url = new URL(Astro.url);
-  if (next) url.searchParams.set('status', next);
-  else url.searchParams.delete('status');
-  // A new filter is a new result set; page 2 of the old one means nothing in it.
-  url.searchParams.delete('page');
-  return `${url.pathname}${url.search}`;
-}
-
 const countLabel = `${total} ${pluralUk(total, {
   one: 'замовлення',
   few: 'замовлення',
   many: 'замовлень',
 })}`;
-
-const filterTabs: { label: string; value: OrderStatus | null }[] = [
-  { label: 'Усі', value: null },
-  ...orderStatus.enumValues.map((value) => ({ label: ORDER_STATUS_LABELS[value], value })),
-];
 ---
 
 <AdminLayout title="Замовлення">
@@ -73,7 +59,16 @@ const filterTabs: { label: string; value: OrderStatus | null }[] = [
     <p class="text-fg-muted text-sm">{countLabel}</p>
   </header>
 
-  <form method="get" action="/admin/orders" class="mt-5 flex max-w-xl flex-col gap-2 sm:flex-row">
+  {/*
+    Search and the status filter are one form and one action: the status was a
+    row of nine pills, which is a third of the viewport on a phone and pushed the
+    table off the first screen. A `<select>` is the same nine choices in one
+    control, and folding it into the search row means both parts of the view are
+    chosen in one place and applied in one submit. Submitting drops `page` on its
+    own — a new filter is a new result set, and page 2 of the old one means
+    nothing in it.
+  */}
+  <form method="get" action="/admin/orders" class="mt-5 flex max-w-3xl flex-col gap-2 sm:flex-row">
     <label for="orders-q" class="sr-only">Номер, ім’я або телефон</label>
     <input
       id="orders-q"
@@ -85,37 +80,37 @@ const filterTabs: { label: string; value: OrderStatus | null }[] = [
       autocomplete="off"
       class="admin-field sm:flex-1"
     />
-    {status && <input type="hidden" name="status" value={status} />}
+
+    <div class="relative sm:w-52">
+      <label for="orders-status" class="sr-only">Статус</label>
+      <select id="orders-status" name="status" class="admin-field admin-select">
+        <option value="">Усі статуси</option>
+        {
+          orderStatus.enumValues.map((value) => (
+            <option value={value} selected={value === status}>
+              {ORDER_STATUS_LABELS[value]}
+            </option>
+          ))
+        }
+      </select>
+      {/* The chevron is a sibling, not a pseudo-element: `appearance: none` takes
+          the native arrow away, and `select::after` is not rendered. */}
+      <svg
+        class="text-fg-subtle pointer-events-none absolute top-1/2 right-4 h-4 w-4 -translate-y-1/2"
+        viewBox="0 0 16 16"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.5"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true"
+      >
+        <path d="m4 6 4 4 4-4" />
+      </svg>
+    </div>
+
     <button type="submit" class="admin-btn admin-btn-primary shrink-0">Знайти</button>
   </form>
-
-  {/* Horizontally scrollable rather than wrapped: nine statuses wrap to three
-      ragged rows on a phone and push the table off the first screen. */}
-  <nav class="-mx-gutter mt-4 overflow-x-auto px-gutter" aria-label="Фільтр за статусом">
-    <ul class="flex w-max gap-2">
-      {
-        filterTabs.map((tab) => {
-          const active = tab.value === (status ?? null);
-          return (
-            <li>
-              <a
-                href={statusHref(tab.value)}
-                aria-current={active ? 'page' : undefined}
-                class:list={[
-                  'admin-badge h-9 px-3.5 text-sm',
-                  active
-                    ? 'bg-accent text-accent-fg'
-                    : 'border-border-strong text-fg-muted hover:border-fg-subtle hover:text-fg border',
-                ]}
-              >
-                {tab.label}
-              </a>
-            </li>
-          );
-        })
-      }
-    </ul>
-  </nav>
 
   {
     rows.length === 0 ? (
