@@ -116,33 +116,35 @@ const leavingTerminal = order?.status === 'cancelled' || order?.status === 'refu
 ---
 
 <AdminLayout title={order ? `Замовлення ${order.orderNumber}` : 'Замовлення не знайдено'}>
-  <a href="/admin/orders" class="text-ink-muted hover:text-ink text-sm">← До списку</a>
+  <a href="/admin/orders" class="text-fg-muted hover:text-fg text-sm">← До списку</a>
 
   {
     !order ? (
-      <p class="text-ink mt-6">Замовлення «{orderNumber}» не знайдено.</p>
+      <p class="text-fg mt-6">Замовлення «{orderNumber}» не знайдено.</p>
     ) : (
       <>
         <header class="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2">
-          <h1 class="font-display text-ink text-2xl font-bold sm:text-3xl">
+          <h1 class="text-fg font-mono text-2xl font-semibold sm:text-3xl">
             {order.orderNumber}
           </h1>
           <OrderStatusBadge status={order.status} />
         </header>
-        <p class="text-ink-muted mt-1 text-sm">
+        <p class="text-fg-subtle mt-1 text-sm">
           Створено {formatAdminDateTime(order.createdAt)}
           {order.paidAt && <> · оплачено {formatAdminDateTime(order.paidAt)}</>}
           {order.cancelledAt && <> · скасовано {formatAdminDateTime(order.cancelledAt)}</>}
         </p>
 
+        {/* A refusal is the only thing that earns colour on this page — the
+            successes are confirmed by the row itself having changed. */}
         {message && (
           <p
             role="status"
             class:list={[
-              'rounded-card mt-5 border p-3 text-sm',
+              'rounded-card mt-5 p-3 text-sm',
               FAILURES.has(message)
-                ? 'border-brand text-brand bg-paper-raised'
-                : 'border-line bg-paper-raised text-ink-soft',
+                ? 'admin-tone-negative'
+                : 'admin-card text-fg-muted',
             ]}
           >
             {ADMIN_ORDER_MESSAGES[message]}
@@ -150,14 +152,14 @@ const leavingTerminal = order?.status === 'cancelled' || order?.status === 'refu
         )}
 
         {/* ------------------------------------------------------- actions */}
-        <section class="border-line bg-paper-raised rounded-card mt-6 border p-5">
-          <h2 class="font-display text-ink text-lg font-bold">Статус</h2>
-          <p class="text-ink-muted mt-1 text-sm">
-            Зараз: <strong class="text-ink-soft">{ORDER_STATUS_LABELS[order.status]}</strong>
+        <section class="admin-card mt-6 p-5">
+          <h2 class="text-fg text-base font-semibold">Статус</h2>
+          <p class="text-fg-muted mt-1 text-sm">
+            Зараз: <strong class="text-fg font-medium">{ORDER_STATUS_LABELS[order.status]}</strong>
           </p>
 
           {transitions.length === 0 ? (
-            <p class="text-ink-muted mt-2 text-sm">
+            <p class="text-fg-subtle mt-2 text-sm">
               Замовлення завершене — далі статус не змінюється.
             </p>
           ) : (
@@ -170,10 +172,7 @@ const leavingTerminal = order?.status === 'cancelled' || order?.status === 'refu
                       cannot fire a transition nobody chose. */}
                   <input type="hidden" name="from" value={order.status} />
                   <input type="hidden" name="next" value={next} />
-                  <button
-                    type="submit"
-                    class="bg-brand hover:bg-brand-hover rounded-btn h-touch w-full cursor-pointer px-6 text-sm font-medium text-white sm:w-auto"
-                  >
+                  <button type="submit" class="admin-btn admin-btn-primary w-full sm:w-auto">
                     {ORDER_TRANSITION_LABELS[next]}
                   </button>
                 </form>
@@ -190,15 +189,12 @@ const leavingTerminal = order?.status === 'cancelled' || order?.status === 'refu
                   <input type="hidden" name="from" value={order.status} />
                   <input type="hidden" name="next" value={revert} />
                   {ORDER_REVERT_HINTS[revert] && (
-                    <p class="text-ink-muted mb-2 text-sm">{ORDER_REVERT_HINTS[revert]}</p>
+                    <p class="text-fg-subtle mb-2 text-sm">{ORDER_REVERT_HINTS[revert]}</p>
                   )}
                   {revertWarning && (
-                    <p class="text-ink-muted mb-2 text-sm">{revertWarning}</p>
+                    <p class="text-fg-subtle mb-2 text-sm">{revertWarning}</p>
                   )}
-                  <button
-                    type="submit"
-                    class="border-line-strong text-ink hover:border-ink rounded-btn h-touch w-full cursor-pointer border px-6 text-sm font-medium sm:w-auto"
-                  >
+                  <button type="submit" class="admin-btn admin-btn-secondary w-full sm:w-auto">
                     {ORDER_REVERT_LABELS[revert]}
                   </button>
                 </form>
@@ -209,8 +205,8 @@ const leavingTerminal = order?.status === 'cancelled' || order?.status === 'refu
                   exiting it did) and there is no script on this page. Two
                   deliberate clicks. */}
               {(exits.length > 0 || (revert && leavingTerminal)) && (
-                <details class="border-line mt-4 border-t pt-4">
-                  <summary class="text-ink-muted hover:text-ink min-h-touch flex cursor-pointer items-center text-sm">
+                <details class="border-border mt-4 border-t pt-4">
+                  <summary class="text-fg-muted hover:text-fg min-h-touch flex cursor-pointer items-center text-sm">
                     Інші дії
                   </summary>
                   {revert && leavingTerminal && (
@@ -219,15 +215,15 @@ const leavingTerminal = order?.status === 'cancelled' || order?.status === 'refu
                       <input type="hidden" name="from" value={order.status} />
                       <input type="hidden" name="next" value={revert} />
                       {ORDER_REVERT_HINTS[revert] && (
-                        <p class="text-ink-muted mb-2 text-sm">{ORDER_REVERT_HINTS[revert]}</p>
+                        <p class="text-fg-subtle mb-2 text-sm">{ORDER_REVERT_HINTS[revert]}</p>
                       )}
                       {revertFromRefundedWarning && (
-                        <p class="text-ink-muted mb-2 text-sm">{revertFromRefundedWarning}</p>
+                        <p class="text-fg-subtle mb-2 text-sm">{revertFromRefundedWarning}</p>
                       )}
-                      <button
-                        type="submit"
-                        class="border-line-strong text-ink hover:border-ink rounded-btn h-touch w-full cursor-pointer border px-6 text-sm font-medium sm:w-auto"
-                      >
+                      {/* Secondary, not danger: this one *undoes* a terminal
+                          state. It shares the disclosure with the exits because
+                          it moves stock, not because it is destructive. */}
+                      <button type="submit" class="admin-btn admin-btn-secondary w-full sm:w-auto">
                         {ORDER_REVERT_LABELS[revert]}
                       </button>
                     </form>
@@ -238,12 +234,9 @@ const leavingTerminal = order?.status === 'cancelled' || order?.status === 'refu
                       <input type="hidden" name="from" value={order.status} />
                       <input type="hidden" name="next" value={next} />
                       {ORDER_TRANSITION_HINTS[next] && (
-                        <p class="text-ink-muted mb-2 text-sm">{ORDER_TRANSITION_HINTS[next]}</p>
+                        <p class="text-fg-subtle mb-2 text-sm">{ORDER_TRANSITION_HINTS[next]}</p>
                       )}
-                      <button
-                        type="submit"
-                        class="border-line-strong text-ink hover:border-ink rounded-btn h-touch w-full cursor-pointer border px-6 text-sm font-medium sm:w-auto"
-                      >
+                      <button type="submit" class="admin-btn admin-btn-danger w-full sm:w-auto">
                         {ORDER_TRANSITION_LABELS[next]}
                       </button>
                     </form>
@@ -256,16 +249,16 @@ const leavingTerminal = order?.status === 'cancelled' || order?.status === 'refu
 
         {/* ------------------------------------------------- customer, delivery */}
         <div class="mt-6 grid gap-6 md:grid-cols-2">
-          <section class="border-line bg-paper-raised rounded-card border p-5">
-            <h2 class="font-display text-ink text-lg font-bold">Клієнт</h2>
+          <section class="admin-card p-5">
+            <h2 class="text-fg text-base font-semibold">Клієнт</h2>
             <dl class="mt-3 space-y-2 text-sm">
               <div>
-                <dt class="text-ink-muted">Ім’я</dt>
-                <dd class="text-ink">{order.customerName}</dd>
+                <dt class="text-fg-subtle text-xs">Ім’я</dt>
+                <dd class="text-fg">{order.customerName}</dd>
               </div>
               <div>
-                <dt class="text-ink-muted">Телефон</dt>
-                <dd class="text-ink">
+                <dt class="text-fg-subtle text-xs">Телефон</dt>
+                <dd class="text-fg">
                   <a href={`tel:${order.customerPhone}`} class="underline-offset-2 hover:underline">
                     {order.customerPhone}
                   </a>
@@ -273,8 +266,8 @@ const leavingTerminal = order?.status === 'cancelled' || order?.status === 'refu
               </div>
               {order.customerEmail && (
                 <div>
-                  <dt class="text-ink-muted">Email</dt>
-                  <dd class="text-ink">
+                  <dt class="text-fg-subtle text-xs">Email</dt>
+                  <dd class="text-fg">
                     <a
                       href={`mailto:${order.customerEmail}`}
                       class="underline-offset-2 hover:underline"
@@ -286,34 +279,34 @@ const leavingTerminal = order?.status === 'cancelled' || order?.status === 'refu
               )}
               {order.comment && (
                 <div>
-                  <dt class="text-ink-muted">Коментар</dt>
-                  <dd class="text-ink whitespace-pre-line">{order.comment}</dd>
+                  <dt class="text-fg-subtle text-xs">Коментар</dt>
+                  <dd class="text-fg whitespace-pre-line">{order.comment}</dd>
                 </div>
               )}
             </dl>
           </section>
 
-          <section class="border-line bg-paper-raised rounded-card border p-5">
-            <h2 class="font-display text-ink text-lg font-bold">Доставка й оплата</h2>
+          <section class="admin-card p-5">
+            <h2 class="text-fg text-base font-semibold">Доставка й оплата</h2>
             <dl class="mt-3 space-y-2 text-sm">
               <div>
-                <dt class="text-ink-muted">Спосіб доставки</dt>
-                <dd class="text-ink">{DELIVERY_METHOD_LABELS[order.deliveryMethod]}</dd>
+                <dt class="text-fg-subtle text-xs">Спосіб доставки</dt>
+                <dd class="text-fg">{DELIVERY_METHOD_LABELS[order.deliveryMethod]}</dd>
               </div>
               <div>
-                <dt class="text-ink-muted">Куди</dt>
-                <dd class="text-ink">{deliveryDestination(order)}</dd>
+                <dt class="text-fg-subtle text-xs">Куди</dt>
+                <dd class="text-fg">{deliveryDestination(order)}</dd>
               </div>
               <div>
-                <dt class="text-ink-muted">Оплата</dt>
-                <dd class="text-ink">{PAYMENT_METHOD_LABELS[order.paymentMethod]}</dd>
+                <dt class="text-fg-subtle text-xs">Оплата</dt>
+                <dd class="text-fg">{PAYMENT_METHOD_LABELS[order.paymentMethod]}</dd>
               </div>
               {order.payments.map((payment) => (
                 <div>
-                  <dt class="text-ink-muted">Monobank</dt>
-                  <dd class="text-ink">
+                  <dt class="text-fg-subtle text-xs">Monobank</dt>
+                  <dd class="text-fg">
                     {payment.status} · {formatPrice(payment.amount)}
-                    <span class="text-ink-muted block text-xs break-all">
+                    <span class="text-fg-subtle block font-mono text-xs break-all">
                       {payment.invoiceId}
                     </span>
                   </dd>
@@ -321,74 +314,122 @@ const leavingTerminal = order?.status === 'cancelled' || order?.status === 'refu
               ))}
             </dl>
 
-            <form method="post" action={selfUrl} class="border-line mt-4 border-t pt-4">
-              <input type="hidden" name="intent" value="ttn" />
-              <label for="ttn" class="text-ink-muted block text-sm">
-                Номер накладної Нової Пошти
-              </label>
-              <div class="mt-2 flex flex-col gap-2 sm:flex-row">
-                <input
-                  id="ttn"
-                  name="ttn"
-                  type="text"
-                  inputmode="numeric"
-                  value={order.npTtn ?? ''}
-                  placeholder={'0'.repeat(TRACKING_NUMBER_LENGTH)}
-                  autocomplete="off"
-                  class="border-line-strong bg-paper-raised text-ink placeholder:text-ink-muted rounded-btn h-touch w-full min-w-0 appearance-none border px-4 text-base sm:flex-1 sm:text-sm"
-                />
-                <button
-                  type="submit"
-                  class="border-line-strong text-ink hover:border-ink rounded-btn h-touch shrink-0 cursor-pointer border px-6 text-sm font-medium sm:w-auto"
-                >
-                  Зберегти
-                </button>
+            {/* The tracking number is a *value* until someone asks to change it.
+                A live input alongside read-only fields reads as something that
+                still needs filling in, and invites an accidental edit of a
+                number the carrier already has.
+
+                Not a `<details>`, unlike «Інші дії» above: a `<summary>` toggles
+                on a click *anywhere* inside itself, so the number could not sit
+                in it and still be selectable — every attempt to copy it would
+                open the editor instead. A checkbox carries the toggle alone, the
+                number lives outside it, and `group-has-[:checked]` reveals the
+                form. Still no script on the page. */}
+            <div class="border-border group mt-4 border-t pt-4">
+              {/* The label is its own line: at 320px it wraps to two, and in the
+                  row below it would push the button between the label and the
+                  value it belongs to. */}
+              <p class="text-fg-subtle text-xs">Номер накладної Нової Пошти</p>
+
+              <div class="min-h-touch flex items-center gap-x-4">
+                {/* `select-all`: one click takes the whole number, which is the
+                    only reason to touch it without editing. */}
+                <span class="text-fg min-w-0 font-mono text-sm break-all select-all">
+                  {order.npTtn ?? <span class="text-fg-subtle font-sans select-none">—</span>}
+                </span>
+                {/* `ml-auto` rather than `justify-between` on the row: it keeps
+                    the button at the right edge whatever the value's width. The
+                    checkbox is `sr-only`, not hidden, so it stays keyboard
+                    reachable — and since the global `:focus-visible` outline
+                    would then land on a clipped 1px box, the ring is drawn on
+                    this label instead. */}
+                <label class="text-fg-muted hover:text-fg has-[:focus-visible]:outline-fg-subtle ml-auto shrink-0 cursor-pointer rounded-full text-sm underline underline-offset-2 has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2">
+                  {/* Checked from the server when the last attempt was rejected,
+                      so the correction happens where the error message points. */}
+                  <input
+                    type="checkbox"
+                    class="sr-only"
+                    checked={message === 'invalid_tracking_number'}
+                  />
+                  <span class="group-has-[:checked]:hidden">
+                    {order.npTtn ? 'Змінити' : 'Додати'}
+                  </span>
+                  <span class="hidden group-has-[:checked]:inline">Згорнути</span>
+                </label>
               </div>
-              <p class="text-ink-muted mt-2 text-xs">
-                {TRACKING_NUMBER_LENGTH} цифр. Порожнє поле видаляє номер.
-              </p>
-            </form>
+
+              <form
+                method="post"
+                action={selfUrl}
+                class="group-has-[:checked]:block mt-1 hidden"
+              >
+                <input type="hidden" name="intent" value="ttn" />
+                <label for="ttn" class="sr-only">Номер накладної Нової Пошти</label>
+                <div class="flex flex-col gap-2 sm:flex-row">
+                  <input
+                    id="ttn"
+                    name="ttn"
+                    type="text"
+                    maxlength="14"
+                    inputmode="numeric"
+                    value={order.npTtn ?? ''}
+                    placeholder={'0'.repeat(TRACKING_NUMBER_LENGTH)}
+                    autocomplete="off"
+                    class="admin-field font-mono sm:flex-1"
+                  />
+                  <button type="submit" class="admin-btn admin-btn-primary shrink-0">
+                    Зберегти
+                  </button>
+                </div>
+                <p class="text-fg-subtle mt-2 text-xs">
+                  {TRACKING_NUMBER_LENGTH} цифр. Порожнє поле видаляє номер.
+                </p>
+              </form>
+            </div>
           </section>
         </div>
 
         {/* -------------------------------------------------------- the goods */}
-        <section class="border-line bg-paper-raised rounded-card mt-6 border p-5">
-          <h2 class="font-display text-ink text-lg font-bold">Товари</h2>
+        <section class="admin-card mt-6 p-5">
+          <h2 class="text-fg text-base font-semibold">Товари</h2>
 
           {/* Snapshotted at order time — never joined back to the catalog
               (`docs/CONVENTIONS.md`), so this is what was actually bought, at
               the price it was actually bought for. */}
-          <ul class="mt-3 divide-line divide-y text-sm">
+          <ul class="divide-border mt-3 divide-y text-sm">
             {order.items.map((item) => (
               <li class="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-3 first:pt-0">
                 <div class="min-w-0">
-                  <p class="text-ink">
+                  <p class="text-fg">
                     {item.productTitle}
-                    {item.variantName && <span class="text-ink-muted"> · {item.variantName}</span>}
+                    {item.variantName && <span class="text-fg-muted"> · {item.variantName}</span>}
                   </p>
-                  <p class="text-ink-muted text-xs">
-                    {item.sku} · {item.quantity} × {formatPrice(item.unitPrice)}
+                  <p class="text-fg-subtle text-xs">
+                    <span class="font-mono">{item.sku}</span> · {item.quantity} ×{' '}
+                    {formatPrice(item.unitPrice)}
                   </p>
                 </div>
-                <p class="text-ink font-medium whitespace-nowrap">{formatPrice(item.lineTotal)}</p>
+                <p class="text-fg font-medium tabular-nums whitespace-nowrap">
+                  {formatPrice(item.lineTotal)}
+                </p>
               </li>
             ))}
           </ul>
 
           {/* `gap-x-4`: at 320px «за тарифами перевізника» wraps, and without a
               gap the wrapped line runs straight into its own term. */}
-          <dl class="border-line mt-4 space-y-1 border-t pt-4 text-sm">
+          <dl class="border-border mt-4 space-y-1 border-t pt-4 text-sm">
             <div class="flex justify-between gap-x-4">
-              <dt class="text-ink-muted">Товари</dt>
-              <dd class="text-ink whitespace-nowrap">{formatPrice(order.itemsTotal)}</dd>
+              <dt class="text-fg-muted">Товари</dt>
+              <dd class="text-fg tabular-nums whitespace-nowrap">{formatPrice(order.itemsTotal)}</dd>
             </div>
             <div class="flex justify-between gap-x-4">
-              <dt class="text-ink-muted shrink-0">Доставка</dt>
-              <dd class="text-ink-muted text-right">за тарифами перевізника</dd>
+              <dt class="text-fg-muted shrink-0">Доставка</dt>
+              <dd class="text-fg-subtle text-right">за тарифами перевізника</dd>
             </div>
-            <div class="text-ink flex justify-between gap-x-4 font-medium">
+            <div class="text-fg flex justify-between gap-x-4 font-medium">
               <dt>Разом</dt>
-              <dd class="whitespace-nowrap">{formatPrice(order.total)}</dd>
+              <dd class="tabular-nums whitespace-nowrap">{formatPrice(order.total)}</dd>
             </div>
           </dl>
         </section>

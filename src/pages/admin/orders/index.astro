@@ -69,8 +69,8 @@ const filterTabs: { label: string; value: OrderStatus | null }[] = [
 
 <AdminLayout title="Замовлення">
   <header class="flex flex-wrap items-baseline justify-between gap-2">
-    <h1 class="font-display text-ink text-2xl font-bold sm:text-3xl">Замовлення</h1>
-    <p class="text-ink-muted text-sm">{countLabel}</p>
+    <h1 class="text-fg text-2xl font-semibold sm:text-3xl">Замовлення</h1>
+    <p class="text-fg-muted text-sm">{countLabel}</p>
   </header>
 
   <form method="get" action="/admin/orders" class="mt-5 flex max-w-xl flex-col gap-2 sm:flex-row">
@@ -83,15 +83,10 @@ const filterTabs: { label: string; value: OrderStatus | null }[] = [
       placeholder="B260804-XXXXX, ім’я або телефон"
       maxlength={MAX_QUERY}
       autocomplete="off"
-      class="border-line-strong bg-paper-raised text-ink placeholder:text-ink-muted rounded-btn h-touch w-full min-w-0 appearance-none border px-4 text-base sm:flex-1 sm:text-sm"
+      class="admin-field sm:flex-1"
     />
     {status && <input type="hidden" name="status" value={status} />}
-    <button
-      type="submit"
-      class="bg-brand hover:bg-brand-hover rounded-btn h-touch shrink-0 cursor-pointer px-6 text-sm font-medium text-white sm:w-auto"
-    >
-      Знайти
-    </button>
+    <button type="submit" class="admin-btn admin-btn-primary shrink-0">Знайти</button>
   </form>
 
   {/* Horizontally scrollable rather than wrapped: nine statuses wrap to three
@@ -107,10 +102,10 @@ const filterTabs: { label: string; value: OrderStatus | null }[] = [
                 href={statusHref(tab.value)}
                 aria-current={active ? 'page' : undefined}
                 class:list={[
-                  'rounded-btn inline-flex h-9 items-center px-3 text-sm whitespace-nowrap',
+                  'admin-badge h-9 px-3.5 text-sm',
                   active
-                    ? 'bg-espresso text-paper'
-                    : 'border-line-strong text-ink-soft hover:border-ink border',
+                    ? 'bg-accent text-accent-fg'
+                    : 'border-border-strong text-fg-muted hover:border-fg-subtle hover:text-fg border',
                 ]}
               >
                 {tab.label}
@@ -124,7 +119,7 @@ const filterTabs: { label: string; value: OrderStatus | null }[] = [
 
   {
     rows.length === 0 ? (
-      <p class="text-ink-muted mt-8">
+      <p class="text-fg-muted mt-8">
         {query || status
           ? 'За цим фільтром замовлень немає.'
           : 'Замовлень поки немає.'}
@@ -135,28 +130,30 @@ const filterTabs: { label: string; value: OrderStatus | null }[] = [
             a table at 320px either scrolls sideways or crushes every column. */}
         <ul class="mt-6 space-y-3 md:hidden">
           {rows.map((row) => (
-            <li class="border-line bg-paper-raised rounded-card border">
+            <li class="admin-card hover:border-border-strong transition-colors">
               <a href={`/admin/orders/${row.orderNumber}`} class="block p-4">
                 <div class="flex items-start justify-between gap-3">
-                  <span class="text-ink font-medium whitespace-nowrap">{row.orderNumber}</span>
+                  <span class="text-fg font-mono text-sm font-medium whitespace-nowrap">
+                    {row.orderNumber}
+                  </span>
                   <OrderStatusBadge status={row.status} />
                 </div>
-                <p class="text-ink-soft mt-2 text-sm">
+                <p class="text-fg mt-2 text-sm">
                   {row.customerName} · {row.customerPhone}
                 </p>
-                <p class="text-ink-muted mt-1 text-sm">
+                <p class="text-fg-subtle mt-1 text-sm">
                   {formatAdminDateTime(row.createdAt)} ·{' '}
                   {PAYMENT_METHOD_LABELS[row.paymentMethod]}
                 </p>
-                <p class="text-ink mt-2 font-medium">{formatPrice(row.total)}</p>
+                <p class="text-fg mt-2 font-medium tabular-nums">{formatPrice(row.total)}</p>
               </a>
             </li>
           ))}
         </ul>
 
-        <div class="border-line bg-paper-raised rounded-card mt-6 hidden overflow-x-auto border md:block">
+        <div class="admin-card mt-6 hidden overflow-x-auto md:block">
           <table class="w-full border-collapse text-sm">
-            <thead class="text-ink-muted border-line border-b text-left">
+            <thead class="text-fg-subtle border-border border-b text-left text-xs">
               <tr>
                 <th scope="col" class="px-4 py-3 font-medium">Номер</th>
                 <th scope="col" class="px-4 py-3 font-medium">Дата</th>
@@ -169,35 +166,35 @@ const filterTabs: { label: string; value: OrderStatus | null }[] = [
             </thead>
             <tbody>
               {rows.map((row) => (
-                <tr class="border-line hover:bg-paper border-b last:border-b-0">
+                <tr class="border-border hover:bg-surface-hover border-b transition-colors last:border-b-0">
                   <td class="px-4 py-3 whitespace-nowrap">
                     <a
                       href={`/admin/orders/${row.orderNumber}`}
-                      class="text-ink font-medium underline-offset-2 hover:underline"
+                      class="text-fg font-mono font-medium underline-offset-2 hover:underline"
                     >
                       {row.orderNumber}
                     </a>
-                    <span class="text-ink-muted block text-xs">
+                    <span class="text-fg-subtle block text-xs">
                       {row.itemCount} шт.
                     </span>
                   </td>
-                  <td class="text-ink-muted px-4 py-3 whitespace-nowrap">
+                  <td class="text-fg-muted px-4 py-3 whitespace-nowrap">
                     {formatAdminDateTime(row.createdAt)}
                   </td>
-                  <td class="text-ink-soft px-4 py-3">
+                  <td class="text-fg px-4 py-3">
                     {row.customerName}
-                    <span class="text-ink-muted block text-xs">{row.customerPhone}</span>
+                    <span class="text-fg-subtle block text-xs">{row.customerPhone}</span>
                   </td>
-                  <td class="text-ink-soft px-4 py-3">
+                  <td class="text-fg-muted px-4 py-3">
                     {DELIVERY_METHOD_LABELS[row.deliveryMethod]}
                     {row.npTtn && (
-                      <span class="text-ink-muted block text-xs">ТТН {row.npTtn}</span>
+                      <span class="text-fg-subtle block font-mono text-xs">ТТН {row.npTtn}</span>
                     )}
                   </td>
-                  <td class="text-ink-soft px-4 py-3">
+                  <td class="text-fg-muted px-4 py-3">
                     {PAYMENT_METHOD_LABELS[row.paymentMethod]}
                   </td>
-                  <td class="text-ink px-4 py-3 text-right font-medium whitespace-nowrap">
+                  <td class="text-fg px-4 py-3 text-right font-medium tabular-nums whitespace-nowrap">
                     {formatPrice(row.total)}
                   </td>
                   <td class="px-4 py-3">
@@ -219,23 +216,21 @@ const filterTabs: { label: string; value: OrderStatus | null }[] = [
           href={pageHref(page - 1)}
           aria-disabled={page === 1}
           class:list={[
-            'rounded-btn border-line-strong h-touch inline-flex items-center border px-4 text-sm',
-            page === 1 ? 'text-ink-muted pointer-events-none opacity-50' : 'text-ink-soft hover:border-ink',
+            'admin-btn admin-btn-secondary',
+            page === 1 && 'pointer-events-none opacity-40',
           ]}
         >
           Назад
         </a>
-        <span class="text-ink-muted text-sm">
+        <span class="text-fg-muted text-sm tabular-nums">
           {page} / {pageCount}
         </span>
         <a
           href={pageHref(page + 1)}
           aria-disabled={page === pageCount}
           class:list={[
-            'rounded-btn border-line-strong h-touch inline-flex items-center border px-4 text-sm',
-            page === pageCount
-              ? 'text-ink-muted pointer-events-none opacity-50'
-              : 'text-ink-soft hover:border-ink',
+            'admin-btn admin-btn-secondary',
+            page === pageCount && 'pointer-events-none opacity-40',
           ]}
         >
           Далі

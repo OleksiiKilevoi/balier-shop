@@ -41,6 +41,19 @@ export default defineConfig({
       subsets: ['cyrillic', 'latin'],
       fallbacks: ['system-ui', 'sans-serif'],
     },
+    // The admin panel's only face, and the only thing it takes from this file —
+    // the storefront never loads it and it never loads the storefront's two.
+    // Weights are the three the panel actually paints: body, `font-medium`
+    // labels and buttons, `font-semibold` headings. Nothing there is bold.
+    {
+      provider: fontProviders.google(),
+      name: 'Geist',
+      cssVariable: '--font-geist',
+      weights: [400, 500, 600],
+      styles: ['normal'],
+      subsets: ['cyrillic', 'latin'],
+      fallbacks: ['system-ui', 'sans-serif'],
+    },
   ],
   vite: {
     plugins: [tailwindcss()],

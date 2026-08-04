@@ -4,7 +4,155 @@
 
 ## 📍 CURRENT STATE (overwrite this block; keep tight)
 
-- **Last done:** **status revert on `/admin/orders/[orderNumber]`**, on report that a wrong click
+- **Last done:** **the admin panel has a typeface: Geist.** On request, and it reverses the "no web
+  font at all" decision two entries below — deliberately, and the reason that decision was made still
+  holds: Geist is a neutral interface grotesque with a real Cyrillic cut, so it carries no business's
+  brand and survives the lift into the next project, which is the same test the accent has to pass.
+  - **Self-hosted at build time**, through Astro's font pipeline (a fourth entry in
+    `astro.config.mjs` + a `<Font cssVariable="--font-geist" preload />` in `AdminLayout`), so nothing
+    is fetched from Google at runtime and no third party sits in front of a signed-in screen. Weights
+    are exactly the three the panel paints — 400 body, 500 labels/buttons, 600 headings; nothing under
+    `/admin` is bold. Two subsets, `cyrillic` + `latin`, both preloaded because both are on every
+    screen (Ukrainian copy, Latin order numbers and emails).
+  - **Isolation still holds, and is still enforced by the build**: `admin.css` aliases
+    `--font-sans: var(--font-geist), …` the same way `global.css` aliases Inter, and the built assets
+    cross-check clean — no `--font-geist` in `BaseLayout.*.css`, no `--font-playfair`/`--font-inter`/
+    `--color-paper` in `AdminLayout.*.css` (24.7 KB, up from 24.2). The storefront's rendered HTML
+    contains no mention of Geist.
+  - **The mono stack is untouched** — order numbers, SKUs, TTNs and invoice ids still render in the
+    system mono (`ui-monospace`/Consolas/SF Mono). Geist Mono exists on Google Fonts and would pair
+    exactly; it was not added because it was not asked for, and it would be a third font file.
+  - Config, one layout tag and two `admin.css` declarations — no route, query, schema or validation
+    touched.
+  `pnpm check` (0 errors)/`pnpm test` (110/110, untouched)/`pnpm build` clean (6 font files now, up
+  from 4 — Geist is one variable file per subset, shared across all three weights). Verified live over
+  CDP against the real dev Neon DB: `document.fonts.check('600 16px Geist…', 'Замовлення')` true with
+  all six faces `loaded`, computed `font-family` on `<body>`/`<h1>` resolving through `--font-geist`,
+  Cyrillic measuring differently from Arial (so not silently falling back), and the orders list
+  eyeballed at 1280 light *and* dark plus 320 (`cssContentSize.width` 320, no overflow).
+- **Before that:** **a light/dark switch in the admin header, and the panel's first client-side
+  JavaScript.** **Two states, light and dark**, flipped by one icon button and remembered in
+  `localStorage`. **This retires the panel's "no client-side JavaScript at all" property**,
+  deliberately and with the trade named: a chosen theme has to survive a page load, and nothing but
+  storage does that. It is one inline script in `AdminLayout` — no framework, no hydration, no
+  JavaScript *asset* — and every other page in the panel is still plain forms and links.
+  - **Following the system is how the panel starts, not a state the switch can sit in** (built with a
+    third `system` mode first, then cut on request — "we only need dark/light"). Until a choice
+    exists the script resolves `prefers-color-scheme` to one of the two before the first paint *and
+    keeps following it live*, so a first visit still lands on the right theme and an OS change mid-
+    session is still followed; the first click ends that for this browser, permanently. `data-theme`
+    is therefore always concrete (`light`/`dark`) once JavaScript has run, and the two `theme-color`
+    metas are always exactly one `all` and one `not all`.
+  - **One palette now, not two, via `light-dark()`.** Each token carries both themes on one line
+    (`--admin-canvas: light-dark(#f7f7f8, #09090b)`), so a colour is written once and the halves
+    cannot drift. `color-scheme` is the only switch: `light dark` means follow the OS, and
+    `:root[data-theme='light'|'dark']` overrides it. **There is no `prefers-color-scheme` media query
+    left in `admin.css`.** Values are unchanged — this is the same palette, restructured.
+  - **The fade is a view transition, because the obvious version measurably does not work.** A
+    `transition` on `*` looks right until you measure it: `color` is inherited, so it creates one
+    transition per node (`getAnimations()` reported **239** colour transitions against 22 for
+    `background-color`), each chasing a parent that is still animating. They restart every frame and
+    text crawls for over a second while backgrounds land at 0.5s — the exact mismatch the fade was
+    meant to prevent. One `document.startViewTransition` cross-fade moves everything together on a
+    single 500ms animation instead, and cannot outrank the panel's own 0.15s hover timings.
+  - **Not the default cross-fade either.** The UA version fades old out *while* fading new in, so at
+    the midpoint both snapshots sit half-transparent, a quarter of the page shows through as grey and
+    every line of text ghosts — visibly wrong on a screen that is mostly small text. The outgoing
+    page stays fully opaque and the incoming one dissolves over it, so coverage is 100% throughout.
+    `mix-blend-mode: normal` is required with that, since the UA sets `plus-lighter` for *its* fade.
+  - **No flash on load**: the script is inline and blocking in `<head>`, so `data-theme` is on
+    `<html>` before the first paint — confirmed by reading the first rendered frame, not assumed.
+    **With JavaScript off the switch hides itself** (`:root:not([data-theme])`) and the panel follows
+    the OS exactly as before — a control that cannot work is worse than none. Reduced motion skips
+    the transition entirely (0 animations, still switches).
+  - Also: the two `theme-color` metas are re-pointed by the script so mobile browser chrome follows a
+    forced theme; one new `admin-icon-btn` utility; both icons ship and CSS picks one off the same
+    `data-theme`, so the icon is right in the first paint.
+  - Markup, CSS and that one script only — no route, query, schema or validation touched.
+  `pnpm check` (0 errors)/`pnpm test` (110/110, untouched)/`pnpm build` clean. Verified live over CDP
+  against the real dev Neon DB, and re-verified after the cut to two states: a fresh browser under a
+  dark OS resolving to `dark` with nothing stored; the OS flipped live with no choice made (followed,
+  no reload) and again with one made (correctly ignored); both clicks, with icon, `aria-label` and
+  both metas tracking; a stored theme beating the opposite OS setting; `data-theme` present at the
+  **first animation frame** (read from a script injected ahead of the page's own, so before the first
+  paint) under an opposing OS; the cross-fade still the single `admin-theme-in` 500ms animation on
+  `::view-transition-new(root)`; and JavaScript disabled → no attribute, switch hidden, OS honoured.
+  Earlier in the same block and unchanged by the cut: `admin-btn-danger`'s `color-mix` border
+  resolving, and 320px (`scrollWidth` 305, header wraps to two rows, control fully visible).
+  **The shipped stylesheet was tested separately from dev**, because they are not the same mechanism:
+  Lightning CSS downlevels `light-dark()` into its `--lightningcss-light/dark` space-toggle
+  polyfill. It rewrites the `:root[data-theme]` rules too, so the override survives — confirmed by
+  driving the built `AdminLayout.*.css` through every OS/attribute combination in a harness, since
+  `/admin` in a built Worker is (correctly) 403 and cannot be browsed. Isolation still holds:
+  `--color-paper`, `--color-espresso`, `--font-playfair`, `container-page` all absent from the built
+  admin CSS (24.2 KB, up from 22 KB).
+- **Earlier:** **the admin panel got its own design system, `src/styles/admin.css` — deliberately
+  design-agnostic**, because the panel (with the cart, checkout and DB) is meant to be lifted into
+  the next business unchanged, and a panel wearing this shop's leather-and-cream skin cannot be. It
+  now shares **nothing** with the storefront: not a token, not a font, not a component.
+  - **Its own Tailwind build, not a second palette inside `global.css`.**
+    `@import 'tailwindcss' source(none)` plus three `@source` lines (the admin layout, components and
+    pages) means the panel's stylesheet is compiled only from the panel's own files. The two ship as
+    separate assets (`AdminLayout.*.css` 22 KB / `BaseLayout.*.css` 42 KB) and **no page loads both**
+    — verified by grepping the built admin CSS for `--color-paper`, `--color-espresso`,
+    `--font-playfair`, `container-page`: all absent, and the storefront home still renders exactly as
+    before. Re-theming either side can no longer touch the other.
+  - **The accent is the inverted foreground, not a colour** — solid black on light, solid white on
+    dark. A brand hue is precisely the thing that would not survive the move to the next business, so
+    the primary button doesn't have one. Buttons and fields are pills (`--radius-control: 9999px`),
+    cards are `0.875rem`.
+  - **Dark theme via `prefers-color-scheme`, and that is the only option available** — the panel has
+    no client-side JavaScript, so a manual toggle could not be persisted. One `:root` palette,
+    re-declared under the media query; components name a role (`bg-surface`, `text-fg-muted`) and
+    never branch on the theme. `color-scheme: light dark` on `html` so native controls, scrollbars
+    and the caret follow it too.
+    **Superseded by the entry above** — the palette is now one `light-dark()` block with no media
+    query, and a manual switch does exist. What survived unchanged: the colour values themselves,
+    role-named components, and `color-scheme` carrying the theme to native controls.
+  - **No web font at all.** The storefront's Playfair/Inter `<Font>` tags are gone from
+    `AdminLayout`; the panel uses the system UI stack (renders Cyrillic on every target) and a mono
+    stack for the strings that get compared against another screen — order numbers, SKUs, TTNs,
+    Monobank invoice ids.
+    **Half superseded by the entry at the top** — the panel now loads Geist, its own font, which the
+    storefront never sees. What survived: the reasoning (the face must carry no brand), and the mono
+    stack, which is still the system's.
+  - **The reusable pieces are utilities, not repeated class strings:** `admin-btn` + `-primary`/
+    `-secondary`/`-danger`, `admin-field`, `admin-card`, `admin-badge`, `admin-container`, and five
+    `admin-tone-*` named for what a row *means* (positive / attention / progress / neutral /
+    negative) rather than for a colour. `OrderStatusBadge` now maps status → meaning, and holds no
+    colour value. Cancel/refund moved to `admin-btn-danger`; the revert that *undoes* a terminal
+    state stays `admin-btn-secondary`, since it shares the disclosure for its stock side effect, not
+    for being destructive.
+  - Markup and CSS only — no route, query, schema or validation touched, and the panel's
+    no-JavaScript and post/redirect/get properties are unchanged.
+  `pnpm check` (0 errors)/`pnpm test` (110/110, untouched)/`pnpm build` clean. Verified live against
+  the real dev Neon DB over CDP with `prefers-color-scheme` emulated both ways: the list, an order
+  detail and `/admin` in light *and* dark at 1280, the detail and list at 320 (`cssContentSize.width`
+  320 on both, no overflow), and the disclosures forced open to check all three button tiers and the
+  `insufficient_stock` failure banner in dark.
+- **Earlier:** **the TTN field on `/admin/orders/[orderNumber]` is a value, not a live input.**
+  It was an always-editable text box sitting among read-only fields, which read as something still
+  waiting to be filled in and invited an accidental edit of a number the carrier already has. Now the
+  number renders as plain text (`—` when unset) with a «Змінити»/«Додати» affordance; the input and
+  «Зберегти» appear only when that is pressed. Markup-only — no change to `setOrderTrackingNumber`,
+  the schema, or `adminOrderActionSchema`.
+  - **A `<details>` disclosure, the same scriptless mechanism as «Інші дії»** two cards above, so the
+    panel keeps its "no client-side JavaScript at all" property. The open/closed labels swap through
+    Tailwind's `group-open:` variant (confirmed emitted into the built CSS, not just written).
+  - **Re-opened automatically when the last attempt was rejected** (`open={message ===
+    'invalid_tracking_number'}`), so the correction happens where the error message points instead of
+    behind a collapsed row.
+  - Two layout details, both from looking at 320px rather than reasoning about it: the label sits
+    *outside* the summary (inside, it wraps to two lines and shoves the button between the label and
+    its own value), and the toggle is anchored with `ml-auto` rather than `justify-between` — the
+    displayed value is `group-open:hidden` while editing, and `justify-between` swung the link from
+    the right edge to the left one on every toggle.
+  `pnpm check` (0 errors)/`pnpm test` (110/110, unchanged — this is markup)/`pnpm build` clean.
+  Verified live against the real dev Neon DB on `B260804-DAMN7`: collapsed/expanded/no-TTN
+  (`B260804-L6NJG`) states screenshotted at 320px and 1280px with `cssContentSize.width` 320 in both
+  narrow shots, and a real form POST round trip through the disclosure (`303`, value saved, then
+  restored to `20450123456789`).
+- **Earlier:** **status revert on `/admin/orders/[orderNumber]`**, on report that a wrong click
   was unrecoverable — built in three passes in one session, each widening the last on a direct
   follow-up ask. Final shape: `src/lib/orders/status.ts`'s `revertTarget(order)` (one step back, or
   `null`) and `revertCrossesPayment(order)`; `allowedTransitions` folds `[forward, back, exit]`
@@ -57,7 +205,7 @@
   and completed the revert for real; separately cancelled cod order `BYP3K` from `confirmed` (stock
   11 → 12) and reverted it back (stock 12 → 11); confirmed the pre-migration cancelled orders
   (`L6NJG`/`LHB7A`) still correctly show no revert option.
-- **Before that:** **the admin orders screen — Phase 4's second item.** `/admin/orders` (list) and
+- **Earlier:** **the admin orders screen — Phase 4's second item.** `/admin/orders` (list) and
   `/admin/orders/[orderNumber]` (detail), behind the gate below, with the status transitions the
   order state machine allows and the Nova Poshta tracking number.
   - **The state machine is a pure module, `src/lib/orders/status.ts` (13 tests).** Everything about
@@ -78,7 +226,9 @@
     verified against the real dev DB, not just reasoned about — see below.
   - **`refunded` is bookkeeping, not a refund.** Nothing here calls Monobank; the money is returned
     in Monobank's own dashboard and the button says so, rather than implying it moves money.
-  - **The panel runs with no client-side JavaScript at all.** Filter and search are a plain GET
+  - **The panel runs with no client-side JavaScript at all.** *(True as written; the theme switch at
+    the top of this block is now the one exception. Everything below still holds — no page's
+    behaviour depends on script.)* Filter and search are a plain GET
     form (the URL carries the view, like `/search`); both writes are form POSTs back to the same
     page, answered with a 303 to it, so a refresh after acting re-reads instead of re-firing.
     Terminal actions sit behind a `<details>` disclosure rather than a `confirm()` — two deliberate
@@ -248,7 +398,14 @@
 - **In progress:** **Phase 4 — the admin panel.** The gate is done and live (one-time PIN), and
   orders are done. What is left of the phase: **products and content management**, **image upload**
   via `storeImage`, and the **cash-on-delivery limit** (`settings.cod_limit` is read at checkout
-  already; nothing writes it). All three are developed against `pnpm dev`, which bypasses the gate.
+  already; nothing writes it). All three are developed against `pnpm dev`, which bypasses the gate,
+  and all three should be built out of `src/styles/admin.css`'s utilities (`admin-btn*`,
+  `admin-icon-btn`, `admin-field`, `admin-card`, `admin-badge`, `admin-tone-*`) — a storefront token
+  appearing under `/admin` is now a bug, not a shortcut, and `source(none)` means it would silently
+  compile to nothing anyway. Colours go in as `light-dark()` pairs on a token; nothing should read
+  `prefers-color-scheme` directly, or it will ignore the theme switch. The no-script rule still
+  stands for *behaviour* — the theme switch is the one sanctioned exception, and image upload is the
+  next item likely to argue for another.
   Deliberately *not* built with orders, and unasked-for so far: any customer-facing notification on
   an admin status change — «Відправлено» emails are not in the roadmap item, so Telegram and email
   stay wired to order creation and payment only.
@@ -303,6 +460,140 @@
 ---
 
 ## 🗒️ SESSION LOG (newest first; 3–6 lines each)
+
+### 2026-08-04 — the admin panel gets a typeface: Geist
+
+- Did, on request ("use this font for the admin panel: Geist"): added Geist to `astro.config.mjs` as
+  a fourth family (`--font-geist`, weights 400/500/600, subsets `cyrillic` + `latin`), a
+  `<Font … preload />` in `AdminLayout`, and `--font-sans: var(--font-geist), …` in `admin.css`.
+  Config, one tag and two declarations — nothing behind the panel changed.
+- This **reverses the panel's "no web font at all" decision** from two sessions ago, and the reversal
+  is the point: that rule existed so the panel would carry no business's brand into the next project,
+  and Geist passes that test on its own — a neutral interface grotesque, and (checked before
+  committing to it, since the whole panel is Ukrainian) it ships a **real Cyrillic cut**, U+0400–045F
+  plus U+0490–0491, so ґ/є/і/ї are drawn rather than substituted.
+- Decisions made rather than asked: **weights are the three the panel paints** (400/500/600 — nothing
+  under `/admin` is bold), so nothing ships that never appears; **both subsets are preloaded**,
+  because every screen mixes Ukrainian copy with Latin order numbers and emails; and **the mono stack
+  stays the system's** — Geist Mono would pair exactly but is a third font file and was not asked for.
+- Verified: `pnpm check` (0 errors)/`pnpm test` (110/110, untouched)/`pnpm build` clean, 6 font files
+  (up from 4 — one variable file per subset, shared by all three weights). Isolation re-checked in the
+  *built* assets, not assumed: no `--font-geist` in `BaseLayout.*.css`, no storefront token in
+  `AdminLayout.*.css` (24.7 KB), and the storefront's HTML mentions Geist nowhere. Live over CDP:
+  `document.fonts.check('600 16px …', 'Замовлення')` true with all six faces `loaded`, computed
+  `font-family` resolving through `--font-geist` on `<body>` and `<h1>`, Cyrillic measuring wider than
+  Arial (so not silently falling back), and the orders list eyeballed at 1280 in both themes and at
+  320 (`cssContentSize.width` 320).
+- Next: unchanged — the rest of Phase 4 (products/content management, image upload, the COD limit).
+
+### 2026-08-04 — the theme switch drops its `system` state
+
+- Did, on request ("remove system state from admin panel theme switcher — we only need dark/light"):
+  the three-state cycle in `AdminLayout`'s inline script is now a two-state flip. The `system` icon,
+  its CSS rule and the `MODES` cycle are gone; `localStorage` is now only ever written, never removed.
+- Decision, made rather than asked because it doesn't change what the switch offers: **the operating
+  system still decides the *starting* theme.** With nothing stored, `read()` resolves
+  `prefers-color-scheme` to `light`/`dark` before the first paint, and a new `change` listener keeps
+  following the OS live until the first click — losing that silently would have been a regression for
+  the browser that never touches the control. Once a choice is stored, the OS is ignored for good.
+- Unchanged: the `light-dark()` palette, `color-scheme` as the only switch, the `startViewTransition`
+  cross-fade (`admin-theme-in`, 500ms, old layer held opaque), the `:root:not([data-theme])` rule
+  that hides a switch JavaScript cannot drive, and the no-JS fallback to the OS.
+- Verified: `pnpm check` (0 errors)/`pnpm test` (110/110, untouched — markup, CSS, one inline script)/
+  `pnpm build` clean, and no `system` selector left in `dist/`. Live over CDP: fresh browser + dark OS
+  → `dark`, nothing stored; OS flipped live → followed while unstored, ignored once stored; both
+  clicks with icon/`aria-label`/both `theme-color` metas tracking; stored `light` beating a dark OS;
+  `data-theme` correct at the first animation frame (read from a script injected ahead of the page's
+  own) under an opposing OS; the fade still one 500ms `::view-transition-new(root)` animation;
+  JavaScript off → no attribute, toggle `display: none`, dark OS honoured.
+- Next: unchanged — the rest of Phase 4 (products/content management, image upload, the COD limit).
+
+### 2026-08-04 — a light/dark switch for the admin panel
+
+- Did, on request ("add a light/dark theme switcher for the admin panel, but make it smooth like a
+  0.5s ease transition so it won't hit the eyes"): a three-state switch (system / light / dark) in
+  the admin header, cycled by one icon button and remembered in `localStorage`. Flagged up front that
+  this ends the panel's "no client-side JavaScript" property, then built it — a chosen theme cannot
+  survive a page load without storage. One inline script in `AdminLayout`, no JavaScript asset.
+- Decisions: **one palette via `light-dark()`** instead of two blocks swapped by a media query, so a
+  colour is written once and `color-scheme` becomes the single switch (`data-theme` on `<html>`
+  overrides the OS). Values unchanged. **The script is inline and blocking in `<head>`** so the theme
+  is set before the first paint, and **the switch hides itself when JavaScript is off** rather than
+  sitting there dead.
+- **The fade was rebuilt after measuring the first attempt.** A `transition` on `*` looked right and
+  was not: `color` is inherited, so it created a transition on every node — `getAnimations()` showed
+  **239** colour transitions vs 22 for `background-color` — each chasing a still-animating parent,
+  restarting every frame. Backgrounds landed at 0.5s while text crawled past 1.5s, which is exactly
+  the jarring thing the ask was about. Replaced with a single `startViewTransition` cross-fade. Then
+  fixed again: the UA's fade leaves both snapshots half-transparent at the midpoint, so a quarter of
+  the page showed through grey and text ghosted — now the old page holds fully opaque and the new one
+  dissolves over it (which needs `mix-blend-mode: normal`, since the UA sets `plus-lighter`).
+- Learned, and worth keeping: **Lightning CSS downlevels `light-dark()`** into a
+  `--lightningcss-light/dark` space-toggle polyfill, so dev (native) and production (polyfill) are
+  *different mechanisms*. It does rewrite the `:root[data-theme]` rules to match, so the override
+  survives — but that had to be checked against the built stylesheet in a harness, because `/admin`
+  in a built Worker is correctly 403 and cannot be browsed. Also: probing computed styles right after
+  flipping the theme reads buttons mid-transition (they carry their own 0.15s hover timing), which
+  looked like two tokens ignoring `data-theme` until it was traced.
+- Verified: `pnpm check` (0 errors)/`pnpm test` (110/110, untouched — markup, CSS and one inline
+  script)/`pnpm build` clean. Live over CDP against the real dev Neon DB: OS-following live both ways
+  without reload, a forced theme beating the opposite OS setting, the full cycle with icon/label/both
+  `theme-color` metas tracking, the fade at 517ms with correct endpoints, the stored theme present in
+  the **first painted frame**, reduced motion skipping it, 320px (`scrollWidth` 305, header wraps to
+  two rows), and JavaScript off → switch hidden, OS honoured. Storefront isolation re-checked in the
+  built CSS.
+- Next: unchanged — the rest of Phase 4 (products/content management, image upload, the COD limit).
+
+### 2026-08-04 — the admin panel gets its own, design-agnostic design system
+
+- Did, on request ("this site will be reused across businesses — the reusable parts, the panel
+  included, should be built that way; make the admin design-agnostic, simple yet modern, round
+  buttons, white light theme, black dark theme, no title fonts from the site"): new
+  `src/styles/admin.css`, and `AdminLayout` + `OrderStatusBadge` + all three `/admin` pages rebuilt
+  on it. Markup and CSS only — no route, query, schema or validation touched.
+- Decisions: **a separate Tailwind build, not extra tokens in `global.css`** —
+  `@import 'tailwindcss' source(none)` with `@source` limited to the panel's own three paths, so the
+  two stylesheets are separate assets and no page loads both; isolation is enforced by the build
+  rather than by discipline. **The accent is the inverted foreground** (black on light, white on
+  dark) because a brand hue is exactly what would not survive the move to the next business.
+  **Dark theme is `prefers-color-scheme` only** — the panel has no JavaScript, so a toggle could not
+  be persisted; one palette re-declared under the media query, plus `color-scheme: light dark` so
+  native controls follow. **No web font** — system UI stack, and a mono stack for the strings that
+  get compared against another screen (order numbers, SKUs, TTNs, invoice ids). The reusable pieces
+  are utilities (`admin-btn` + three variants, `admin-field`, `admin-card`, `admin-badge`,
+  `admin-container`) and five `admin-tone-*` named for meaning, not colour, which is what lets
+  `OrderStatusBadge` hold no colour value at all.
+- Verified: `pnpm check` (0 errors)/`pnpm test` (110/110, untouched)/`pnpm build` clean. Isolation
+  checked in the *built* CSS, not assumed: `--color-paper`, `--color-espresso`, `--font-playfair`
+  and `container-page` are all absent from `AdminLayout.*.css`, and the storefront home renders
+  exactly as before (it still, correctly, ignores a dark OS setting). Live over CDP with
+  `prefers-color-scheme` emulated both ways against the real dev Neon DB: list, order detail and
+  `/admin` at 1280 light and dark; detail and list at 320 (`cssContentSize.width` 320, no overflow);
+  disclosures forced open to see all three button tiers and the `insufficient_stock` banner in dark.
+- Next: unchanged — the rest of Phase 4 (products/content management, image upload, the COD limit),
+  now built out of these utilities.
+
+### 2026-08-04 — the TTN field becomes a value with a «Змінити» button
+
+- Did, on request ("make it intuitive"): the Nova Poshta tracking number on
+  `/admin/orders/[orderNumber]` was an always-active input among otherwise read-only fields. Wrapped
+  it in a `<details>` — the number shows as text (`—` when unset), the input and «Зберегти» appear
+  only after «Змінити»/«Додати». Same scriptless disclosure the exits already use, so the panel's
+  no-JavaScript property holds. Nothing behind the form changed.
+- Decisions: the disclosure re-opens itself when the previous POST came back
+  `invalid_tracking_number`, so the fix happens where the error message is; the displayed value is
+  hidden while open, since the input directly below already carries it and two copies read as two
+  different numbers; and the label was moved out of the `<summary>` because at 320px it wraps and
+  pushes the action button between the label and the value it belongs to. The toggle is anchored
+  `ml-auto` rather than by `justify-between`, which would have swung it right→left on every click
+  once the value hides.
+- Verified: `pnpm check` (0 errors)/`pnpm test` (110/110, untouched — markup only)/`pnpm build`
+  clean. Live on the dev server against the real dev Neon DB: `B260804-DAMN7` collapsed, expanded
+  and at 1280px, `B260804-L6NJG` (no TTN) showing «— … Додати», all screenshotted over CDP with
+  `cssContentSize.width` 320 on the narrow shots; a real POST through the revealed form saved
+  `59000123456789` with a 303 and was restored to `20450123456789` afterwards. Also confirmed
+  Tailwind emits the `group-open:` rules into the built CSS rather than silently dropping them.
+- Next: unchanged — the rest of Phase 4 (products/content management, image upload, the COD limit).
 
 ### 2026-08-04 — status revert on the admin orders screen
 

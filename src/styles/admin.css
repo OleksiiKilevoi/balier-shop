@@ -1,0 +1,464 @@
+/*
+ * The admin panel's design system — deliberately self-contained.
+ *
+ * WHY THIS IS A SEPARATE STYLESHEET FROM `global.css`
+ * The storefront's look belongs to one business: warm leather, cream paper,
+ * Playfair headings, a rust accent. The panel is meant to be lifted into the
+ * next project unchanged, so it must not inherit any of that. Nothing here
+ * references a storefront token, and nothing in `global.css` reaches in.
+ * Re-theming the shop can never break the panel, and vice versa.
+ *
+ * Consequences, all intentional:
+ *   - Its own Tailwind build (`source(none)` + the three `@source` lines below),
+ *     scanning only the panel's files. The two stylesheets ship as separate
+ *     assets and no page ever loads both.
+ *   - One web font, Geist, and it is the panel's alone — the storefront's
+ *     Playfair and Inter are never loaded here. It is a neutral interface
+ *     grotesque with a real Cyrillic cut, so it carries no business's brand and
+ *     survives the move to the next one; that is the same test the accent below
+ *     has to pass. Self-hosted at build time by Astro (`astro.config.mjs` +
+ *     the `<Font>` tag in `AdminLayout`), so nothing is fetched from Google at
+ *     runtime. Lifting the panel means taking that config entry with it.
+ *   - The accent is not a colour, it is the foreground inverted: black on the
+ *     light theme, white on the dark one. A brand hue is exactly the thing that
+ *     would not survive the move to the next business.
+ *
+ * Every value lives here. A page that needs a colour uses a token; a page that
+ * needs a button uses `admin-btn`.
+ */
+@import 'tailwindcss' source(none);
+
+@source '../layouts/AdminLayout.astro';
+@source '../components/admin';
+@source '../pages/admin';
+
+/*
+ * The raw palette. Each token carries both themes at once through
+ * `light-dark()`, so a colour is written in exactly one place and the two halves
+ * cannot drift apart — there is no second block to forget. Components never
+ * branch on the theme; they name a role and get the right value in both.
+ *
+ * `color-scheme` is the only thing that decides which half is used — there is no
+ * `prefers-color-scheme` media query anywhere in this file. Left at `light dark`
+ * it means "follow the operating system", which is what a browser with
+ * JavaScript disabled gets, exactly as before the switch existed. It also hands
+ * the theme to the UA itself, so native controls, scrollbars and the caret
+ * follow along; without it a dark page keeps white scrollbars.
+ *
+ * The switch at the end of this file overrides it per-token-set by writing
+ * `data-theme` on `<html>`.
+ */
+:root {
+  color-scheme: light dark;
+
+  --admin-canvas: light-dark(#f7f7f8, #09090b);
+  --admin-surface: light-dark(#ffffff, #131316);
+  --admin-surface-hover: light-dark(#fafafa, #1a1a1f);
+
+  --admin-fg: light-dark(#111113, #f4f4f6);
+  --admin-fg-muted: light-dark(#57575f, #a1a1aa);
+  --admin-fg-subtle: light-dark(#8a8a94, #71717a);
+
+  --admin-border: light-dark(#e6e6e9, #26262b);
+  --admin-border-strong: light-dark(#d3d3d9, #3a3a42);
+
+  /* Primary action. Inverted foreground, not a brand colour — see the header. */
+  --admin-accent: light-dark(#111113, #f4f4f6);
+  --admin-accent-hover: light-dark(#2f2f35, #ffffff);
+  --admin-accent-fg: light-dark(#ffffff, #09090b);
+
+  --admin-danger: light-dark(#b42318, #f87171);
+  --admin-danger-hover: light-dark(#911d13, #fca5a5);
+
+  --admin-focus: light-dark(#111113, #a1a1aa);
+
+  --admin-tone-positive-bg: light-dark(#e6f6ec, #0f2e1e);
+  --admin-tone-positive-fg: light-dark(#10673a, #6ee7a8);
+  --admin-tone-attention-bg: light-dark(#fdf1dc, #372709);
+  --admin-tone-attention-fg: light-dark(#8a5a08, #f3c566);
+  --admin-tone-progress-bg: light-dark(#e8effb, #10203f);
+  --admin-tone-progress-fg: light-dark(#24509f, #93b4fb);
+  --admin-tone-neutral-bg: light-dark(#eeeef1, #232329);
+  --admin-tone-neutral-fg: light-dark(#4a4a53, #b4b4bd);
+  --admin-tone-negative-bg: light-dark(#fdeaea, #381616);
+  --admin-tone-negative-fg: light-dark(#a4231b, #f3a3a3);
+}
+
+/*
+ * `inline` matters here: it makes `bg-surface` compile to the raw
+ * `var(--admin-surface)` rather than to a second variable captured at `:root`.
+ * Without it the utilities would still work, but every theme value would be
+ * indirected twice for no reason.
+ */
+@theme inline {
+  --color-canvas: var(--admin-canvas);
+  --color-surface: var(--admin-surface);
+  --color-surface-hover: var(--admin-surface-hover);
+
+  --color-fg: var(--admin-fg);
+  --color-fg-muted: var(--admin-fg-muted);
+  --color-fg-subtle: var(--admin-fg-subtle);
+
+  --color-border: var(--admin-border);
+  --color-border-strong: var(--admin-border-strong);
+
+  --color-accent: var(--admin-accent);
+  --color-accent-hover: var(--admin-accent-hover);
+  --color-accent-fg: var(--admin-accent-fg);
+
+  --color-danger: var(--admin-danger);
+}
+
+@theme {
+  /* Astro's font pipeline injects `--font-geist` at runtime; aliasing it into
+     the theme key here is what makes Tailwind compile `font-sans` against it
+     instead of silently keeping its own default stack (same arrangement as
+     `global.css`, and the reason neither file names a family twice). The stack
+     after it is what paints while the face is still in flight, and if the
+     pipeline is ever removed. */
+  --font-sans:
+    var(--font-geist), ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto,
+    'Helvetica Neue', Arial, sans-serif;
+  /* Order numbers, SKUs, tracking numbers, invoice ids: strings that are read
+     character by character and compared against another screen. */
+  --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+
+  --radius-card: 0.875rem;
+  /* Buttons and fields are pills. */
+  --radius-control: 9999px;
+
+  /* The smallest square a finger can reliably hit; also every control's height,
+     which is what keeps a row of them optically aligned. */
+  --spacing-touch: 2.75rem;
+  --spacing-gutter: 1.25rem;
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--admin-canvas);
+    color: var(--admin-fg-muted);
+    font-family: var(--font-sans);
+    font-size: 0.9375rem;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* iOS Safari zooms in on a focused field under 16px and never zooms back
+     out. Fields stay at 16px on phones; the 14px is a desktop refinement. */
+  input,
+  select,
+  textarea {
+    font-size: 1rem;
+  }
+
+  /* One family throughout — the panel has no display face on purpose. Headings
+     separate by weight and tracking instead. */
+  h1,
+  h2,
+  h3 {
+    color: var(--admin-fg);
+    font-weight: 600;
+    letter-spacing: -0.014em;
+    line-height: 1.25;
+    text-wrap: balance;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--admin-focus);
+    outline-offset: 2px;
+  }
+
+  a,
+  button,
+  [role='button'] {
+    -webkit-tap-highlight-color: color-mix(in srgb, var(--admin-fg) 10%, transparent);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+@utility admin-container {
+  margin-inline: auto;
+  width: 100%;
+  max-width: 72rem;
+  padding-inline: var(--spacing-gutter);
+}
+
+@utility admin-card {
+  background-color: var(--admin-surface);
+  border: 1px solid var(--admin-border);
+  border-radius: var(--radius-card);
+}
+
+/*
+ * Buttons. `admin-btn` is the shape and the hit target; a variant supplies the
+ * colour. Both are always needed — the base alone is transparent on purpose, so
+ * a missing variant looks wrong immediately rather than shipping as a ghost.
+ */
+@utility admin-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--spacing-touch);
+  padding-inline: 1.5rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.2;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+
+@utility admin-btn-primary {
+  background-color: var(--admin-accent);
+  color: var(--admin-accent-fg);
+
+  &:hover {
+    background-color: var(--admin-accent-hover);
+  }
+}
+
+/* The default for anything reversible: an outline, so it never competes with
+   the primary action sitting next to it. */
+@utility admin-btn-secondary {
+  border-color: var(--admin-border-strong);
+  color: var(--admin-fg);
+
+  &:hover {
+    background-color: var(--admin-surface-hover);
+    border-color: var(--admin-fg-subtle);
+  }
+}
+
+/* Cancel and refund. Outlined rather than filled — it is behind a disclosure
+   already, and a solid red block invites the click it is trying to slow down. */
+@utility admin-btn-danger {
+  border-color: color-mix(in srgb, var(--admin-danger) 45%, transparent);
+  color: var(--admin-danger);
+
+  &:hover {
+    border-color: var(--admin-danger);
+    background-color: color-mix(in srgb, var(--admin-danger) 8%, transparent);
+  }
+}
+
+/*
+ * A square button carrying an icon and no text. Sized to the header's nav pills
+ * (2rem) rather than to `--spacing-touch`, so the top row stays one optical
+ * line; it is a preference control, not a destination, and never the thing
+ * being reached for in a hurry.
+ */
+@utility admin-icon-btn {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border: 1px solid var(--admin-border-strong);
+  border-radius: var(--radius-control);
+  background-color: transparent;
+  color: var(--admin-fg-muted);
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+
+  &:hover {
+    background-color: var(--admin-surface-hover);
+    border-color: var(--admin-fg-subtle);
+    color: var(--admin-fg);
+  }
+}
+
+@utility admin-field {
+  width: 100%;
+  min-width: 0;
+  height: var(--spacing-touch);
+  padding-inline: 1.125rem;
+  appearance: none;
+  border: 1px solid var(--admin-border-strong);
+  border-radius: var(--radius-control);
+  background-color: var(--admin-surface);
+  color: var(--admin-fg);
+
+  &::placeholder {
+    color: var(--admin-fg-subtle);
+  }
+
+  @media (width >= 40rem) {
+    font-size: 0.875rem;
+  }
+}
+
+/* Status pills, filter tabs, any small label. */
+@utility admin-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--radius-control);
+  padding-inline: 0.625rem;
+  padding-block: 0.1875rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  white-space: nowrap;
+  width: 100%;
+  justify-content: center;
+  max-width: 125px;
+}
+
+/*
+ * Tones are named for what the row *means to the operator*, not for a colour:
+ * `positive` is "money is in", `attention` is "waiting on someone". That is
+ * what lets the next business remap the hues without re-reading every call
+ * site, and what keeps the mapping in `OrderStatusBadge` legible.
+ */
+@utility admin-tone-positive {
+  background-color: var(--admin-tone-positive-bg);
+  color: var(--admin-tone-positive-fg);
+}
+
+@utility admin-tone-attention {
+  background-color: var(--admin-tone-attention-bg);
+  color: var(--admin-tone-attention-fg);
+}
+
+@utility admin-tone-progress {
+  background-color: var(--admin-tone-progress-bg);
+  color: var(--admin-tone-progress-fg);
+}
+
+@utility admin-tone-neutral {
+  background-color: var(--admin-tone-neutral-bg);
+  color: var(--admin-tone-neutral-fg);
+}
+
+@utility admin-tone-negative {
+  background-color: var(--admin-tone-negative-bg);
+  color: var(--admin-tone-negative-fg);
+}
+
+/* ==========================================================================
+ * THE THEME SWITCH
+ *
+ * The one place in the panel that needs client-side JavaScript, and the reason
+ * the "no script at all" property no longer holds: a chosen theme has to be
+ * remembered, and `localStorage` is the only thing that remembers it. Kept to a
+ * single inline script in `AdminLayout` — no framework, no hydration, no
+ * network request — so the panel still ships zero JavaScript *assets*.
+ *
+ * Two states, light and dark, and nothing else — following the operating system
+ * is how the panel *starts* rather than a state the switch can be left in. The
+ * script resolves the OS preference to one of the two before the first paint, so
+ * `data-theme` is always concrete once JavaScript has run.
+ * ========================================================================== */
+
+:root[data-theme='light'] {
+  color-scheme: light;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+}
+
+:root {
+  /*
+   * Slow enough that the switch reads as the page changing its mind rather than
+   * a flash — which is the whole point of having it at all, since the panel is
+   * looked at in a dark room at the end of a working day.
+   */
+  --admin-motion-theme: 0.5s;
+}
+
+/*
+ * The fade is a view transition — one cross-fade of the whole page — and not a
+ * `transition` on every element. The obvious version does not actually work, and
+ * this was measured rather than guessed: `color` is inherited, so a rule on `*`
+ * creates a transition on all ~240 nodes of a real order page, each one chasing
+ * a parent that is itself still animating. Chrome restarts them every frame
+ * (`getAnimations()` shows 239 colour transitions that never leave the pending
+ * state), and the text crawls toward the new theme for well over a second while
+ * backgrounds land correctly at 0.5s. The mismatch is exactly the thing the fade
+ * was supposed to prevent.
+ *
+ * Cross-fading two snapshots has none of that: text, borders, icons, badges and
+ * backgrounds all move together on a single animation, so the timing below is
+ * the timing you see. It also leaves the panel's own hover transitions alone —
+ * there is no rule here that could outrank them.
+ *
+ * Browsers without the API swap instantly. That is what the panel did before the
+ * switch existed, and it is a better failure than a crawl.
+ */
+/*
+ * Not the default cross-fade, which fades the old page out *while* fading the
+ * new one in: at the midpoint both snapshots sit at half opacity, a quarter of
+ * the page shows through as flat grey, and every line of text ghosts against
+ * its own replacement. On a screen that is mostly small text — which is what an
+ * order list is — that reads as a glitch.
+ *
+ * So the outgoing page stays put, fully opaque, and the incoming one dissolves
+ * over the top of it. Coverage is 100% the whole way through, so what you see is
+ * an honest blend of two legible pages rather than a washed-out one.
+ *
+ * `mix-blend-mode: normal` is required, not decoration: the UA stylesheet sets
+ * `plus-lighter` on both layers to make *its* cross-fade come out right, and
+ * left alone it would add the two pages together and blow the midpoint out.
+ */
+::view-transition-old(root),
+::view-transition-new(root) {
+  mix-blend-mode: normal;
+}
+
+::view-transition-old(root) {
+  animation: none;
+}
+
+::view-transition-new(root) {
+  animation: admin-theme-in var(--admin-motion-theme) ease;
+}
+
+@keyframes admin-theme-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/*
+ * The control shows the mode it is currently in, so both icons ship and CSS
+ * picks one. Keyed off the same `data-theme` the palette reads, which is what
+ * makes the icon correct in the very first paint — the head script sets the
+ * attribute before the body exists, and there is nothing here to hydrate.
+ */
+.admin-theme-toggle [data-mode] {
+  display: none;
+}
+
+:root[data-theme='light'] .admin-theme-toggle [data-mode='light'],
+:root[data-theme='dark'] .admin-theme-toggle [data-mode='dark'] {
+  display: block;
+}
+
+/*
+ * No script, no attribute, no switch. A control that cannot do anything is worse
+ * than no control, and with JavaScript off the panel falls back to following the
+ * operating system exactly as it did before.
+ */
+:root:not([data-theme]) .admin-theme-toggle {
+  display: none;
+}
