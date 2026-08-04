@@ -37,7 +37,11 @@
     // manager account is a Phase 0 item and does not exist yet, so this handle
     // is a guess and the button currently points at nothing. `orderDeepLink`
     // validates it, so an empty value hides the button rather than breaking it.
-    "PUBLIC_TELEGRAM_MANAGER": "balier_ua"
+    "PUBLIC_TELEGRAM_MANAGER": "balier_ua",
+    // Turnstile site key — public by definition, it's embedded in the
+    // checkout page's HTML. The paired secret (`TURNSTILE_SECRET_KEY`) is a
+    // Worker secret, never here.
+    "PUBLIC_TURNSTILE_SITE_KEY": "0x4AAAAAAEF8vF0-cXNWdOOY"
   }
 
   // Added in Phase 3, once the namespaces exist:

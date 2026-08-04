@@ -35,3 +35,11 @@ export function createTxDb(databaseUrl: string) {
 }
 
 export type TxDb = ReturnType<typeof createTxDb>['db'];
+
+/**
+ * The type of the `tx` callback parameter inside `txDb.transaction(async (tx) => ...)`.
+ * Drizzle's transaction object is not the same nominal type as `TxDb` itself
+ * (it's a `PgTransaction`, not a `NeonDatabase`), even though it exposes the
+ * same query builder — so functions called with either need to accept both.
+ */
+export type Tx = Parameters<Parameters<TxDb['transaction']>[0]>[0];

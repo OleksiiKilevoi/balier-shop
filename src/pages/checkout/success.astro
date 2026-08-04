@@ -1,0 +1,50 @@
+---
+import { env } from 'cloudflare:workers';
+import BaseLayout from '~/layouts/BaseLayout.astro';
+import Container from '~/components/Container.astro';
+import Button from '~/components/Button.astro';
+import { createDb } from '~/lib/db';
+import { findOrderByNumber } from '~/lib/db/queries/orders';
+import { orderStatusCopy } from '~/lib/i18n/checkout';
+import { formatPrice } from '~/lib/money';
+
+export const prerender = false;
+
+/**
+ * Monobank's own redirect target too — it only exposes one `redirectUrl`,
+ * not distinct success/failure ones, so this page never assumes the redirect
+ * itself means the payment succeeded. It reads the order's live status
+ * (paid, still awaiting confirmation, confirmed-COD, cancelled) and shows
+ * the copy for whatever that status actually is.
+ */
+const orderNumber = Astro.url.searchParams.get('order');
+if (!orderNumber) return Astro.rewrite('/404');
+
+const db = createDb(env.DATABASE_URL);
+const order = await findOrderByNumber(db, orderNumber);
+if (!order) return Astro.rewrite('/404');
+
+const copy = orderStatusCopy(order.status, order.paymentMethod);
+---
+
+<BaseLayout title="Замовлення оформлено" noindex>
+  <Container class="py-8 sm:py-12">
+    <div class="mx-auto max-w-lg text-center">
+      <h1 class="text-3xl sm:text-4xl">{copy.heading}</h1>
+      <p class="text-ink-muted mt-3">{copy.body}</p>
+
+      <dl class="border-line bg-paper-raised rounded-card mt-8 border p-5 text-left text-sm sm:p-6">
+        <div class="flex items-baseline justify-between gap-4">
+          <dt class="text-ink-muted">Номер замовлення</dt>
+          <dd class="text-ink font-medium">{order.orderNumber}</dd>
+        </div>
+        <div class="border-line mt-3 flex items-baseline justify-between gap-4 border-t pt-3">
+          <dt class="text-ink-muted">Сума</dt>
+          <dd class="price">{formatPrice(order.total)}</dd>
+        </div>
+      </dl>
+
+      <Button href="/products" class="mt-8 w-full sm:w-auto">Продовжити покупки</Button>
+    </div>
+  </Container>
+</BaseLayout>

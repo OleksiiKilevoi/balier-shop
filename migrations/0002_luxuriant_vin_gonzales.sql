@@ -1,0 +1,1 @@
+ALTER TABLE "np_settlements" ADD COLUMN "warehouse_count" integer DEFAULT 0 NOT NULL;

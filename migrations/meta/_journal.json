@@ -15,6 +15,13 @@
       "when": 1785756442018,
       "tag": "0001_handy_sheva_callister",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1785830640883,
+      "tag": "0002_luxuriant_vin_gonzales",
+      "breakpoints": true
     }
   ]
 }

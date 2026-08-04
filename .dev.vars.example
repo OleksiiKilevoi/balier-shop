@@ -13,7 +13,8 @@ MONOBANK_TOKEN=""
 # Nova Poshta API key from the business cabinet
 NOVAPOSHTA_API_KEY=""
 
-# Cloudflare Turnstile (secret half; the site key is public and lives in vars)
+# Cloudflare Turnstile secret key. The site key is public — it lives in
+# wrangler.jsonc's `vars` (`PUBLIC_TURNSTILE_SITE_KEY`), not here.
 TURNSTILE_SECRET_KEY=""
 
 # Telegram bot for new-order notifications

@@ -1,0 +1,30 @@
+---
+import BaseLayout from '~/layouts/BaseLayout.astro';
+import Container from '~/components/Container.astro';
+import Button from '~/components/Button.astro';
+
+export const prerender = false;
+
+/**
+ * For when `POST /api/checkout` itself failed before an order ever existed
+ * (validation error, stock disappeared, cash-on-delivery over the limit) —
+ * there is nothing to look up, unlike `/checkout/success`, which always has
+ * an order number to read a real status from.
+ */
+---
+
+<BaseLayout title="Не вдалося оформити замовлення" noindex>
+  <Container class="py-8 sm:py-12">
+    <div class="mx-auto max-w-lg text-center">
+      <h1 class="text-3xl sm:text-4xl">Не вдалося оформити замовлення</h1>
+      <p class="text-ink-muted mt-3">
+        Товар лишився у кошику — спробуйте оформити замовлення ще раз, або напишіть нам, якщо
+        проблема повториться.
+      </p>
+      <div class="mt-8 flex flex-col justify-center gap-3 sm:flex-row">
+        <Button href="/checkout" class="w-full sm:w-auto">Спробувати ще раз</Button>
+        <Button href="/cart" variant="secondary" class="w-full sm:w-auto">Повернутися до кошика</Button>
+      </div>
+    </div>
+  </Container>
+</BaseLayout>

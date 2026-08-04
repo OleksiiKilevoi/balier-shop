@@ -1,5 +1,5 @@
 import { and, asc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
-import type { Db } from '../index';
+import type { Db, Tx } from '../index';
 import { productImages, productTranslations, productVariants, products } from '../schema';
 import type { CartVariantData } from '~/lib/cart';
 import { LOCALE } from './locale';
@@ -89,4 +89,47 @@ export async function findCartVariants(
       imageAlt: image?.alt ?? null,
     };
   });
+}
+
+/**
+ * The order-creation half of the same resolution, run inside the
+ * create-order transaction: locks the requested variant rows with
+ * `FOR UPDATE` so a second checkout for the same variant blocks until this
+ * one commits (or rolls back) its reservation, rather than both reading the
+ * same "available" number and overselling it. No images — order items
+ * snapshot text and price, never a photo.
+ */
+export async function lockCheckoutVariants(
+  tx: Tx,
+  variantIds: readonly string[],
+): Promise<CartVariantData[]> {
+  if (variantIds.length === 0) return [];
+
+  const rows = await tx
+    .select({
+      variantId: productVariants.id,
+      productSlug: products.slug,
+      productTitle: productTranslations.title,
+      variantName: productVariants.colorName,
+      variantHex: productVariants.colorHex,
+      sku: productVariants.sku,
+      unitPrice: sql<number>`coalesce(${productVariants.priceOverride}, ${products.basePrice})`,
+      available: availableStock(),
+    })
+    .from(productVariants)
+    .innerJoin(products, eq(products.id, productVariants.productId))
+    .innerJoin(
+      productTranslations,
+      and(eq(productTranslations.productId, products.id), eq(productTranslations.locale, LOCALE)),
+    )
+    .where(
+      and(
+        inArray(productVariants.id, [...variantIds]),
+        eq(productVariants.isActive, true),
+        eq(products.status, 'active'),
+      ),
+    )
+    .for('update', { of: productVariants });
+
+  return rows.map((row) => ({ ...row, imageUrl: null, imageAlt: null }));
 }

@@ -19,6 +19,7 @@
     "db:seed": "tsx scripts/seed.ts",
     "media:ingest": "tsx scripts/ingest-images.ts",
     "media:push": "tsx scripts/media-push.ts",
+    "np:sync": "tsx scripts/sync-novaposhta.ts",
     "cron:dev": "wrangler dev -c workers/cron/wrangler.jsonc --test-scheduled",
     "cron:deploy": "wrangler deploy -c workers/cron/wrangler.jsonc"
   },

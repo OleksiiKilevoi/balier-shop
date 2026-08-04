@@ -283,6 +283,14 @@ export const npSettlements = pgTable(
     type: text('type'),
     /** Ref used by delivery-cost lookups; not every settlement has one. */
     deliveryCityRef: text('delivery_city_ref'),
+    /**
+     * Denormalised count of `np_warehouses` rows for this settlement, refreshed by
+     * the same sync that populates both tables. NP's `getSettlements` has no
+     * population/importance field, but warehouse count is a solid proxy — a real
+     * city has hundreds, a village has 0–1 — used to rank `/checkout`'s settlement
+     * search so "Київ" surfaces before an obscure village whose name also matches.
+     */
+    warehouseCount: integer('warehouse_count').notNull().default(0),
     updatedAt,
   },
   (t) => [index('np_settlements_name_idx').on(t.name)],
