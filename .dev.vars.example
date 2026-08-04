@@ -20,3 +20,14 @@ TURNSTILE_SECRET_KEY=""
 # Telegram bot for new-order notifications
 TELEGRAM_BOT_TOKEN=""
 TELEGRAM_CHAT_ID=""
+
+# Cloudflare Access — the /admin gate. Neither value is a credential (the gate
+# rests on the JWT signature), but both are account-specific, so they are set
+# per environment instead of living in wrangler.jsonc. Unset = every /admin
+# request is denied. `pnpm dev` bypasses the gate entirely, so these are only
+# needed for `pnpm preview` and the deployed Worker.
+#   TEAM_DOMAIN: the Zero Trust team, e.g. "balier" or the full
+#                "https://balier.cloudflareaccess.com"
+#   AUD:         the Access application's Application Audience tag
+CF_ACCESS_TEAM_DOMAIN=""
+CF_ACCESS_AUD=""

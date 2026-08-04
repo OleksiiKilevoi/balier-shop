@@ -1,0 +1,29 @@
+---
+import AdminLayout from '~/layouts/AdminLayout.astro';
+
+/**
+ * Placeholder home for the panel. It exists so the Access gate has something
+ * real to protect and so the signed-in identity can be seen end to end; the
+ * orders, products and settings screens are the next Phase 4 items.
+ */
+export const prerender = false;
+
+const admin = Astro.locals.admin;
+---
+
+<AdminLayout title="Панель">
+  <h1 class="font-display text-ink text-2xl font-bold sm:text-3xl">Панель керування</h1>
+
+  <p class="text-ink-muted mt-2">
+    Ви увійшли як <strong class="text-ink-soft">{admin?.email ?? 'сервісний токен'}</strong>.
+  </p>
+
+  <div class="border-line bg-paper-raised mt-8 rounded-card border p-5">
+    <h2 class="font-display text-ink text-lg font-bold">Далі</h2>
+    <ul class="text-ink-muted mt-2 list-disc space-y-1 pl-5">
+      <li>Замовлення</li>
+      <li>Товари та зображення</li>
+      <li>Ліміт післяплати</li>
+    </ul>
+  </div>
+</AdminLayout>

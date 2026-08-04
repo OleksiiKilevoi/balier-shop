@@ -1,0 +1,52 @@
+---
+import { Font } from 'astro:assets';
+import Container from '~/components/Container.astro';
+import '~/styles/global.css';
+
+/**
+ * Shell for `/admin/**`. Deliberately not `BaseLayout` — the storefront header,
+ * footer and cart popup have no place in the panel, and the admin pages must not
+ * inherit the shop chrome as it changes.
+ *
+ * Everything under `/admin` is gated by `src/middleware.ts`, so the signed-in
+ * identity is always present here; `noindex` is belt-and-braces on top of that.
+ */
+
+interface Props {
+  title: string;
+}
+
+const { title } = Astro.props;
+const admin = Astro.locals.admin;
+---
+
+<html lang="uk">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <Font cssVariable="--font-playfair" />
+    <Font cssVariable="--font-inter" />
+    <title>{title} — Balier admin</title>
+  </head>
+
+  <body class="flex min-h-dvh flex-col">
+    <header class="bg-espresso text-paper">
+      <Container class="flex min-h-header flex-wrap items-center justify-between gap-2 py-2">
+        <a href="/admin" class="font-display text-lg font-bold">Balier admin</a>
+        {
+          admin && (
+            <span class="text-sm opacity-80">{admin.email ?? 'сервісний токен'}</span>
+          )
+        }
+      </Container>
+    </header>
+
+    <main class="flex-1 py-8">
+      <Container>
+        <slot />
+      </Container>
+    </main>
+  </body>
+</html>

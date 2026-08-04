@@ -6,6 +6,23 @@
   // name instead of updating the running one. Phase 5 stands the store up again
   // on the client's account, and that Worker gets its own name.
   "name": "balier-dev",
+  // Custom domain for the dev deployment, on `mlosko.dev` (bought 2026-08-04 to
+  // unblock Cloudflare Access and Email Sending, both of which need a zone on
+  // this account — `*.workers.dev` cannot be an Access application hostname).
+  // Cloudflare creates the DNS record and the certificate itself, but only once
+  // the zone reads Active: deploying this route before that fails.
+  //
+  // The `workers.dev` URL keeps working alongside it. `/admin` there stays 403,
+  // because no Access policy can cover a `workers.dev` hostname and the in-app
+  // JWT check in `src/middleware.ts` refuses an unauthenticated request anyway.
+  // That gap is precisely why `docs/CONVENTIONS.md` asks for the second check.
+  "routes": [{ "pattern": "balier.mlosko.dev", "custom_domain": true }],
+  // Explicit, not incidental: adding `routes` makes wrangler disable the
+  // `workers.dev` URL by default anyway, and one hostname is what we want —
+  // `balier-dev.<subdomain>.workers.dev` was a second public surface that no
+  // Access policy could cover. Older notes in `docs/STATE.md` that name it as
+  // the live test URL predate this. Set it to `true` to bring it back.
+  "workers_dev": false,
   "compatibility_date": "2026-07-30",
   "compatibility_flags": ["nodejs_compat"],
   "observability": {
@@ -27,24 +44,32 @@
   ],
   // Cloudflare Email Sending — order-confirmation emails to customers
   // (`src/lib/notify/email.ts`). Requires Workers Paid (enabled 2026-08-04).
-  // PLACEHOLDER: no domain is onboarded yet (`wrangler email sending list`
-  // returns none) — `balier.ua`'s DNS isn't on this Cloudflare account (Phase 5
-  // item). Sends fail closed with `E_SENDER_NOT_VERIFIED` (caught, logged,
-  // never thrown into checkout — same best-effort contract as `NotifierPort`)
-  // until `wrangler email sending enable balier.ua` has been run against
-  // whichever account actually holds that zone.
+  // Sending is enabled on `mail.mlosko.dev`, a dedicated subdomain rather than
+  // the apex, so `mlosko.dev` keeps its MX records free for real inbound mail.
+  // Sends fail closed with `E_SENDER_NOT_VERIFIED` (caught, logged, never thrown
+  // into checkout — same best-effort contract as `NotifierPort`) until
+  // `wrangler email sending enable mail.mlosko.dev` has run and its DNS records
+  // are in place. Phase 5 swaps the sender to `balier.ua` on the client account.
   "send_email": [{ "name": "EMAIL" }],
   // Secrets are NOT set here. Locally they live in `.dev.vars`; in production
   // they are set with `wrangler secret put <NAME>`.
   //   DATABASE_URL, MONOBANK_TOKEN, MONOBANK_WEBHOOK_URL,
   //   NOVAPOSHTA_API_KEY, TURNSTILE_SECRET_KEY,
-  //   TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+  //   TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID,
+  //   CF_ACCESS_TEAM_DOMAIN, CF_ACCESS_AUD
+  //
+  // The last two gate `/admin/**` (`src/middleware.ts`). They are not
+  // credentials — the gate rests on the Access JWT signature — but they are
+  // account-specific and no Access application exists yet, so they are set per
+  // environment rather than committed here. While they are unset, every
+  // `/admin` request on a built Worker answers 403, which is the intended
+  // failure direction.
   "vars": {
     "PUBLIC_SITE_URL": "https://balier.ua",
     // `from` address for order-confirmation emails. Not `PUBLIC_` — server-only,
     // never sent to the client. See the `send_email` binding comment above:
     // this does nothing until the domain is onboarded.
-    "ORDER_EMAIL_FROM": "noreply@balier.ua",
+    "ORDER_EMAIL_FROM": "noreply@mail.mlosko.dev",
     // Telegram account the product page's «Замовити через Телеграм» deep-links
     // to. Public by definition — it ends up in an href. PLACEHOLDER: the real
     // manager account is a Phase 0 item and does not exist yet, so this handle

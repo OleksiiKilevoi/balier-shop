@@ -4,7 +4,41 @@
 
 ## 📍 CURRENT STATE (overwrite this block; keep tight)
 
-- **Last done:** **order-confirmation email** — the last open Phase 3 item, and the reason the
+- **Last done:** **the admin gate — Phase 4's first item, the app-side half of it.**
+  `src/lib/access/index.ts` (`createAccessVerifier`, `extractAccessToken`, `normalizeTeamDomain`,
+  18 tests) verifies a Cloudflare Access JWT with Web Crypto: RS256 pinned from our side rather than
+  read off the token, the signing key matched by `kid` against
+  `<team>.cloudflareaccess.com/cdn-cgi/access/certs`, then `iss`/`aud`/`exp`/`nbf` checked so a
+  token minted for somebody else's Access application cannot pass. `src/middleware.ts` grew an
+  `adminGate` ahead of the existing rate limiter (`sequence(adminGate, rateLimit)`) covering
+  `/admin/**` and `/api/admin/**`; the identity lands on `Astro.locals.admin`. Also added, so the
+  gate has something real to protect: `src/layouts/AdminLayout.astro` (its own shell — the panel must
+  not inherit storefront chrome) and a placeholder `src/pages/admin/index.astro`.
+  - **Cloudflare Access itself cannot be configured yet, and this is a blocker, not an oversight.**
+    An Access application needs a hostname on a zone in the Cloudflare account, and `*.workers.dev`
+    cannot be one — so `balier-dev.mykhailoshulezhko.workers.dev` cannot sit behind Access at all.
+    Same root cause as the Email Sending blocker: no domain on this account. The gate is therefore
+    written to **fail closed** — unconfigured means deny, not allow — and the deployed Worker now
+    answers 403 to every `/admin` request, ours included. That is the intended failure direction,
+    and it is exactly why `docs/CONVENTIONS.md` asks for this check in the app rather than trusting
+    edge configuration: the Worker is reachable on a URL no Access policy covers.
+  - **`pnpm dev` bypasses the gate**, because nothing authenticates in front of it locally. The
+    bypass is behind `import.meta.env.DEV`, a build-time constant — verified, not assumed:
+    `dev@localhost` appears nowhere in `dist/` after a build, so it cannot become a production
+    bypass. The whole panel is therefore developed locally against the real dev Neon DB.
+  - `CF_ACCESS_TEAM_DOMAIN` / `CF_ACCESS_AUD` are set per environment (`.dev.vars` locally,
+    `wrangler secret put` later), not in `wrangler.jsonc`. Neither is a credential — the gate rests
+    on the signature — but they are account-specific and do not exist yet. Learned along the way:
+    `wrangler types` derives `Env` from `.dev.vars`, **not** from `src/env.d.ts`'s declaration
+    merging, so a new secret has to exist in `.dev.vars` before `pnpm cf-typegen` will type it.
+  `pnpm check` (0 errors)/`pnpm test` (84/84, 18 new)/`pnpm build` clean. Verified live in a built
+  Worker (`pnpm preview`): `/admin` → 403 text, `/admin/orders` → 403 (the gate runs before routing),
+  `/api/admin/anything` → 403 JSON, an `alg: none` forgery → 403, while `/`, `/cart` stay 200 and
+  `/administrative` still 404s rather than being swallowed by the prefix match. And on `pnpm dev`:
+  `/admin` renders, showing `dev@localhost`. **Not verified:** a real Access login end to end —
+  impossible until a domain is onboarded, so the JWKS wire format is still assumed from the docs
+  (`src/lib/access/index.test.ts` says so at the top, per the Monobank fixture lesson).
+- **Before that:** **order-confirmation email** — the last open Phase 3 item, and the reason the
   Cloudflare plan was upgraded to Workers Paid this session (Email Sending needs it). Reused the
   existing `NotifierPort` shape rather than adding a new port type: `src/lib/notify/email.ts`
   (`createEmailNotifier`, tested) implements it against the new `send_email` binding
@@ -32,11 +66,12 @@
   `customerEmail` needed no new plumbing — it was already an optional field on the checkout form,
   validation schema, and `orders` table from a prior session; both `orderCreated`/`orderPaid` are
   silent no-ops when it's absent.
-  `pnpm check` (0 errors)/`pnpm test` (74/74, 8 new)/`pnpm build` clean. **Not verified live**:
+  `pnpm check` (0 errors)/`pnpm test` (66/66, 8 new — this block previously said 74, an arithmetic
+  slip; the suite has been counted directly since)/`pnpm build` clean. **Not verified live**:
   `/api/checkout` is gated by the real Turnstile secret, which curl can't satisfy, so a real
   COD-with-email order (to see the send attempt and its graceful failure end to end) needs an
   actual browser pass — same recurring gap as the rest of `/checkout`.
-- **Before that:** **API rate limiting** — `src/middleware.ts` (new) runs a per-IP, per-route
+- **Earlier:** **API rate limiting** — `src/middleware.ts` (new) runs a per-IP, per-route
   fixed-window counter (`src/lib/rateLimit/`, KV-backed) ahead of every route
   `docs/CONVENTIONS.md` names (checkout, both Nova Poshta search endpoints) plus `/api/cart` and
   `/api/checkout/limits`, which each already carried their own "not yet rate limited" note.
@@ -52,7 +87,7 @@
   (58/58, 4 new)/`pnpm build` clean; verified live against the running dev server — tripped the
   limit on `/api/checkout/limits`, got a 429 with a correct `retry-after`, and confirmed the webhook
   keeps answering its own 403 rather than being rate-limited.
-- **Earlier:** the **`orderPaid` Telegram notification** — the last piece of the notification port
+- **Earlier still:** the **`orderPaid` Telegram notification** — the last piece of the notification port
   that had been implemented but wired to nothing. `confirmPayment` now `.returning()`s the updated
   order row and carries it (with its already-loaded items) out in the `paid` result, and
   `src/pages/api/webhooks/monobank.ts` sends «Оплачено» to the manager group on that transition only.
@@ -65,32 +100,15 @@
   (`sendMessage`, right `chat_id`, «Оплачено» heading) and that it resolves rather than throwing when
   fetch fails. `pnpm check` (0 errors)/`pnpm test` (54/54, 2 new)/`pnpm build` clean; **confirmed
   working live** — committed as `b6a5d22`.
-- **Earlier still:** 🎉 **the whole card money path was verified live end to end on the deployed dev
-  Worker** — order `B260804-DAMN7` went card → Monobank → webhook → `paid`, with its `payments` row
-  at `success`. That was the first Monobank webhook to ever complete the round trip, and it also
-  closed the long-standing "is `X-Sign` DER or raw?" question: `normalizeSignature`'s DER→raw
-  conversion works against a real Monobank signature. Getting there took fixing two separate bugs,
-  both found by testing live rather than locally:
-  1. **Every checkout on the deployed site returned `captcha_failed`.** The Worker had no runtime
-     `TURNSTILE_SECRET_KEY` — `wrangler secret list --name balier-dev` returned `DATABASE_URL` and
-     nothing else, so `createTurnstileCaptcha` posted an undefined secret to siteverify and failed
-     closed. The secrets *looked* present in the dashboard because they had been added under
-     **Settings → Build → Variables and secrets**, which is Workers Builds' *build-time* env (same
-     idea as Pages build vars) — those never become runtime bindings, and a `wrangler deploy`
-     doesn't turn them into any. Fixed by setting them as real runtime secrets with
-     `wrangler secret put`: `TURNSTILE_SECRET_KEY`, `MONOBANK_TOKEN`, `NOVAPOSHTA_API_KEY`,
-     `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`.
-  2. **`verifyWebhook` rejected every real webhook, always.** `GET /api/merchant/pubkey` returns
-     `key` as base64 of a **PEM document**, not of the DER bytes (confirmed live: the decoded
-     payload starts `0x2d`, i.e. `-----BEGIN PUBLIC KEY-----`). Those PEM text bytes went straight
-     into `crypto.subtle.importKey('spki', …)`, which threw, and the adapter's `catch` turned the
-     throw into "signature invalid" → 403. So the money moved at Monobank while the order sat in
-     `awaiting_payment` forever. Fixed with `normalizePublicKey` in `src/lib/monobank/index.ts`
-     (unwraps PEM armour; passes bare DER through, mirroring `normalizeSignature`).
-  The six existing tests passed throughout because `stubPubkeyFetch` exported the key as **DER** —
-  the fixture shared the implementation's wrong assumption, so the suite was confirming a broken
-  path against itself. It now stubs PEM like the real API, plus a new case for bare DER. Committed
-  and pushed as `611cb2f`; `pnpm check` (0 errors)/`pnpm test` (52/52)/`pnpm build` all clean.
+- **Before that (full account in the session log below, 2026-08-04):** 🎉 **the whole card money
+  path was verified live end to end on the deployed dev Worker** — order `B260804-DAMN7` went
+  card → Monobank → webhook → `paid`. First completed webhook round trip in the project's history.
+  It took fixing two bugs invisible to local testing: the deployed Worker had **no runtime
+  `TURNSTILE_SECRET_KEY`** (the dashboard's Build-section variables are build-time env, not runtime
+  bindings — see the `cloudflare-build-vars-are-not-runtime-secrets` memory), and `verifyWebhook`
+  rejected **every** real webhook because `GET /pubkey` returns base64 of a **PEM document**, not of
+  DER (`normalizePublicKey` now unwraps it). The six existing tests had passed throughout, because
+  the fixture stubbed DER — the same wrong assumption as the implementation. Committed as `611cb2f`.
 - **Also true (from the prior session, unchanged):** Phase 3's "core money path" —
   `/checkout` end to end, `src/lib/orders/`, `src/lib/monobank/` (`PaymentPort` incl. ECDSA
   signature verification), `src/lib/novaposhta/` (client + sync), the checkout/webhook API routes,
@@ -106,28 +124,39 @@
   `X-Sign`, is **now verified** (see the webhook entry above) — that entry is finally closed. Testing this from
   plain `localhost` would still need a tunnel; testing against the deployed dev Worker doesn't, and
   that is the route that worked.
-- **In progress:** Phase 3 is now **code-complete** — every checklist item is built, including the
-  order-confirmation email. What's left is not code: a domain needs to sit on a Cloudflare account
-  with `wrangler email sending enable` run against it before the email actually delivers, and a
-  real browser pass through `/checkout` (Turnstile-gated, so curl can't do it) would confirm the
-  send attempt live. The admin-editable cash-on-delivery limit moved to Phase 4 (admin panel) —
-  Phase 3's job was only to read and enforce the seeded `settings.cod_limit`, which is already done.
-  Phase 2 still carries its own leftover: the seven static pages render a heading, a lead and a
+- **In progress:** **Phase 4 — the admin panel.** Its first item is done on the app side (the
+  Access JWT gate above) and blocked on the Cloudflare side (no domain → no Access application).
+  The remaining three items — orders/products/content management, image upload via `storeImage`,
+  and the cash-on-delivery limit — are unstarted, and all three are developed against `pnpm dev`,
+  which bypasses the gate.
+  Phase 3 is **code-complete**; what's left there is not code — a domain for Email Sending, and a
+  real browser pass through `/checkout` (Turnstile-gated, so curl can't do it). Phase 2 still
+  carries its own leftover: the seven static pages render a heading, a lead and a
   `ContentPlaceholder`. Writing them is a Phase 5 content item, and the legal ones gate Monobank.
-- **Next step:** either a real browser checkout pass (COD, with an email address, to watch the
-  confirmation email attempt and its graceful `E_SENDER_NOT_VERIFIED` failure), or start Phase 4
-  (admin panel) — Phase 3 has nothing code-shaped left in it.
+- **Next step:** Phase 4's orders screen — list, detail, and the status transitions the state
+  machine allows — behind the gate, at `/admin/orders`. (Still open from Phase 3, unchanged: a real
+  browser checkout pass, COD with an email address, to watch the confirmation email attempt and its
+  graceful `E_SENDER_NOT_VERIFIED` failure.)
 - **Blockers (waiting on me):**
   - Phase 0 externals unchanged: Monobank Acquiring registration, Nova Poshta business account +
     cash-on-delivery setup, Telegram manager account / bot / chat.
-  - **No domain onboarded for Email Sending** — `wrangler email sending list` returns none, and
-    `balier.ua` isn't attached to this Cloudflare account (still nominally a Phase 5 item). Order-
-    confirmation emails are fully wired but fail closed until either `balier.ua`'s DNS moves here
-    ahead of schedule, or a different already-owned domain gets onboarded for dev testing.
+  - ~~**No domain on this Cloudflare account**~~ — **resolved 2026-08-04.** `mlosko.dev` was bought
+    and onboarded, which cleared both halves of this blocker at once. Two things still outstanding
+    on it, both small and both Mykhailo's:
+    - **Email Sending DNS records are not added yet.** Sending is enabled on `mail.mlosko.dev`
+      (tag `1d4ba47f…`, DKIM selector `cf-bounce`, return path `cf-bounce.mail.mlosko.dev`), but
+      the six records it needs — three MX on `cf-bounce.mail`, SPF, DKIM, DMARC — must be created
+      in the zone by hand; `wrangler email sending dns get mail.mlosko.dev` prints them exactly.
+      Until they exist, order emails keep failing closed.
+    - **The Turnstile widget's hostname allowlist may not include `balier.mlosko.dev`.** The
+      widget (`0x4AAAAAAEF8vF0-cXNWdOOY`) was created when `localhost` and the `workers.dev` URL
+      were the only hosts. If checkout on the new domain returns `captcha_failed`, this is why —
+      add the hostname in the Turnstile dashboard. Not yet tested either way.
   - `PUBLIC_TELEGRAM_MANAGER` in `wrangler.jsonc` is a **placeholder handle**.
   - ~~`DATABASE_URL` missing as a Worker secret~~ — resolved; it is set, and as of 2026-08-04 so are
     the other five runtime secrets.
-- **Active branch:** `main` (only branch; tracks `origin/main`), clean and pushed at `b6a5d22`.
+- **Active branch:** `main` (only branch; tracks `origin/main`), pushed at `2f42788`; the admin gate
+  above is uncommitted working-tree changes on top of it.
   A push to `main` deploys (Workers Builds is connected to `mykhailoshulezhko/balier`, production
   branch `main`, build `pnpm run build`, deploy `npx wrangler deploy`).
 
@@ -141,13 +170,60 @@
       confirmation email. `balier-cron` is deployed. Only external/non-code items remain: onboarding
       a domain for Email Sending, and a live browser pass through `/checkout`. The admin COD-limit
       UI is Phase 4's item, not this one)
-- [ ] Phase 4 — Admin panel
+- [~] Phase 4 — Admin panel (the app-side Access JWT gate is built and fail-closed; Access itself
+      is blocked on a domain. Orders/products/content, image upload and the COD limit are unstarted)
 - [ ] Phase 5 — Launch (incl. migrating off the dev Neon/Cloudflare accounts)
 - [ ] Phase 6 — Improvements
 
 ---
 
 ## 🗒️ SESSION LOG (newest first; 3–6 lines each)
+
+### 2026-08-04 — Phase 4, part 1: the admin gate (Access JWT)
+
+- Did, on request (started Phase 4, auth first — nothing else in the phase is safe to build without
+  it, since every other item is an authenticated write path): `src/lib/access/index.ts` verifies the
+  Cloudflare Access JWT with Web Crypto — RS256 pinned by us rather than read from the token's own
+  header, signing key matched by `kid` against the team's `/cdn-cgi/access/certs`, then
+  `iss`/`aud`/`exp`/`nbf`. `src/middleware.ts` now runs `sequence(adminGate, rateLimit)`, gating
+  `/admin/**` and `/api/admin/**` and putting the identity on `Astro.locals.admin`.
+  `AdminLayout.astro` + a placeholder `/admin` page exist so the gate protects something real.
+- Decisions: **fail closed** — unconfigured is deny, not allow, which matters because Access cannot
+  be configured at all yet (it needs a hostname on a zone in the account; `*.workers.dev` cannot be
+  one, confirmed against Cloudflare's docs). The deployed Worker therefore 403s `/admin` for
+  everyone, us included, and the panel gets built against `pnpm dev`, which bypasses the gate behind
+  `import.meta.env.DEV`. That bypass was *verified* rather than assumed — `dev@localhost` appears
+  nowhere in `dist/` after a build. This is also the concrete case for why `docs/CONVENTIONS.md`
+  wants the check inside the app: the Worker is reachable on a URL no Access policy covers, so edge
+  configuration alone would protect nothing here.
+- Found along the way: `wrangler types` builds `Env` from `.dev.vars`, not from `src/env.d.ts`'s
+  declaration merging — the comment in `env.d.ts` implies otherwise. A new secret must be in
+  `.dev.vars` before `pnpm cf-typegen` will type it. Also corrected an arithmetic slip in this file:
+  the suite was 66 tests before this session, not the 74 the previous entry claimed.
+- Verified: `pnpm check` (0 errors)/`pnpm test` (84/84, 18 new)/`pnpm build` clean. Live in a built
+  Worker (`pnpm preview`, which is where the gate is actually armed): `/admin` 403, `/admin/orders`
+  403 (the gate runs before routing, so a route that does not exist yet is still refused rather than
+  404ing), `/api/admin/anything` 403 as JSON, an `alg: none` forgery 403, `/` and `/cart` still 200,
+  `/administrative` still 404 — the prefix match does not over-reach. On `pnpm dev`, `/admin` renders
+  as `dev@localhost`. **Not verified:** a real Access login, impossible without a domain — so the
+  JWKS response shape is still taken from the docs, and the test file says so at the top rather than
+  quietly pretending otherwise (the Monobank fixture lesson).
+- Then, same session: **`mlosko.dev` was bought and onboarded, clearing the domain blocker, and the
+  gate is live.** The dev Worker now answers on `balier.mlosko.dev` (custom domain), a Zero Trust
+  team `mlosko` exists, and a self-hosted Access application covers four destinations —
+  `admin`, `admin/*`, `api/admin`, `api/admin/*`. All four are needed: Access matches the path
+  exactly unless wildcarded, and a wildcard does **not** cover its own parent, so `admin` alone
+  would have left `/admin/orders` uncovered and `admin/*` alone would have left `/admin` uncovered.
+  `CF_ACCESS_TEAM_DOMAIN`/`CF_ACCESS_AUD` are set as Worker secrets. Verified live after deploy:
+  `/` 200, `/admin` and `/api/admin/x` both 302 to `mlosko.cloudflareaccess.com` with our AUD.
+  Email Sending is enabled on `mail.mlosko.dev` — a subdomain rather than the apex on purpose, so
+  `mlosko.dev` can still take real inbound mail later without colliding MX records.
+- **`workers.dev` is now off.** Adding a `routes` entry makes wrangler disable it by default;
+  `balier-dev.mykhailoshulezhko.workers.dev` 404s. Kept that way and made explicit
+  (`"workers_dev": false`) rather than left to a default — it was a second public surface no Access
+  policy could cover. **Session-log entries above this one that name it as the live test URL are
+  historical**; the live dev URL is `https://balier.mlosko.dev`.
+- Next: `/admin/orders` — list, detail, and the status transitions the order state machine allows.
 
 ### 2026-08-04 — order-confirmation email
 

@@ -286,7 +286,12 @@ validate a wire format** — stub the shape the real API actually returns.
 
 ## Phase 4 — Admin panel (2 days)
 
-- [ ] Cloudflare Access, plus a server-side check of the Access JWT in the app itself
+- [x] **Server-side check of the Access JWT in the app itself** — `src/lib/access/` +
+      `src/middleware.ts` gate `/admin/**` and `/api/admin/**`, fail-closed
+- [ ] **Cloudflare Access itself** — blocked, not skipped: an Access application needs a hostname on
+      a zone in the account, and `*.workers.dev` cannot be one. Same root cause as the Email Sending
+      blocker. Until a domain is onboarded, the deployed Worker answers 403 to every `/admin`
+      request and the panel is developed against `pnpm dev`, which bypasses the gate
 - [ ] Managing orders, products, content
 - [ ] Image upload — POST the file to an admin route and call `storeImage`, the same code path
       `pnpm media:ingest` uses. Since nothing is resized server-side, the form has to state the
