@@ -18,6 +18,11 @@ interface Props {
 
 const { title } = Astro.props;
 const admin = Astro.locals.admin;
+
+/** Grows a row per section as Phase 4 lands them (products, content, settings). */
+const NAV = [{ href: '/admin/orders', label: 'Замовлення' }];
+
+const pathname = Astro.url.pathname;
 ---
 
 <html lang="uk">
@@ -34,7 +39,29 @@ const admin = Astro.locals.admin;
   <body class="flex min-h-dvh flex-col">
     <header class="bg-espresso text-paper">
       <Container class="flex min-h-header flex-wrap items-center justify-between gap-2 py-2">
-        <a href="/admin" class="font-display text-lg font-bold">Balier admin</a>
+        <div class="flex items-center gap-4">
+          <a href="/admin" class="font-display text-lg font-bold">Balier admin</a>
+          <nav aria-label="Розділи">
+            <ul class="flex gap-3">
+              {
+                NAV.map((item) => (
+                  <li>
+                    <a
+                      href={item.href}
+                      aria-current={pathname.startsWith(item.href) ? 'page' : undefined}
+                      class:list={[
+                        'text-sm underline-offset-4 hover:underline',
+                        pathname.startsWith(item.href) ? 'underline' : 'opacity-80',
+                      ]}
+                    >
+                      {item.label}
+                    </a>
+                  </li>
+                ))
+              }
+            </ul>
+          </nav>
+        </div>
         {
           admin && (
             <span class="text-sm opacity-80">{admin.email ?? 'сервісний токен'}</span>

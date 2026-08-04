@@ -9,6 +9,7 @@ import {
   products,
 } from '../schema';
 import type { Kopiykas } from '~/lib/money';
+import { likeContains } from './like';
 import { LOCALE } from './locale';
 import { availableStock } from './stock';
 
@@ -225,17 +226,6 @@ export async function listFeaturedProducts(db: Db, limit: number): Promise<Produ
     .limit(limit);
 
   return hydrateProductCards(db, rows);
-}
-
-/**
- * Wraps a token in `%…%` and escapes the LIKE metacharacters, so a query of
- * `50%` looks for that text rather than for anything at all.
- *
- * Backslash is Postgres' default LIKE escape character, so no `ESCAPE` clause
- * is needed — but it does mean a literal backslash has to be doubled first.
- */
-function likeContains(token: string): string {
-  return `%${token.replace(/[\\%_]/g, (char) => `\\${char}`)}%`;
 }
 
 /**

@@ -1,5 +1,10 @@
+import { and, desc, eq, or, sql } from 'drizzle-orm';
+import type { SQL } from 'drizzle-orm';
 import type { Db, Tx, TxDb } from '../index';
-import type { Order, OrderItem, Payment } from '../schema';
+import type { Order, OrderItem, OrderStatus, Payment } from '../schema';
+import { orderItems, orders } from '../schema';
+import type { Kopiykas } from '~/lib/money';
+import { likeContains } from './like';
 
 export interface OrderWithItems extends Order {
   items: OrderItem[];
@@ -15,6 +20,134 @@ export async function findOrderByNumber(
     with: { items: true },
   });
   return order ?? null;
+}
+
+export interface OrderForAdmin extends Order {
+  items: OrderItem[];
+  /** Empty for cash on delivery — no invoice is ever created. */
+  payments: Payment[];
+}
+
+/**
+ * The admin order detail page. Unlike `findOrderByNumber` this carries the
+ * payment rows too, so the panel can show what Monobank thinks alongside what
+ * we think — the pair that told us the webhook was failing, back when it was.
+ */
+export async function findAdminOrder(
+  db: Db | TxDb | Tx,
+  orderNumber: string,
+): Promise<OrderForAdmin | null> {
+  const order = await db.query.orders.findFirst({
+    where: (o, { eq: eqCol }) => eqCol(o.orderNumber, orderNumber),
+    with: { items: true, payments: true },
+  });
+  return order ?? null;
+}
+
+/** One row of the admin order list. */
+export interface OrderListRow {
+  orderNumber: string;
+  status: OrderStatus;
+  customerName: string;
+  customerPhone: string;
+  paymentMethod: Order['paymentMethod'];
+  deliveryMethod: Order['deliveryMethod'];
+  total: Kopiykas;
+  npTtn: string | null;
+  itemCount: number;
+  createdAt: Date;
+}
+
+export interface OrderListResult {
+  rows: OrderListRow[];
+  /** Matching rows in total, ignoring the page window. */
+  total: number;
+}
+
+/**
+ * The admin order list: newest first, optionally narrowed to one status and to
+ * a search over the three things a manager has in front of them when they go
+ * looking — the order number a customer read out, the customer's name, or their
+ * phone.
+ *
+ * The phone match is on digits only, so `050 123` finds `+380501234567`
+ * regardless of how either side was punctuated. Substring matching, like
+ * `/search`, and for the same reason: the table is small and an operator types
+ * fragments, not prefixes.
+ */
+/** Digits, and the punctuation a phone number is written with — nothing else. */
+const PHONE_SHAPED = /^[\d\s+()-]+$/;
+const MIN_PHONE_DIGITS = 3;
+
+export async function listOrders(
+  db: Db,
+  options: { status?: OrderStatus; query?: string; limit: number; offset: number },
+): Promise<OrderListResult> {
+  const filters: SQL[] = [];
+
+  if (options.status) filters.push(eq(orders.status, options.status));
+
+  const query = options.query?.trim();
+  if (query) {
+    const text = likeContains(query);
+
+    const matches: SQL[] = [
+      sql`${orders.orderNumber} ilike ${text}`,
+      sql`${orders.customerName} ilike ${text}`,
+    ];
+
+    // Only when the query is phone-shaped. Matching stray digits against phone
+    // numbers is worse than useless: an order number like `B260804-DAMN7`
+    // reduces to the digits `2608047`, and searching for `7` alone then returns
+    // every customer whose number happens to contain one.
+    const digits = PHONE_SHAPED.test(query) ? query.replace(/\D/g, '') : '';
+    if (digits.length >= MIN_PHONE_DIGITS) {
+      matches.push(
+        sql`regexp_replace(${orders.customerPhone}, '\\D', '', 'g') like ${likeContains(digits)}`,
+      );
+    }
+
+    const matched = or(...matches);
+    if (matched) filters.push(matched);
+  }
+
+  const where = filters.length > 0 ? and(...filters) : undefined;
+
+  // Join and group rather than a correlated subquery: inside a `select` field
+  // Drizzle renders column references *unqualified* (`"order_id" = "id"`, not
+  // `"order_items"."order_id" = "orders"."id"`), which in a subquery silently
+  // resolves both sides to the inner table and counts nothing. It only
+  // qualifies them in `where`/`orderBy` position. Grouping keeps every
+  // reference bound to the schema, so a renamed column is a type error rather
+  // than a wrong number on screen.
+  const itemCount = sql<number>`coalesce(sum(${orderItems.quantity}), 0)::int`;
+
+  const [rows, [counted]] = await Promise.all([
+    db
+      .select({
+        orderNumber: orders.orderNumber,
+        status: orders.status,
+        customerName: orders.customerName,
+        customerPhone: orders.customerPhone,
+        paymentMethod: orders.paymentMethod,
+        deliveryMethod: orders.deliveryMethod,
+        total: orders.total,
+        npTtn: orders.npTtn,
+        itemCount,
+        createdAt: orders.createdAt,
+      })
+      .from(orders)
+      .leftJoin(orderItems, eq(orderItems.orderId, orders.id))
+      .where(where)
+      .groupBy(orders.id)
+      .orderBy(desc(orders.createdAt))
+      .limit(options.limit)
+      .offset(options.offset),
+
+    db.select({ total: sql<number>`count(*)::int` }).from(orders).where(where),
+  ]);
+
+  return { rows, total: counted?.total ?? 0 };
 }
 
 export interface PaymentWithOrder extends Payment {

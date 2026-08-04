@@ -1,6 +1,10 @@
 import type { DeliveryMethod, Order, PaymentMethod } from '~/lib/db/schema';
 
-/** Shared between the Telegram (`./telegram`) and email (`./email`) order-notification adapters. */
+/**
+ * Shared by the Telegram (`./telegram`) and email (`./email`) order-notification
+ * adapters, and by the admin order screens — one order reads the same way
+ * wherever it is shown.
+ */
 
 export const DELIVERY_METHOD_LABELS: Record<DeliveryMethod, string> = {
   np_warehouse: 'Відділення Нової Пошти',

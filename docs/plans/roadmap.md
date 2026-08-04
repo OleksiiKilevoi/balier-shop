@@ -284,7 +284,10 @@ its fixture originally stubbed the pubkey as DER, the same wrong assumption the 
 so six green tests were confirming a broken path against itself. **A self-signed fixture cannot
 validate a wire format** — stub the shape the real API actually returns.
 
-## Phase 4 — Admin panel (2 days)
+## Phase 4 — Admin panel (2 days) — gate and orders done
+
+The gate is live and the orders screen is finished. What remains is the catalog side — products,
+content and image upload — plus the one-field cash-on-delivery setting.
 
 - [x] **Cloudflare Access, plus a server-side check of the Access JWT in the app itself.**
       `src/lib/access/` + `src/middleware.ts` gate `/admin/**` and `/api/admin/**`, fail-closed;
@@ -292,12 +295,35 @@ validate a wire format** — stub the shape the real API actually returns.
       Access application needs a hostname on a zone in the account, and `*.workers.dev` cannot be
       one). Login is **one-time PIN**, so no admin ever needs a Cloudflare account. `pnpm dev`
       bypasses the gate, which is how the rest of the panel gets built
-- [ ] Managing orders, products, content
+- [x] **Managing orders** — `/admin/orders` (list: status filter, search over order number /
+      customer name / phone, pagination) and `/admin/orders/[orderNumber]` (detail: line items,
+      customer, delivery, the Monobank invoice row, the allowed status transitions, and the Nova
+      Poshta tracking number). The state machine is pure and tested in `src/lib/orders/status.ts`;
+      `updateStatus.ts` is the transactional half. Three properties worth keeping in mind before
+      extending it: **`paid` is unreachable from the panel by construction** (a test asserts it over
+      the whole enum — the webhook stays its only writer); **cancel and refund are never offered
+      together**, since which one applies depends on whether money has actually been collected, so
+      a cash order in transit is cancelled and a card order past `paid` is refunded; and **both
+      return stock, but only when it was actually taken** — `confirmed`/`paid` and later have
+      decremented and dropped their reservation, `pending`/`awaiting_payment` have only reserved.
+      `refunded` is bookkeeping: nothing calls Monobank, the money is returned in its dashboard.
+      The panel runs with no client-side JavaScript — GET forms for the view, POST + 303 for the
+      writes, a `<details>` disclosure instead of a `confirm()`. Verified live against the dev DB,
+      including both restock paths and four kinds of forged POST
+- [ ] Managing products and content
 - [ ] Image upload — POST the file to an admin route and call `storeImage`, the same code path
       `pnpm media:ingest` uses. Since nothing is resized server-side, the form has to state the
       expected dimensions and reject anything wildly off, or the storefront inherits whatever the
       uploader happened to export
-- [ ] Configuring the cash-on-delivery limit
+- [ ] Configuring the cash-on-delivery limit — `settings.cod_limit` is already read and enforced at
+      checkout (`getCodLimitKopiykas`); what is missing is the one screen that writes it
+
+> **Not in this phase, and not agreed either way: telling the customer when an admin moves an
+> order.** Marking an order shipped or cancelled currently sends nothing — Telegram and email fire
+> on order creation and on payment, and nowhere else. Whether «Відправлено» / «Скасовано» should
+> reach the customer is a decision about what the shop says to people, not a UI detail, so it is
+> recorded here rather than built. Both adapters already implement `NotifierPort`, so the work is
+> small once the answer exists; the answer is what is missing.
 
 ## Phase 5 — Launch (2–3 days)
 

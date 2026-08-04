@@ -4,7 +4,67 @@
 
 ## 📍 CURRENT STATE (overwrite this block; keep tight)
 
-- **Last done:** **the admin gate — Phase 4's first item, the app-side half of it.**
+- **Last done:** **the admin orders screen — Phase 4's second item.** `/admin/orders` (list) and
+  `/admin/orders/[orderNumber]` (detail), behind the gate below, with the status transitions the
+  order state machine allows and the Nova Poshta tracking number.
+  - **The state machine is a pure module, `src/lib/orders/status.ts` (13 tests).** Everything about
+    *what may happen* lives there; `src/lib/orders/updateStatus.ts` is thin transactional plumbing
+    around it. Two rules carry the weight:
+    - **`paid` is never a legal target.** `allowedTransitions` cannot produce it from any state,
+      either payment method, and a test asserts that over the whole enum — the webhook stays the
+      only writer (hard rule 2). A hand-crafted `POST … next=paid` was tried live and refused.
+    - **Cancel and refund are decided by whether money has actually arrived**, not offered side by
+      side. Card collects up front, so it is refundable from `paid` on; cash on delivery collects
+      when the carrier hands the parcel over, so a cash order in transit is *cancelled* — there is
+      nothing to refund yet. Exactly one of the two is ever offered.
+  - **Both undo actions return stock, but only when it was actually taken** (decided by explicit
+    ask). `confirmed`/`paid` and later have already decremented `product_variants.stock` and dropped
+    their reservation (`create.ts` for cash, `confirmPayment.ts` for card); `pending`/
+    `awaiting_payment` hold a live reservation and have decremented nothing. So undoing the first
+    kind increments stock back, undoing the second only releases the reservation. Both paths were
+    verified against the real dev DB, not just reasoned about — see below.
+  - **`refunded` is bookkeeping, not a refund.** Nothing here calls Monobank; the money is returned
+    in Monobank's own dashboard and the button says so, rather than implying it moves money.
+  - **The panel runs with no client-side JavaScript at all.** Filter and search are a plain GET
+    form (the URL carries the view, like `/search`); both writes are form POSTs back to the same
+    page, answered with a 303 to it, so a refresh after acting re-reads instead of re-firing.
+    Terminal actions sit behind a `<details>` disclosure rather than a `confirm()` — two deliberate
+    clicks, no script. Each transition form carries the status it was *rendered* from, re-checked
+    against the live row under `FOR UPDATE`, so a stale tab cannot fire a transition nobody chose.
+  - **Astro's origin check already protects these forms**: a POST without a matching `Origin` header
+    is refused with «Cross-site POST form submissions are forbidden» before any handler runs. Found
+    by curl getting a 403 — worth knowing for any future admin form, and it means the panel's writes
+    carry CSRF protection we did not have to build.
+  - Also added: `src/lib/validation/admin.ts` (zod, incl. the 14-digit TTN — spaces and dashes
+    stripped, empty clears it), `src/lib/i18n/admin.ts`, `src/components/admin/OrderStatusBadge.astro`,
+    a nav row in `AdminLayout`, and `src/lib/db/queries/like.ts` — the LIKE-escaping helper that was
+    private to `products.ts`, now shared by both search paths so the escaping rule has one definition.
+  - **Three real bugs, all found by testing live rather than by the type checker:**
+    - **The phone search matched stray digits.** `q=DAMN7` returned six orders, because the query's
+      digits (`7`) were matched against every phone number. The phone clause now only runs on a
+      phone-shaped query (digits and phone punctuation only, ≥3 digits).
+    - **The item-count column was always `0`.** Drizzle renders column references **unqualified
+      inside a `select` field** — `where "order_id" = "id"` instead of
+      `"order_items"."order_id" = "orders"."id"` — so the correlated subquery compared `order_items`
+      to itself and summed nothing, with no error anywhere. It qualifies them correctly in
+      `where`/`orderBy`, which is why `searchProducts`' very similar subquery has always been fine.
+      Replaced with a `leftJoin` + `groupBy`, which keeps every reference bound to the schema.
+    - Three 320px layout faults (order number wrapping mid-token, the totals row colliding with its
+      own wrapped value, an almost-empty status card on a delivered order), all seen in actual
+      screenshots.
+  `pnpm check` (0 errors)/`pnpm test` (97/97, 13 new)/`pnpm build` clean. Verified live against the
+  real dev Neon DB: order `B260804-DAMN7` walked `paid → packed → shipped → delivered` with a TTN
+  saved from grouped input; `B260804-L6NJG` (cash, `confirmed`) cancelled and **SPACE stock went
+  2 → 3** with its reservation count at 0; `B260804-LHB7A` (`awaiting_payment`) cancelled and stock
+  **stayed** at 3 while its live reservation was released — both halves of the restock rule
+  confirmed. Forged POSTs for `paid`, for a jump past a step, from a stale status and with a garbage
+  status were each refused with the right message; an unknown order number 404s. 320px checked over
+  CDP (`cssContentSize` 320 on both pages) *and eyeballed in screenshots*, plus 1280 for the desktop
+  table. Then in a built Worker (`pnpm preview`, where the gate is armed): `/admin/orders`,
+  `/admin/orders/<n>` and a POST transition all 403, and the order was still `confirmed` afterwards.
+  **Note the dev DB was mutated by this testing** — `DAMN7` is now `delivered` with fake TTN
+  `20450123456789`, `L6NJG` and `LHB7A` are `cancelled`. Harmless test rows, not cleaned up.
+- **Before that:** **the admin gate — Phase 4's first item, the app-side half of it.**
   `src/lib/access/index.ts` (`createAccessVerifier`, `extractAccessToken`, `normalizeTeamDomain`,
   18 tests) verifies a Cloudflare Access JWT with Web Crypto: RS256 pinned from our side rather than
   read off the token, the signing key matched by `kid` against
@@ -46,7 +106,7 @@
   a JWT our verifier rejected would have rendered «Доступ заборонено» instead of the panel. That
   also retires the last assumption in `src/lib/access/index.test.ts`'s header note: the JWKS wire
   format is now confirmed by a real login, not just taken from the docs.
-- **Before that:** **order-confirmation email** — the last open Phase 3 item, and the reason the
+- **Earlier:** **order-confirmation email** — the last open Phase 3 item, and the reason the
   Cloudflare plan was upgraded to Workers Paid this session (Email Sending needs it). Reused the
   existing `NotifierPort` shape rather than adding a new port type: `src/lib/notify/email.ts`
   (`createEmailNotifier`, tested) implements it against the new `send_email` binding
@@ -132,19 +192,22 @@
   `X-Sign`, is **now verified** (see the webhook entry above) — that entry is finally closed. Testing this from
   plain `localhost` would still need a tunnel; testing against the deployed dev Worker doesn't, and
   that is the route that worked.
-- **In progress:** **Phase 4 — the admin panel.** Its first item is done on the app side (the
-  Access JWT gate above) and blocked on the Cloudflare side (no domain → no Access application).
-  The remaining three items — orders/products/content management, image upload via `storeImage`,
-  and the cash-on-delivery limit — are unstarted, and all three are developed against `pnpm dev`,
-  which bypasses the gate.
+- **In progress:** **Phase 4 — the admin panel.** The gate is done and live (one-time PIN), and
+  orders are done. What is left of the phase: **products and content management**, **image upload**
+  via `storeImage`, and the **cash-on-delivery limit** (`settings.cod_limit` is read at checkout
+  already; nothing writes it). All three are developed against `pnpm dev`, which bypasses the gate.
+  Deliberately *not* built with orders, and unasked-for so far: any customer-facing notification on
+  an admin status change — «Відправлено» emails are not in the roadmap item, so Telegram and email
+  stay wired to order creation and payment only.
   Phase 3 is **code-complete**; what's left there is not code — a domain for Email Sending, and a
   real browser pass through `/checkout` (Turnstile-gated, so curl can't do it). Phase 2 still
   carries its own leftover: the seven static pages render a heading, a lead and a
   `ContentPlaceholder`. Writing them is a Phase 5 content item, and the legal ones gate Monobank.
-- **Next step:** Phase 4's orders screen — list, detail, and the status transitions the state
-  machine allows — behind the gate, at `/admin/orders`. (Still open from Phase 3, unchanged: a real
-  browser checkout pass, COD with an email address, to watch the confirmation email attempt and its
-  graceful `E_SENDER_NOT_VERIFIED` failure.)
+- **Next step:** the rest of Phase 4 — products/content management and image upload, or the
+  cash-on-delivery limit (much the smaller of the two, and it closes a checkout setting that is
+  currently read-only). (Still open from Phase 3, unchanged: a real browser checkout pass, COD with
+  an email address, to watch the confirmation email attempt and its graceful
+  `E_SENDER_NOT_VERIFIED` failure.)
 - **Blockers (waiting on me):**
   - Phase 0 externals unchanged: Monobank Acquiring registration, Nova Poshta business account +
     cash-on-delivery setup, Telegram manager account / bot / chat.
@@ -163,8 +226,8 @@
   - `PUBLIC_TELEGRAM_MANAGER` in `wrangler.jsonc` is a **placeholder handle**.
   - ~~`DATABASE_URL` missing as a Worker secret~~ — resolved; it is set, and as of 2026-08-04 so are
     the other five runtime secrets.
-- **Active branch:** `main` (only branch; tracks `origin/main`), pushed at `2f42788`; the admin gate
-  above is uncommitted working-tree changes on top of it.
+- **Active branch:** `main` (only branch; tracks `origin/main`), pushed at `25457fc`; the orders
+  screen above is uncommitted working-tree changes on top of it.
   A push to `main` deploys (Workers Builds is connected to `mykhailoshulezhko/balier`, production
   branch `main`, build `pnpm run build`, deploy `npx wrangler deploy`).
 
@@ -178,14 +241,55 @@
       confirmation email. `balier-cron` is deployed. Only external/non-code items remain: onboarding
       a domain for Email Sending, and a live browser pass through `/checkout`. The admin COD-limit
       UI is Phase 4's item, not this one)
-- [~] Phase 4 — Admin panel (the app-side Access JWT gate is built and fail-closed; Access itself
-      is blocked on a domain. Orders/products/content, image upload and the COD limit are unstarted)
+- [~] Phase 4 — Admin panel (the Access JWT gate is built, fail-closed and live behind one-time PIN;
+      the orders screen — list, detail, transitions, TTN — is done and verified live. Products and
+      content management, image upload and the COD limit are unstarted)
 - [ ] Phase 5 — Launch (incl. migrating off the dev Neon/Cloudflare accounts)
 - [ ] Phase 6 — Improvements
 
 ---
 
 ## 🗒️ SESSION LOG (newest first; 3–6 lines each)
+
+### 2026-08-04 — Phase 4, part 2: the admin orders screen
+
+- Did, on request (after confirming the live `/admin` one-time-PIN login works): `/admin/orders`
+  list — status filter, search over order number / customer name / phone, pagination — and
+  `/admin/orders/[orderNumber]` detail, with the allowed status transitions and the Nova Poshta
+  tracking number. `src/lib/orders/status.ts` holds the whole decision layer as pure, tested code
+  (`allowedTransitions`, `isStockCommitted`); `src/lib/orders/updateStatus.ts` is the transactional
+  plumbing (`FOR UPDATE` re-read, restock, reservation release). Supporting: `validation/admin.ts`,
+  `i18n/admin.ts`, `components/admin/OrderStatusBadge.astro`, `queries/like.ts` (the LIKE-escaping
+  helper lifted out of `products.ts` so both search paths share one definition), plus `listOrders` /
+  `findAdminOrder`.
+- Decisions, two closed by asking rather than guessing: **(1) both cancel and refund return stock**,
+  but only when it was actually taken — `confirmed`/`paid` and later have decremented and dropped
+  their reservation, `pending`/`awaiting_payment` have only reserved, so the second kind releases
+  the reservation and increments nothing. **(2) TTN entry is in scope** (`orders.np_ttn` existed in
+  the schema with nothing writing to it). Decided without asking, and stated rather than assumed:
+  `paid` is unreachable from the panel by construction; cancel and refund are never offered together
+  — which of the two appears is decided by whether money has actually been collected, so a cash
+  order in transit is cancelled and a card order past `paid` is refunded; `refunded` is bookkeeping
+  and the money is returned in Monobank's dashboard; and no customer notification fires on an admin
+  status change, since that is not in the roadmap item.
+- Found along the way, three bugs that only live testing could have produced: the phone search
+  matched **stray digits** (`q=DAMN7` returned six orders, because `7` was matched against every
+  phone); the item-count column was **always 0**, because Drizzle renders column references
+  *unqualified inside a `select` field* so the correlated subquery compared `order_items` to itself
+  — it qualifies them in `where`/`orderBy`, which is why `searchProducts`' near-identical subquery
+  has always worked, and the fix is a `leftJoin` + `groupBy`; and three 320px faults visible only in
+  actual screenshots. Also learned: **Astro's origin check already refuses cross-site form POSTs**
+  (curl needed an explicit `Origin` header), so the panel's writes have CSRF protection for free.
+- Verified: `pnpm check` (0 errors)/`pnpm test` (97/97, 13 new)/`pnpm build` clean. Live against the
+  real dev Neon DB — `B260804-DAMN7` walked `paid → packed → shipped → delivered`; cancelling cash
+  order `B260804-L6NJG` took SPACE stock 2 → 3; cancelling `B260804-LHB7A` (`awaiting_payment`) left
+  stock alone and released its reservation; forged POSTs (`next=paid`, a jump past a step, a stale
+  `from`, a garbage status) were each refused with the right message. 320px measured over CDP *and*
+  eyeballed, 1280 too. Then in a built Worker (`pnpm preview`): every new route 403s, POST included,
+  and the order was unchanged afterwards. **The dev DB was mutated by this testing** — `DAMN7` is
+  `delivered` with fake TTN `20450123456789`, `L6NJG`/`LHB7A` are `cancelled`.
+- Next: the rest of Phase 4 — products/content management and image upload, or the cash-on-delivery
+  limit (smaller, and it closes a setting checkout currently only reads).
 
 ### 2026-08-04 — Phase 4, part 1: the admin gate (Access JWT)
 
