@@ -16,9 +16,7 @@ export const prerender = false;
  * checkout will call before creating an order, so the two cannot disagree about
  * what a cart is worth.
  *
- * Not yet rate limited — that is its own roadmap item, waiting on the
- * `RATE_LIMIT` KV namespace. The endpoint is read-only and bounded by
- * `MAX_CART_LINES`, so the exposure until then is a database read.
+ * Rate limited per IP in `src/middleware.ts`.
  */
 export const POST: APIRoute = async ({ request }) => {
   let payload: unknown;

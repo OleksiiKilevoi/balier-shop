@@ -203,9 +203,14 @@ content item and a Monobank gate, not a build one.
       («Політика конфіденційності») wraps rather than overflowing. The homepage is verified at both
       320 and 1280 with the featured grid populated
 
-## Phase 3 — Cart and payment (3 days — realistically 5–6)
+## Phase 3 — Cart and payment (3 days — realistically 5–6) — money path done, extras pending
 
 The heaviest phase by a wide margin. Consider splitting notifications out.
+
+The whole card money path is verified live end to end against the deployed dev Worker — order →
+Monobank → webhook → `paid`, with the Telegram «Оплачено» message landing in the manager group. What
+is left in this phase is one deliberately-deferred extra — order-confirmation email — now that rate
+limiting is done too.
 
 - [x] **Cart (nanostores + persist), server-side validation of prices and stock** — `src/stores/cart.ts`
       stores `{ variantId, quantity }` and nothing else, so a hand-edited `localStorage` entry can
@@ -222,19 +227,50 @@ The heaviest phase by a wide margin. Consider splitting notifications out.
       the customer is still pressing. `QuantityStepper` moved to delegated listeners for the same
       reason — a per-element binding leaves every cloned row dead. Verified at 320 px and 1280 px
       against Neon, including the sold-out, clamped, network-failure and empty paths
-- [ ] `/checkout` page
-- [ ] Create the KV namespaces (`CACHE`, `RATE_LIMIT`) and uncomment the bindings in `wrangler.jsonc`
-- [ ] Cron for syncing Nova Poshta reference data — handler stubbed in `workers/cron/`
-- [ ] Payment methods: card / cash on delivery
-- [ ] Webhook handler: X-Sign verification, idempotency, re-check via invoice/status, transition the
-      order to paid
-- [ ] Cron for checking stale orders (releasing reservations) — handler stubbed in `workers/cron/`
-- [ ] Configurable limit for cash on delivery
-- [ ] `/checkout/success` (for both the card and cash-on-delivery flows) and `/checkout/failure`
+- [x] `/checkout` page — one form, delivery and payment method switching the fields below it.
+      Settlement and warehouse are search comboboxes against the synced Nova Poshta tables (Kyiv
+      alone has 7 756 warehouses, so a plain `<select>` could not work); `+380` is a fixed prefix
+      chip and the input holds 9 auto-formatted local digits (`src/lib/phone.ts`)
+- [x] Create the `RATE_LIMIT` KV namespace and bind it in `wrangler.jsonc` (`CACHE` stays
+      uncreated — nothing needs it yet, so creating it now would be unused scope)
+- [x] Cron for syncing Nova Poshta reference data — `syncNovaPoshta` in `workers/cron/`, real and
+      run successfully against the live API. **The `balier-cron` Worker itself has never been
+      deployed**, so nothing runs it on a schedule yet — `pnpm cron:deploy` plus its own runtime
+      secrets (`DATABASE_URL`, `NOVAPOSHTA_API_KEY`)
+- [x] Payment methods: card / cash on delivery — cash on delivery commits the sale inside the
+      creating transaction (nothing to wait on); card leaves the stock reservation live and calls
+      Monobank *outside* the transaction, rolling the order back to `cancelled` if the invoice call
+      itself fails. Both verified live against the real dev Neon DB and the real Monobank test
+      merchant
+- [x] Webhook handler: X-Sign verification, idempotency, re-check via invoice/status, transition the
+      order to paid — `src/lib/orders/confirmPayment.ts` is the only place an order becomes `paid`,
+      and it re-checks `invoice/status` rather than trusting the webhook body. Verified live: a real
+      Monobank callback carrying a real `X-Sign` took an order to `paid`. Two things only live
+      testing could have found: `X-Sign` is DER and needs converting to raw, and `GET /pubkey`
+      returns base64 of a **PEM document**, not of DER (`normalizeSignature` / `normalizePublicKey`)
+- [x] Cron for checking stale orders (releasing reservations) — `releaseExpiredReservations` in
+      `workers/cron/`; same undeployed-Worker caveat as the Nova Poshta sync above
+- [x] Configurable limit for cash on delivery — read from `settings.cod_limit` at checkout and
+      enforced (`cod_over_limit`). Editing it from the admin panel is Phase 4's item, not this one
+- [x] `/checkout/success` (for both the card and cash-on-delivery flows) and `/checkout/failure`
 - [ ] Order confirmation emails to customers
-- [ ] Telegram notifications about new orders
-- [ ] Bot protection: Cloudflare Turnstile on the checkout form
-- [ ] Rate limiting on API routes
+- [x] Telegram notifications about new orders — `src/lib/notify/telegram.ts` implements `NotifierPort`
+      against the Bot API. `orderCreated` fires from `createOrder` for both payment methods;
+      `orderPaid` fires from the webhook route on the `paid` transition only, so a redelivered
+      webhook (which `confirmPayment` reports as `unchanged`) cannot produce a second message. Both
+      are sent outside the DB transaction and are best-effort by the port's contract — a Telegram
+      outage never costs an order. Verified live in the manager group
+- [x] Bot protection: Cloudflare Turnstile on the checkout form — `src/lib/turnstile/index.ts` calls
+      siteverify from `POST /api/checkout` before any DB or cart work, and fails closed
+- [x] Rate limiting on API routes — `src/middleware.ts` runs a per-IP, per-route fixed-window
+      counter (`src/lib/rateLimit/`) against the `RATE_LIMIT` KV namespace, ahead of every route
+      named in `docs/CONVENTIONS.md` (checkout, both NP search endpoints) plus `/api/cart` and
+      `/api/checkout/limits`. `/api/webhooks/monobank` is deliberately excluded — it's already gated
+      by `X-Sign`, and an IP bucket risks dropping a genuine redelivery from Monobank's own
+      infrastructure. Budgets are sized to cost: `/api/checkout` (calls Turnstile + Monobank, creates
+      a row) gets 5/5min, the debounced NP search inputs get 60/min. Verified live: tripped the limit
+      on `/api/checkout/limits` (30/min) against the running dev server and got a 429 with a correct
+      `retry-after`; confirmed the webhook keeps answering its own 403 rather than being rate-limited
 - [x] ~~Delivery cost calculation~~ — **removed**, see the decision above. The recipient pays the
       carrier; nothing about delivery enters a total
 
@@ -242,7 +278,11 @@ Write tests alongside, not in Phase 5: order total calculation and webhook signa
 are the two places where a bug costs money. The runner is **Vitest** (`pnpm test`), configured in
 `vitest.config.ts` without the Astro config so a unit test never depends on the deploy target.
 `src/lib/cart/index.test.ts` covers the first half of the order total: pricing from the database,
-clamping to stock, and every way a stored cart can be malformed.
+clamping to stock, and every way a stored cart can be malformed. `src/lib/monobank/index.test.ts`
+covers the second, signature verification — with one lesson worth carrying into any future adapter:
+its fixture originally stubbed the pubkey as DER, the same wrong assumption the implementation made,
+so six green tests were confirming a broken path against itself. **A self-signed fixture cannot
+validate a wire format** — stub the shape the real API actually returns.
 
 ## Phase 4 — Admin panel (2 days)
 

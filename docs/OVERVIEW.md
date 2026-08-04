@@ -186,8 +186,9 @@ What exists in the repository today, as distinct from the target shape above.
 
 ### Cloudflare bindings and accounts
 
-- `MEDIA` (R2 bucket `balier-media`) and `IMAGES` are bound in `wrangler.jsonc`. `CACHE` and
-  `RATE_LIMIT` KV namespaces are commented out until Phase 3 creates them.
+- `MEDIA` (R2 bucket `balier-media`), `IMAGES`, and the `RATE_LIMIT` KV namespace (backs
+  `src/middleware.ts`) are bound in `wrangler.jsonc`. `CACHE` is still commented out — nothing
+  needs it yet.
 - The Neon project and the Cloudflare account are the **developer's own, for development only**.
   The store ships on the client's accounts, stood up again during Phase 5.
 

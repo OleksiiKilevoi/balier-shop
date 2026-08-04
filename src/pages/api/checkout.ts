@@ -17,8 +17,8 @@ export const prerender = false;
  * order (`cart_changed`) so the customer reviews the real cart before money
  * moves.
  *
- * Not yet rate limited — that waits on follow-up work (the `RATE_LIMIT` KV
- * namespace), same as `/api/cart` already notes for itself.
+ * Rate limited per IP in `src/middleware.ts` (tightest budget of any route —
+ * this one calls Turnstile/Monobank and creates a row).
  */
 export const POST: APIRoute = async ({ request, locals }) => {
   let payload: unknown;

@@ -4,10 +4,39 @@
 
 ## 📍 CURRENT STATE (overwrite this block; keep tight)
 
-- **Last done:** 🎉 **the whole card money path is now verified live end to end on the deployed dev
+- **Last done:** **API rate limiting** — `src/middleware.ts` (new) runs a per-IP, per-route
+  fixed-window counter (`src/lib/rateLimit/`, KV-backed) ahead of every route
+  `docs/CONVENTIONS.md` names (checkout, both Nova Poshta search endpoints) plus `/api/cart` and
+  `/api/checkout/limits`, which each already carried their own "not yet rate limited" note.
+  `/api/webhooks/monobank` is deliberately excluded — `X-Sign` already gates it, and an IP bucket
+  risks dropping a genuine redelivery from Monobank's own infrastructure rather than an attacker's.
+  Budgets are sized to cost, not uniform: `/api/checkout` (Turnstile + Monobank + a new row) gets
+  5/5min, the debounced NP search inputs get 60/min. New `RATE_LIMIT` KV namespace, created and
+  bound in `wrangler.jsonc` (`CACHE` stays uncreated — nothing needs it). Along the way, confirmed
+  `balier-cron` **is now deployed** (`wrangler secret list --name balier-cron` returns
+  `DATABASE_URL`/`NOVAPOSHTA_API_KEY` instead of "Worker not found") — done in this session before
+  the docs below caught up to it, so both stock-reservation release and the Nova Poshta sync are
+  finally running on schedule against the deployed dev Worker. `pnpm check` (0 errors)/`pnpm test`
+  (58/58, 4 new)/`pnpm build` clean; verified live against the running dev server — tripped the
+  limit on `/api/checkout/limits`, got a 429 with a correct `retry-after`, and confirmed the webhook
+  keeps answering its own 403 rather than being rate-limited.
+- **Before that:** the **`orderPaid` Telegram notification** — the last piece of the notification port
+  that had been implemented but wired to nothing. `confirmPayment` now `.returning()`s the updated
+  order row and carries it (with its already-loaded items) out in the `paid` result, and
+  `src/pages/api/webhooks/monobank.ts` sends «Оплачено» to the manager group on that transition only.
+  Two properties this shape buys, both deliberate: the send happens **outside** `confirmPayment`'s
+  transaction (a network call never holds one open — same rule `create.ts` follows for the Monobank
+  call), and it **cannot duplicate** on a redelivered webhook, because `confirmPayment`'s idempotency
+  reports an already-`paid` order as `unchanged` and so never produces a second `paid` result. Sent
+  via `waitUntil` rather than awaited, so Monobank still gets its fast 200. Two new tests cover the
+  real adapter (`telegram.test.ts` previously only tested the pure formatter): the wire call itself
+  (`sendMessage`, right `chat_id`, «Оплачено» heading) and that it resolves rather than throwing when
+  fetch fails. `pnpm check` (0 errors)/`pnpm test` (54/54, 2 new)/`pnpm build` clean; **confirmed
+  working live** — committed as `b6a5d22`.
+- **Earlier still:** 🎉 **the whole card money path was verified live end to end on the deployed dev
   Worker** — order `B260804-DAMN7` went card → Monobank → webhook → `paid`, with its `payments` row
-  at `success`. That is the first Monobank webhook that has *ever* completed the round trip, and it
-  also closes the long-standing "is `X-Sign` DER or raw?" question: `normalizeSignature`'s DER→raw
+  at `success`. That was the first Monobank webhook to ever complete the round trip, and it also
+  closed the long-standing "is `X-Sign` DER or raw?" question: `normalizeSignature`'s DER→raw
   conversion works against a real Monobank signature. Getting there took fixing two separate bugs,
   both found by testing live rather than locally:
   1. **Every checkout on the deployed site returned `captcha_failed`.** The Worker had no runtime
@@ -34,35 +63,33 @@
   `/checkout` end to end, `src/lib/orders/`, `src/lib/monobank/` (`PaymentPort` incl. ECDSA
   signature verification), `src/lib/novaposhta/` (client + sync), the checkout/webhook API routes,
   `/checkout` + `/checkout/success` + `/checkout/failure`, and both cron jobs
-  (`releaseExpiredReservations`, `syncNovaPoshta`) are real. Telegram order-created notifications
-  (`src/lib/notify/telegram.ts`) are wired and verified live. Verified live against the real dev
+  (`releaseExpiredReservations`, `syncNovaPoshta`) are real. Telegram notifications
+  (`src/lib/notify/telegram.ts`) are wired for **both** events now and verified live. Verified live against the real dev
   Neon DB: COD orders end to end, the strict `cart_changed` rejection rolling back with zero side
   effects, and — with real Monobank/Nova Poshta credentials from Mykhailo's personal dev accounts
   (see `balier-infra-accounts-are-dev` memory) — **card payment confirmed working end to end
   including the paid transition and idempotency** (order `B260804-6DN8Q`). Test orders
   `B260804-BYP3K`, `B260804-S86Y7` (COD) and `B260804-6DN8Q` (card, paid) are real rows in the dev
   DB, harmless, not cleaned up. Webhook HTTP delivery over the real network, including a real
-  `X-Sign`, is **now verified** (see Last done) — that entry is finally closed. Testing this from
+  `X-Sign`, is **now verified** (see the webhook entry above) — that entry is finally closed. Testing this from
   plain `localhost` would still need a tunnel; testing against the deployed dev Worker doesn't, and
   that is the route that worked.
-- **In progress:** Phase 3. Deferred on purpose, per the reviewed plan: order-confirmation email,
-  a Telegram `orderPaid` notification (the webhook still doesn't send one — only order creation
-  does so far), general API rate limiting (needs the `RATE_LIMIT` KV namespace), the admin-editable
-  cash-on-delivery limit (Phase 4; the seeded `settings.cod_limit` is read, not writable yet).
+- **In progress:** Phase 3, and only one deliberately-deferred extra is left in it now:
+  order-confirmation email. The admin-editable cash-on-delivery limit moved to Phase 4 (admin
+  panel) — Phase 3's job was only to read and enforce the seeded `settings.cod_limit`, which is
+  already done.
   Phase 2 still carries its own leftover: the seven static pages render a heading, a lead and a
   `ContentPlaceholder`. Writing them is a Phase 5 content item, and the legal ones gate Monobank.
-- **Next step:** deploy `balier-cron` — it has **never been deployed** (`wrangler secret list --name
-  balier-cron` → "Worker not found"), so on the deployed dev site nothing releases expired stock
-  reservations and nothing refreshes the Nova Poshta cache. `pnpm cron:deploy`, then its own runtime
-  secrets (`DATABASE_URL`, `NOVAPOSHTA_API_KEY`) — runtime, not the Build section, see Last done.
-  After that, pick the next Phase 3 item: the `orderPaid` notification or rate limiting.
+- **Next step:** the order-confirmation email — the last open Phase 3 item. `balier-cron` is
+  deployed and rate limiting is done (see Last done for both), so nothing else in this phase is
+  blocked on infrastructure anymore.
 - **Blockers (waiting on me):**
   - Phase 0 externals unchanged: Monobank Acquiring registration, Nova Poshta business account +
     cash-on-delivery setup, Telegram manager account / bot / chat.
   - `PUBLIC_TELEGRAM_MANAGER` in `wrangler.jsonc` is a **placeholder handle**.
   - ~~`DATABASE_URL` missing as a Worker secret~~ — resolved; it is set, and as of 2026-08-04 so are
     the other five runtime secrets.
-- **Active branch:** `main` (only branch; tracks `origin/main`), clean and pushed at `611cb2f`.
+- **Active branch:** `main` (only branch; tracks `origin/main`), clean and pushed at `b6a5d22`.
   A push to `main` deploys (Workers Builds is connected to `mykhailoshulezhko/balier`, production
   branch `main`, build `pnpm run build`, deploy `npx wrangler deploy`).
 
@@ -71,9 +98,10 @@
 - [~] Phase 0 — Preparation (Neon + R2 done; Monobank, Nova Poshta, Telegram outstanding)
 - [x] Phase 1 — Foundation (schema, migrations, seed, design components, deploy verified)
 - [~] Phase 2 — Catalog / storefront (every page built; static-page copy outstanding)
-- [~] Phase 3 — Cart and payment (cart, `/checkout`, both payment methods, Turnstile done; the
-      webhook is now verified live end to end. `orderPaid` notification, rate limiting, admin
-      COD-limit editing still open, and `balier-cron` is written but not deployed)
+- [~] Phase 3 — Cart and payment (the money path is done and verified live end to end: cart,
+      `/checkout`, both payment methods, Turnstile, the webhook, both Telegram notifications, and
+      now rate limiting. `balier-cron` is deployed. Only the confirmation email and the admin
+      COD-limit UI (Phase 4's item) are still open)
 - [ ] Phase 4 — Admin panel
 - [ ] Phase 5 — Launch (incl. migrating off the dev Neon/Cloudflare accounts)
 - [ ] Phase 6 — Improvements
@@ -81,6 +109,55 @@
 ---
 
 ## 🗒️ SESSION LOG (newest first; 3–6 lines each)
+
+### 2026-08-04 — API rate limiting
+
+- Did, on request: `src/lib/rateLimit/index.ts` (`checkRateLimit`, tested) is a KV fixed-window
+  counter — `${key}:${windowStart}` holds a count, TTL'd to `windowSeconds * 2` so a slow reader
+  never resurrects an expired window. Not atomic (KV has no increment primitive), so two requests
+  racing the same window can both slip a step past the limit — accepted as fine for abuse
+  deterrence, not fine for anything that has to bill on the count, and said so in the code comment.
+  `src/middleware.ts` (new) applies it per-IP (`cf-connecting-ip`) ahead of a small route table:
+  `/api/checkout` (5/5min — it calls Turnstile and Monobank and creates a row), `/api/cart` and
+  `/api/checkout/limits` (30/min), the two NP search endpoints (60/min — debounced keystrokes).
+  `/api/webhooks/monobank` is deliberately not in the table: `X-Sign` already gates it, and an IP
+  bucket risks dropping a genuine redelivery from Monobank's own infra rather than an attacker.
+- Decisions: created only the `RATE_LIMIT` KV namespace, not `CACHE` too, even though the roadmap
+  checklist bundled them into one line — nothing needs `CACHE` yet, and creating unused
+  infrastructure isn't in scope for "do rate limiting." Split that checklist line into two so the
+  distinction survives. Also found and fixed along the way: `balier-cron` **is now deployed**
+  (confirmed via `wrangler secret list --name balier-cron`, no longer "Worker not found") — that
+  happened earlier in this session, before this pass, and the docs hadn't caught up to it yet.
+- Verified: `pnpm check` (0 errors)/`pnpm test` (58/58, 4 new)/`pnpm build` clean. Live against the
+  running dev server: `/api/checkout/limits` returns 429 with a correct `retry-after` after 30
+  requests in a minute, and `/api/webhooks/monobank` keeps answering its own 403 across repeated
+  calls rather than ever hitting the rate limiter — confirms the exclusion actually takes effect,
+  not just that the code compiles.
+- Next: the order-confirmation email — the only Phase 3 item left open.
+
+### 2026-08-04 — the `orderPaid` Telegram notification
+
+- Did, on request: wired the half of `NotifierPort` that had been implemented since the notifications
+  session but called from nowhere. `confirmPayment` now `.returning()`s the row it just flipped to
+  `paid` and hands it back in the result (`{ transitioned: 'paid'; order; items }`, items reused from
+  the `findPaymentByInvoiceId` join rather than re-read); the webhook route sends «Оплачено» on that
+  result and only that result.
+- Decisions: the send lives in the route, not in `confirmPayment`, so it happens **outside** the
+  transaction — same rule `create.ts` follows for the Monobank call, a network call must never hold a
+  DB transaction open. Returning the order instead of notifying in place is what makes that possible.
+  Duplicate protection needs nothing new: `confirmPayment` was already idempotent, so a redelivered
+  webhook lands on `unchanged` and simply never yields a second `paid` result to notify from. Used
+  `waitUntil` rather than `await` — Monobank wants a fast 200 and the notifier is best-effort by the
+  port's contract anyway.
+- Verified: `pnpm check` (0 errors)/`pnpm test` (54/54)/`pnpm build` clean, then live — deployed and
+  confirmed the «Оплачено» message arrives in the manager group on a real card payment. The two new
+  tests are the first to cover the *adapter* rather than the pure formatter (the wire call, and that
+  a fetch failure resolves instead of throwing) — worth having, since "never throws into checkout" is
+  a contract claim that a formatter test can't check.
+- Next: deploy `balier-cron` (still never deployed), then rate limiting / the confirmation email.
+- Also: brought `docs/plans/roadmap.md`'s Phase 3 checklist back in line with reality — it still had
+  ten items unticked that have been built and verified since (checkout, both payment methods, the
+  webhook, both crons, success/failure, notifications, Turnstile, the COD limit).
 
 ### 2026-08-04 — live on the deployed Worker: captcha always failing, then the webhook always 403ing
 

@@ -42,13 +42,11 @@
     // checkout page's HTML. The paired secret (`TURNSTILE_SECRET_KEY`) is a
     // Worker secret, never here.
     "PUBLIC_TURNSTILE_SITE_KEY": "0x4AAAAAAEF8vF0-cXNWdOOY"
-  }
+  },
 
-  // Added in Phase 3, once the namespaces exist:
+  // CACHE is not created yet — nothing needs it. RATE_LIMIT backs the
+  // per-IP counters in `src/middleware.ts` (`wrangler kv namespace create
+  // RATE_LIMIT`, 2026-08-04).
   //   wrangler kv namespace create CACHE
-  //   wrangler kv namespace create RATE_LIMIT
-  // "kv_namespaces": [
-  //   { "binding": "CACHE", "id": "<id>" },
-  //   { "binding": "RATE_LIMIT", "id": "<id>" }
-  // ]
+  "kv_namespaces": [{ "binding": "RATE_LIMIT", "id": "8ef01313c48a4dcea67fc75f2b50129f" }]
 }
