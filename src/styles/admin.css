@@ -472,6 +472,121 @@
 }
 
 /* ==========================================================================
+ * THE BURGER MENU
+ *
+ * The header on a phone. Three nav pills, an email address, the theme switch and
+ * a sign-out button do not fit on one line at 360px — they wrapped the header
+ * onto three — so below `sm` all of it moves behind one square control.
+ *
+ * It is a `<details>`, not a scripted disclosure, for the same reason the rest
+ * of the panel is plain forms: it opens, closes and is keyboard-operable with
+ * JavaScript off. The script in `AdminLayout` only adds outside-click and
+ * Escape, neither of which a `<details>` has an opinion about.
+ *
+ * Plain classes rather than `@utility`, like the disclosure above: the rules
+ * that matter are about the parent's `[open]` state and about children, which is
+ * not something a utility on the summary could say. It also leaves `display`
+ * untouched throughout, so the `sm:hidden` that takes the whole menu out of the
+ * wide layout is free to win — unlayered CSS here outranks Tailwind's utilities.
+ * ========================================================================== */
+
+.admin-menu {
+  position: relative;
+}
+
+/* The panel's one full-size touch target: it is what a hand reaches for first on
+   a phone, unlike the 2rem preference controls it replaces. */
+.admin-menu > summary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--spacing-touch);
+  height: var(--spacing-touch);
+  margin-inline-end: -0.5rem;
+  border-radius: var(--radius-control);
+  color: var(--admin-fg-muted);
+  list-style: none;
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.admin-menu > summary::-webkit-details-marker {
+  display: none;
+}
+
+.admin-menu[open] > summary {
+  background-color: var(--admin-surface-hover);
+  color: var(--admin-fg);
+}
+
+/* Open swaps the burger for the cross that closes it — the control is the same
+   one, so it has to say which way it is pointing. */
+.admin-menu > summary [data-menu='close'],
+.admin-menu[open] > summary [data-menu='open'] {
+  display: none;
+}
+
+.admin-menu[open] > summary [data-menu='close'] {
+  display: block;
+}
+
+/*
+ * Anchored to the button and hanging past the header's bottom edge. Opaque
+ * rather than blurred like the bar above it: the page scrolls under this, and
+ * a menu you can read the order list through is not a menu.
+ */
+.admin-menu-panel {
+  position: absolute;
+  top: calc(100% + 0.75rem);
+  inset-inline-end: 0;
+  z-index: 30;
+  width: max-content;
+  min-width: 13rem;
+  /* The gutter on both sides is what keeps it inside the viewport when a long
+     address is what decides the width. */
+  max-width: calc(100vw - 2 * var(--spacing-gutter));
+  padding: 0.5rem;
+  border: 1px solid var(--admin-border);
+  border-radius: var(--radius-card);
+  background-color: var(--admin-surface);
+  box-shadow: 0 0.75rem 2rem -0.5rem color-mix(in srgb, #000 35%, transparent);
+  animation: admin-menu-in 0.14s ease-out;
+}
+
+@keyframes admin-menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(-0.375rem);
+  }
+}
+
+/* A row of the menu, not a pill in a bar: full width, left-aligned, and the
+   whole strip is the hit target. */
+.admin-menu-link {
+  display: flex;
+  align-items: center;
+  min-height: var(--spacing-touch);
+  padding-inline: 0.75rem;
+  border-radius: var(--radius-control);
+  color: var(--admin-fg-muted);
+  font-size: 0.9375rem;
+  font-weight: 500;
+}
+
+.admin-menu-link:hover {
+  background-color: var(--admin-surface-hover);
+  color: var(--admin-fg);
+}
+
+/* Same fill the wide header gives the current section, for the same reason. */
+.admin-menu-link.is-active {
+  background-color: var(--admin-accent);
+  color: var(--admin-accent-fg);
+}
+
+/* ==========================================================================
  * THE COLOUR SWATCH
  *
  * The circle in the left end of a variant's hex field. Why it is a `<span>` with

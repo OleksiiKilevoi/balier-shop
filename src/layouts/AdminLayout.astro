@@ -1,6 +1,8 @@
 ---
 import { Font } from 'astro:assets';
 
+import ThemeToggle from '~/components/admin/ThemeToggle.astro';
+
 import '~/styles/admin.css';
 
 /**
@@ -18,13 +20,15 @@ import '~/styles/admin.css';
  * identity is present on every screen except the login form itself — which is
  * what `bare` below is for. `noindex` is belt-and-braces on top of that.
  *
- * The theme switch below is the panel's *only* client-side JavaScript, and the
- * reason the old "no script at all" property no longer holds: a chosen theme has
- * to be remembered across requests, and nothing but `localStorage` remembers it.
- * It is one inline script — no framework, no hydration, no extra request — so
- * the panel still ships no JavaScript assets, and every other page here is still
- * plain forms and links. With JavaScript off the switch hides itself and the
- * panel follows the operating system exactly as it did before.
+ * The theme switch below is the reason the old "no script at all" property no
+ * longer holds: a chosen theme has to be remembered across requests, and nothing
+ * but `localStorage` remembers it. It is one inline script — no framework, no
+ * hydration, no extra request — so the panel still ships no JavaScript assets,
+ * and every other page here is still plain forms and links. With JavaScript off
+ * the switch hides itself and the panel follows the operating system exactly as
+ * it did before. The same script also dismisses the burger menu on an outside
+ * click or Escape, which is a courtesy on top of a menu that is a `<details>`
+ * and therefore opens and closes without it.
  */
 
 interface Props {
@@ -47,8 +51,9 @@ const PANEL_NAME = 'Balier';
 /**
  * Three rows, and deliberately not four: `/admin/categories` is reached from
  * the product list instead, because a fourth item starts wrapping this header
- * onto a second line at 320px and categories are opened far less often than
- * anything here.
+ * onto a second line on a narrow laptop, and categories are opened far less
+ * often than anything here. The burger below takes the phone off that budget —
+ * the nav is a stacked list there — but the wide header still has to fit.
  */
 const NAV = [
   { href: '/admin/orders', label: 'Замовлення' },
@@ -123,14 +128,34 @@ const pathname = Astro.url.pathname;
         apply(read());
 
         document.addEventListener('DOMContentLoaded', () => {
-          const toggle = document.getElementById('admin-theme-toggle');
-          if (!toggle) return;
+          // The burger menu closes itself when something else is clicked or
+          // Escape is pressed. `<details>` does neither on its own, and a panel
+          // that stays open over the page after a stray tap reads as stuck.
+          const menu = document.querySelector('.admin-menu');
+          if (menu) {
+            document.addEventListener('click', (event) => {
+              if (menu.open && !menu.contains(event.target)) menu.open = false;
+            });
+
+            document.addEventListener('keydown', (event) => {
+              if (event.key !== 'Escape' || !menu.open) return;
+              menu.open = false;
+              menu.querySelector('summary')?.focus();
+            });
+          }
+
+          // Two of them on a signed-in page — the header cluster and the menu —
+          // and one on the login screen. All the same control, so all bound.
+          const toggles = document.querySelectorAll('.admin-theme-toggle');
+          if (!toggles.length) return;
 
           // The icon is CSS's job (it reads the same `data-theme`); the name the
           // control announces is this one's, and has to say where it stands now.
           const label = (mode) => {
-            toggle.setAttribute('title', 'Тема: ' + NAMES[mode]);
-            toggle.setAttribute('aria-label', 'Перемкнути тему. Зараз: ' + NAMES[mode]);
+            for (const toggle of toggles) {
+              toggle.setAttribute('title', 'Тема: ' + NAMES[mode]);
+              toggle.setAttribute('aria-label', 'Перемкнути тему. Зараз: ' + NAMES[mode]);
+            }
           };
           label(read());
 
@@ -160,16 +185,18 @@ const pathname = Astro.url.pathname;
             change(prefersDark.matches ? 'dark' : 'light');
           });
 
-          toggle.addEventListener('click', () => {
-            const next = read() === 'dark' ? 'light' : 'dark';
-            try {
-              localStorage.setItem(KEY, next);
-            } catch {
-              /* Not remembered, but the switch still works for this page. */
-            }
+          for (const toggle of toggles) {
+            toggle.addEventListener('click', () => {
+              const next = read() === 'dark' ? 'light' : 'dark';
+              try {
+                localStorage.setItem(KEY, next);
+              } catch {
+                /* Not remembered, but the switch still works for this page. */
+              }
 
-            change(next);
-          });
+              change(next);
+            });
+          }
         });
       })();
     </script>
@@ -184,9 +211,12 @@ const pathname = Astro.url.pathname;
           {PANEL_NAME}<span class="text-fg-subtle font-normal"> / адмін</span>
         </a>
 
+        {/* Hidden on a phone, where the same links are stacked inside the menu
+            below. Two navs would be two tab stops over the same three
+            destinations, so exactly one of them is ever in the layout. */}
         {
           !bare && (
-            <nav aria-label="Розділи">
+            <nav aria-label="Розділи" class="hidden sm:block">
               <ul class="flex gap-1">
                 {NAV.map((item) => {
                   const active = pathname.startsWith(item.href);
@@ -213,82 +243,131 @@ const pathname = Astro.url.pathname;
         }
 
         <div class="ml-auto flex min-w-0 items-center gap-3">
+          {/* The login screen has nothing to put in a menu — no nav, no address,
+              no session to end — so its theme switch stays in the header at every
+              width and no burger is drawn at all. */}
+          {bare && <ThemeToggle />}
+
           {
-            !bare && admin && (
-              <span class="text-fg-subtle truncate text-xs">{admin.email}</span>
-            )
-          }
+            !bare && (
+              <>
+                {/* The wide-screen cluster. `hidden` sits on this wrapper rather
+                    than on the controls, so it cannot collide with the `display`
+                    that `admin-icon-btn` sets on them. */}
+                <div class="hidden min-w-0 items-center gap-3 sm:flex">
+                  {admin && <span class="text-fg-subtle truncate text-xs">{admin.email}</span>}
 
-          {/* Both icons ship and CSS shows the one matching `data-theme`, so the
-              control is correct in the first paint rather than after a script
-              has had a chance to touch it. `aria-label` is replaced on load with
-              one naming the current mode; this is the pre-script fallback. */}
-          <button
-            type="button"
-            id="admin-theme-toggle"
-            class="admin-theme-toggle admin-icon-btn"
-            aria-label="Перемкнути тему"
-          >
-            <svg
-              data-mode="light"
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.6"
-              stroke-linecap="round"
-              aria-hidden="true"
-            >
-              <circle cx="12" cy="12" r="4" />
-              <path
-                d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"
-              />
-            </svg>
+                  <ThemeToggle />
 
-            <svg
-              data-mode="dark"
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.6"
-              stroke-linejoin="round"
-              aria-hidden="true"
-            >
-              <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" />
-            </svg>
-          </button>
+                  {/* A form, not a link: `GET /admin/logout` would be followed by
+                      any prefetcher that saw it, and would sign the operator out
+                      at random. As a POST it also picks up Astro's origin check
+                      for free. */}
+                  {admin && (
+                    <form method="post" action="/admin/logout">
+                      <button
+                        type="submit"
+                        class="admin-icon-btn"
+                        aria-label="Вийти з панелі"
+                        title="Вийти"
+                      >
+                        <svg
+                          width="16"
+                          height="16"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="1.6"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          aria-hidden="true"
+                        >
+                          <path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3" />
+                          <path d="M10 8l-4 4 4 4M6 12h9" />
+                        </svg>
+                      </button>
+                    </form>
+                  )}
+                </div>
 
-          {/* A form, not a link: `GET /admin/logout` would be followed by any
-              prefetcher that saw it, and would sign the operator out at random.
-              As a POST it also picks up Astro's origin check for free. */}
-          {
-            !bare && admin && (
-              <form method="post" action="/admin/logout">
-                <button
-                  type="submit"
-                  class="admin-icon-btn"
-                  aria-label="Вийти з панелі"
-                  title="Вийти"
-                >
-                  <svg
-                    width="16"
-                    height="16"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="1.6"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    aria-hidden="true"
-                  >
-                    <path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3" />
-                    <path d="M10 8l-4 4 4 4M6 12h9" />
-                  </svg>
-                </button>
-              </form>
+                {/* The phone's copy of all of it. A `<details>`, so it opens and
+                    closes with no script at all — the same bargain the rest of
+                    the panel takes — and the script only adds the dismissals a
+                    `<details>` has no opinion about. Styled in `admin.css`. */}
+                <details class="admin-menu sm:hidden">
+                  <summary aria-label="Меню панелі">
+                    <svg
+                      data-menu="open"
+                      width="20"
+                      height="20"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.6"
+                      stroke-linecap="round"
+                      aria-hidden="true"
+                    >
+                      <path d="M4 7h16M4 12h16M4 17h16" />
+                    </svg>
+
+                    <svg
+                      data-menu="close"
+                      width="20"
+                      height="20"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.6"
+                      stroke-linecap="round"
+                      aria-hidden="true"
+                    >
+                      <path d="m6 6 12 12M18 6 6 18" />
+                    </svg>
+                  </summary>
+
+                  <div class="admin-menu-panel">
+                    <nav aria-label="Розділи">
+                      <ul>
+                        {NAV.map((item) => {
+                          const active = pathname.startsWith(item.href);
+                          return (
+                            <li>
+                              <a
+                                href={item.href}
+                                aria-current={active ? 'page' : undefined}
+                                class:list={['admin-menu-link', active && 'is-active']}
+                              >
+                                {item.label}
+                              </a>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </nav>
+
+                    <div class="border-border mt-2 border-t pt-2">
+                      {admin && (
+                        <p class="text-fg-subtle truncate px-3 py-1 text-xs">{admin.email}</p>
+                      )}
+
+                      <div class="mt-1 flex items-center gap-2">
+                        <ThemeToggle />
+
+                        {admin && (
+                          <form method="post" action="/admin/logout" class="flex-1">
+                            <button
+                              type="submit"
+                              class="admin-btn admin-btn-secondary w-full px-4"
+                            >
+                              Вийти
+                            </button>
+                          </form>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </details>
+              </>
             )
           }
         </div>

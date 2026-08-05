@@ -1067,7 +1067,9 @@ const variantLabel = (variant: (typeof variants)[number]) =>
                   </div>
                 </div>
 
-                <button type="submit" class="admin-btn admin-btn-primary shrink-0">Завантажити</button>
+                <button type="submit" class="admin-btn admin-btn-primary w-full shrink-0 sm:w-auto">
+                  Завантажити
+                </button>
               </div>
 
               {uploadIssue && (
@@ -1080,139 +1082,158 @@ const variantLabel = (variant: (typeof variants)[number]) =>
             {images.length > 0 && (
               <ul class="mt-4 space-y-3">
                 {images.map((image, index) => (
-                  <li class="border-border rounded-card flex flex-wrap items-start gap-4 border p-4">
-                    <span class="bg-surface-hover border-border h-28 w-21 shrink-0 overflow-hidden rounded-md border">
-                      <img
-                        src={image.url}
-                        alt={image.alt ?? ''}
-                        width={image.width ?? undefined}
-                        height={image.height ?? undefined}
-                        loading="lazy"
-                        class="h-full w-full object-cover"
-                      />
-                    </span>
+                  <li class="border-border rounded-card border p-4">
+                    {/* Only the identity of the photo sits beside the thumbnail —
+                        a name tag, and it is all that column is wide enough for.
+                        The fields and the buttons below get the row's full width
+                        at every size, which on a phone is the difference between
+                        a 108px column that the danger button hangs out of and a
+                        form that fits. */}
+                    <div class="flex items-start gap-4">
+                      <span class="bg-surface-hover border-border h-28 w-21 shrink-0 overflow-hidden rounded-md border">
+                        <img
+                          src={image.url}
+                          alt={image.alt ?? ''}
+                          width={image.width ?? undefined}
+                          height={image.height ?? undefined}
+                          loading="lazy"
+                          class="h-full w-full object-cover"
+                        />
+                      </span>
 
-                    <div class="min-w-0 flex-1">
-                      {index === 0 && (
-                        <p class="admin-badge admin-tone-neutral w-auto max-w-none">
-                          Головне фото
+                      <div class="min-w-0 flex-1">
+                        {index === 0 && (
+                          <p class="admin-badge admin-tone-neutral w-auto max-w-none">
+                            Головне фото
+                          </p>
+                        )}
+                        <p class="text-fg-subtle mt-1 font-mono text-xs break-all">{image.url}</p>
+                        <p class="text-fg-subtle mt-0.5 text-xs">
+                          {image.width && image.height ? `${image.width}×${image.height} px` : 'розмір невідомий'}
                         </p>
-                      )}
-                      <p class="text-fg-subtle mt-1 font-mono text-xs break-all">{image.url}</p>
-                      <p class="text-fg-subtle mt-0.5 text-xs">
-                        {image.width && image.height ? `${image.width}×${image.height} px` : 'розмір невідомий'}
-                      </p>
+                      </div>
+                    </div>
 
+                    <form
+                      method="post"
+                      action={selfUrl}
+                      data-form={`image:${image.id}`}
+                      class="mt-4 flex flex-wrap items-end gap-3"
+                    >
+                      <input type="hidden" name="intent" value="image_save" />
+                      <input type="hidden" name="imageId" value={image.id} />
+
+                      <div class="w-full sm:flex-1">
+                        <label for={`alt-${image.id}`} class="text-fg-subtle text-xs">
+                          Опис
+                        </label>
+                        <input
+                          id={`alt-${image.id}`}
+                          name="alt"
+                          type="text"
+                          value={image.alt ?? ''}
+                          maxlength={300}
+                          autocomplete="off"
+                          class="admin-field mt-1"
+                        />
+                      </div>
+
+                      <div class="w-full sm:w-44">
+                        <label for={`variant-${image.id}`} class="text-fg-subtle text-xs">
+                          Належить
+                        </label>
+                        <div class="relative mt-1">
+                          <select
+                            id={`variant-${image.id}`}
+                            name="variantId"
+                            class="admin-field admin-select"
+                          >
+                            <option value="" selected={image.variantId === null}>
+                              Спільне фото
+                            </option>
+                            {variants.map((variant) => (
+                              <option value={variant.id} selected={variant.id === image.variantId}>
+                                {variantLabel(variant)}
+                              </option>
+                            ))}
+                          </select>
+                          <svg
+                            class="text-fg-subtle pointer-events-none absolute top-1/2 right-4 h-4 w-4 -translate-y-1/2"
+                            viewBox="0 0 16 16"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="1.5"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            aria-hidden="true"
+                          >
+                            <path d="m4 6 4 4 4-4" />
+                          </svg>
+                        </div>
+                      </div>
+
+                      <button
+                        type="submit"
+                        class="admin-btn admin-btn-secondary w-full shrink-0 sm:w-auto"
+                      >
+                        Зберегти
+                      </button>
+                    </form>
+
+                    <div class="mt-3 flex flex-wrap items-center gap-2">
+                      {/* Keyed to the photo rather than to the row it is in, so
+                          reordering follows the photo: click «Вище» and the
+                          keyboard is on that same photo's «Вище» again, one
+                          place up the list, ready for the next press. */}
+                      {index > 0 && (
+                        <form
+                          method="post"
+                          action={selfUrl}
+                          data-form={`image-up:${image.id}`}
+                          class="flex-1 sm:flex-none"
+                        >
+                          <input type="hidden" name="intent" value="image_move" />
+                          <input type="hidden" name="imageId" value={image.id} />
+                          <input type="hidden" name="direction" value="up" />
+                          <button type="submit" class="admin-btn admin-btn-secondary w-full px-4 sm:w-auto sm:px-6">
+                            Вище
+                          </button>
+                        </form>
+                      )}
+                      {index < images.length - 1 && (
+                        <form
+                          method="post"
+                          action={selfUrl}
+                          data-form={`image-down:${image.id}`}
+                          class="flex-1 sm:flex-none"
+                        >
+                          <input type="hidden" name="intent" value="image_move" />
+                          <input type="hidden" name="imageId" value={image.id} />
+                          <input type="hidden" name="direction" value="down" />
+                          <button type="submit" class="admin-btn admin-btn-secondary w-full px-4 sm:w-auto sm:px-6">
+                            Нижче
+                          </button>
+                        </form>
+                      )}
+
+                      {/* The one control here that destroys a row rather than
+                          editing one — outlined red, and the only thing between
+                          it and the click is that it sits apart from the two
+                          above. On a phone that separation is the line break the
+                          `basis-full` forces, rather than the gap. Unlike the
+                          order screen's exits it is not behind a disclosure yet. */}
                       <form
                         method="post"
                         action={selfUrl}
-                        data-form={`image:${image.id}`}
-                        class="mt-3 flex flex-wrap items-end gap-3"
+                        data-form={`image-remove:${image.id}`}
+                        class="basis-full sm:basis-auto"
                       >
-                        <input type="hidden" name="intent" value="image_save" />
+                        <input type="hidden" name="intent" value="image_remove" />
                         <input type="hidden" name="imageId" value={image.id} />
-
-                        <div class="w-full sm:flex-1">
-                          <label for={`alt-${image.id}`} class="text-fg-subtle text-xs">
-                            Опис
-                          </label>
-                          <input
-                            id={`alt-${image.id}`}
-                            name="alt"
-                            type="text"
-                            value={image.alt ?? ''}
-                            maxlength={300}
-                            autocomplete="off"
-                            class="admin-field mt-1"
-                          />
-                        </div>
-
-                        <div class="w-full sm:w-44">
-                          <label for={`variant-${image.id}`} class="text-fg-subtle text-xs">
-                            Належить
-                          </label>
-                          <div class="relative mt-1">
-                            <select
-                              id={`variant-${image.id}`}
-                              name="variantId"
-                              class="admin-field admin-select"
-                            >
-                              <option value="" selected={image.variantId === null}>
-                                Спільне фото
-                              </option>
-                              {variants.map((variant) => (
-                                <option value={variant.id} selected={variant.id === image.variantId}>
-                                  {variantLabel(variant)}
-                                </option>
-                              ))}
-                            </select>
-                            <svg
-                              class="text-fg-subtle pointer-events-none absolute top-1/2 right-4 h-4 w-4 -translate-y-1/2"
-                              viewBox="0 0 16 16"
-                              fill="none"
-                              stroke="currentColor"
-                              stroke-width="1.5"
-                              stroke-linecap="round"
-                              stroke-linejoin="round"
-                              aria-hidden="true"
-                            >
-                              <path d="m4 6 4 4 4-4" />
-                            </svg>
-                          </div>
-                        </div>
-
-                        <button type="submit" class="admin-btn admin-btn-secondary shrink-0">
-                          Зберегти
+                        <button type="submit" class="admin-btn admin-btn-danger w-full sm:w-auto">
+                          Прибрати фото
                         </button>
                       </form>
-
-                      <div class="mt-3 flex flex-wrap items-center gap-2">
-                        {/* Keyed to the photo rather than to the row it is in, so
-                            reordering follows the photo: click «Вище» and the
-                            keyboard is on that same photo's «Вище» again, one
-                            place up the list, ready for the next press. */}
-                        {index > 0 && (
-                          <form
-                            method="post"
-                            action={selfUrl}
-                            data-form={`image-up:${image.id}`}
-                          >
-                            <input type="hidden" name="intent" value="image_move" />
-                            <input type="hidden" name="imageId" value={image.id} />
-                            <input type="hidden" name="direction" value="up" />
-                            <button type="submit" class="admin-btn admin-btn-secondary">
-                              Вище
-                            </button>
-                          </form>
-                        )}
-                        {index < images.length - 1 && (
-                          <form
-                            method="post"
-                            action={selfUrl}
-                            data-form={`image-down:${image.id}`}
-                          >
-                            <input type="hidden" name="intent" value="image_move" />
-                            <input type="hidden" name="imageId" value={image.id} />
-                            <input type="hidden" name="direction" value="down" />
-                            <button type="submit" class="admin-btn admin-btn-secondary">
-                              Нижче
-                            </button>
-                          </form>
-                        )}
-
-                        {/* The one control here that destroys a row rather than
-                            editing one — outlined red, and the only thing between
-                            it and the click is that it sits apart from the two
-                            above. Unlike the order screen's exits it is not behind
-                            a disclosure yet. */}
-                        <form method="post" action={selfUrl} data-form={`image-remove:${image.id}`}>
-                          <input type="hidden" name="intent" value="image_remove" />
-                          <input type="hidden" name="imageId" value={image.id} />
-                          <button type="submit" class="admin-btn admin-btn-danger">
-                            Прибрати фото
-                          </button>
-                        </form>
-                      </div>
                     </div>
                   </li>
                 ))}
