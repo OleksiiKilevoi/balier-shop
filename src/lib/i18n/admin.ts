@@ -1,4 +1,15 @@
-import type { OrderStatus } from '~/lib/db/schema';
+import type { OrderStatus, ProductStatus } from '~/lib/db/schema';
+import {
+  EXPECTED_HEIGHT,
+  EXPECTED_WIDTH,
+  MAX_LONG_SIDE,
+  MAX_UPLOAD_BYTES,
+  MIN_SHORT_SIDE,
+} from '~/lib/media/upload';
+import type { UploadIssue } from '~/lib/media/upload';
+import { COD_LIMIT_MAX_HRYVNIAS, COD_LIMIT_MIN_HRYVNIAS } from '~/lib/validation/admin';
+import { PRODUCT_PRICE_MAX_HRYVNIAS, PRODUCT_PRICE_MIN_HRYVNIAS } from '~/lib/validation/catalog';
+import type { CatalogField } from '~/lib/validation/catalog';
 
 /** UI strings for the admin panel. Ukrainian, like the storefront. */
 
@@ -159,6 +170,161 @@ export function cardLinkExpiryText(deadline: string): string {
 
 export const ADMIN_CARD_LINK_EXPIRED =
   'Термін дії посилання минув. Замовлення скасується автоматично, якщо цього ще не сталося.';
+
+/**
+ * `/admin/settings` — currently the cash-on-delivery limit and nothing else.
+ *
+ * The refusal names the range rather than just saying "invalid", because the
+ * field accepts one thing and rejects two different ways of getting it wrong
+ * (a stray decimal point, and a value outside the bounds).
+ */
+export const ADMIN_SETTINGS_MESSAGES = {
+  cod_limit_updated: 'Ліміт післяплати збережено.',
+  invalid_cod_limit: `Вкажіть суму цілими гривнями — від ${COD_LIMIT_MIN_HRYVNIAS} до ${new Intl.NumberFormat('uk-UA').format(COD_LIMIT_MAX_HRYVNIAS)} ₴.`,
+  bad_request: 'Не вдалося зберегти зміни.',
+} as const;
+
+export type AdminSettingsMessage = keyof typeof ADMIN_SETTINGS_MESSAGES;
+
+/**
+ * Under the limit field. Says what the number does at checkout, in the same
+ * terms the customer sees it (`codOverLimitText`), and says the one thing the
+ * screen deliberately cannot do — a manager looking for the off switch should
+ * find out here rather than by setting the limit to 1 ₴ and hoping.
+ */
+export const ADMIN_COD_LIMIT_HINT =
+  'Замовлення, дорожчі за цю суму, не можна оформити з післяплатою — на сайті залишиться тільки оплата карткою.';
+
+/* ------------------------------------------------------------- the catalog */
+
+export const PRODUCT_STATUS_LABELS: Record<ProductStatus, string> = {
+  draft: 'Чернетка',
+  active: 'У продажу',
+  archived: 'В архіві',
+};
+
+/**
+ * What each status *does*, shown next to the selector on the product form.
+ *
+ * `draft` and `archived` are indistinguishable to a customer — both are simply
+ * not there — but they mean opposite things to the shop, so the copy separates
+ * them by intent rather than by effect.
+ */
+export const PRODUCT_STATUS_HINTS: Record<ProductStatus, string> = {
+  draft: 'Ще не опубліковано. Товару немає ні в каталозі, ні в пошуку, ні за прямим посиланням.',
+  active: 'Опубліковано. Товар є в каталозі, у пошуку та за прямим посиланням.',
+  archived: 'Знято з продажу. З каталогу зникає, але залишається в панелі та в історії замовлень.',
+};
+
+/**
+ * Result of a POST on the catalog screens.
+ *
+ * The refusals outnumber the confirmations because most of what can go wrong
+ * here is a collision with something the manager cannot see from this page — a
+ * slug another product already holds, a SKU on a variant of a different product.
+ * Each of those names the conflict rather than saying «не вдалося».
+ */
+export const ADMIN_PRODUCT_MESSAGES = {
+  created: 'Товар створено. Далі — опис, варіанти та фото.',
+  saved: 'Зміни збережено.',
+  variant_added: 'Варіант додано.',
+  variant_saved: 'Варіант збережено.',
+  variant_activated: 'Варіант знову в продажу.',
+  variant_deactivated: 'Варіант знято з продажу.',
+  image_added: 'Фото додано.',
+  image_saved: 'Фото збережено.',
+  image_moved: 'Порядок фото змінено.',
+  image_removed: 'Фото прибрано з товару.',
+  slug_taken: 'Таку адресу вже займає інший товар. Змініть slug.',
+  sku_taken: 'Такий артикул уже існує — SKU має бути унікальним у всьому каталозі.',
+  last_active_variant:
+    'Це єдиний варіант у продажу. Якщо зняти і його, товар зникне зі сторінки навіть у статусі «У продажу» — спершу додайте інший варіант або переведіть товар в архів.',
+  not_found: 'Рядок не знайдено — можливо, його вже змінили в іншій вкладці.',
+  conflict: 'Такий запис уже існує.',
+  bad_request: 'Не вдалося зберегти зміни.',
+} as const;
+
+export type AdminProductMessage = keyof typeof ADMIN_PRODUCT_MESSAGES;
+
+/**
+ * Why an uploaded file was refused.
+ *
+ * Nothing in this project resizes an image, so every one of these is the
+ * difference between a working product page and a broken-looking one — the
+ * message says what to do to the file, not what rule it broke.
+ */
+export const ADMIN_UPLOAD_ERRORS: Record<UploadIssue, string> = {
+  empty: 'Оберіть файл.',
+  too_large: `Файл завеликий — до ${Math.round(MAX_UPLOAD_BYTES / 1024 / 1024)} МБ. Експортуйте фото ще раз із меншою якістю.`,
+  unsupported_format: 'Підтримуються тільки WebP, AVIF, JPEG і PNG.',
+  unreadable: 'Не вдалося прочитати це зображення. Можливо, файл пошкоджено або це не фото.',
+  too_small: `Замале зображення — коротша сторона має бути від ${MIN_SHORT_SIDE} px, інакше в каталозі воно розтягнеться.`,
+  too_big: `Завелике зображення — довша сторона до ${MAX_LONG_SIDE} px. Схоже, це оригінал із фотоапарата, а не підготовлений експорт.`,
+  landscape: 'Потрібне вертикальне або квадратне фото — горизонтальне ламає сітку каталогу.',
+};
+
+/** Stated on the upload control, since nothing resizes what goes in. */
+export const ADMIN_UPLOAD_HINT = `Очікуваний розмір — ${EXPECTED_WIDTH}×${EXPECTED_HEIGHT} px, вертикальне.`;
+
+/**
+ * Messages under individual controls, keyed by the field
+ * `catalogFieldErrors` names. Same idea as `ADMIN_NEW_ORDER_ERRORS`: each one
+ * names the fix, not the rule.
+ */
+export const ADMIN_CATALOG_ERRORS: Record<CatalogField, string> = {
+  title: 'Вкажіть назву.',
+  slug: 'Тільки малі латинські літери, цифри й дефіси — наприклад, sumka-liunet.',
+  description: 'Опис задовгий.',
+  details: 'Деталі задовгі.',
+  dimensions: 'Задовгий рядок розмірів.',
+  metaTitle: 'Заголовок для пошукових систем задовгий.',
+  metaDescription: 'Опис для пошукових систем задовгий.',
+  basePrice: `Вкажіть ціну цілими гривнями — від ${PRODUCT_PRICE_MIN_HRYVNIAS} до ${new Intl.NumberFormat('uk-UA').format(PRODUCT_PRICE_MAX_HRYVNIAS)} ₴.`,
+  compareAtPrice: 'Стара ціна має бути цілим числом гривень або порожньою.',
+  categoryId: 'Оберіть категорію зі списку.',
+  position: 'Порядок — ціле число від 0.',
+  sku: 'Тільки великі латинські літери, цифри й дефіси — наприклад, SUMKA-LIUNET-CHORNYI.',
+  colorName: 'Назва кольору задовга.',
+  colorHex: 'Колір у форматі #1a1a1a.',
+  priceOverride: 'Своя ціна варіанта — ціле число гривень або порожнє поле.',
+  stock: 'Залишок — ціле число від 0.',
+  alt: 'Опис зображення задовгий.',
+};
+
+/**
+ * The four things about the storefront that the editor cannot show by simply
+ * rendering the row, and that a manager would otherwise discover by wondering
+ * why the shop disagrees with the form in front of them.
+ */
+export const ADMIN_STOREFRONT_NOTES = {
+  price:
+    'Ціна на картці — найдешевший варіант у продажу. Своя ціна на одному варіанті змінює те, що бачить покупець у каталозі.',
+  leadImage: 'Перше фото в списку — те, що показує картка товару в каталозі та в пошуку.',
+  slugChange:
+    'Товар опубліковано: зміна адреси зламає наявні поза сайтом посилання на нього.',
+  noVariants:
+    'Немає жодного варіанта в продажу — сторінка товару віддає 404 навіть у статусі «У продажу».',
+  noImages: 'Немає фото — картка в каталозі буде порожньою.',
+} as const;
+
+/** `/admin/categories`. */
+export const ADMIN_CATEGORY_MESSAGES = {
+  created: 'Категорію створено.',
+  saved: 'Категорію збережено.',
+  slug_taken: 'Таку адресу вже займає інша категорія.',
+  not_found: 'Категорію не знайдено.',
+  bad_request: 'Не вдалося зберегти категорію.',
+} as const;
+
+export type AdminCategoryMessage = keyof typeof ADMIN_CATEGORY_MESSAGES;
+
+/**
+ * Deactivating a category is as close to deleting as the panel goes, and what
+ * it does is not obvious: the products stay put and keep the category's name on
+ * their page, they just lose the link to a listing that would now 404.
+ */
+export const ADMIN_CATEGORY_HINT =
+  'Знята з публікації категорія зникає з каталогу, але товари залишаються на місці й зберігають її назву. Видалити категорію не можна — це очистило б поле категорії в усіх її товарах.';
 
 /**
  * Sign-in results.

@@ -1,0 +1,78 @@
+---
+/**
+ * The variant's colour chip: a text field carrying the hex, with the platform's
+ * colour picker attached to a swatch inside its left end.
+ *
+ * TWO CONTROLS OVER ONE VALUE, AND ONLY ONE OF THEM IS SUBMITTED.
+ * The text input stays the field — it is the `name`, it is what the schema
+ * refuses or accepts, and it can be **empty**, which is what «this variant has
+ * no colour chip» is. A native `<input type="color">` can do neither: it has no
+ * empty state (an untouched one submits `#000000`, so a variant with no colour
+ * would silently acquire black) and its value is not free text. So the picker
+ * here carries no `name`, never reaches the server, and exists only to write an
+ * answer into the field beside it.
+ *
+ * That also makes the whole thing an enhancement rather than a requirement: with
+ * script blocked the swatch still shows the stored colour and the manager still
+ * types a hex, exactly as before this component existed. The picker just stops
+ * feeding it.
+ *
+ * It is deliberately out of the tab order. The text input is the keyboard path
+ * to the same value and reaching it is one stop; a second stop per variant that
+ * opens an OS-modal colour dialog is a worse row to tab through, not a better
+ * one.
+ *
+ * Painting is `admin.css`'s job, off the `--swatch` property set below — see
+ * «THE COLOUR SWATCH» there for why the native control is invisible.
+ */
+interface Props {
+  /** The text field's id; the picker points at it, and the label labels it. */
+  id: string;
+  value: string;
+  invalid?: boolean;
+  name?: string;
+  label?: string;
+}
+
+const { id, value, invalid = false, name = 'colorHex', label = 'Зразок' } = Astro.props;
+
+/**
+ * Only a real six-digit hex is painted, and it is validated here rather than
+ * interpolated: this string goes into a `style` attribute, and the row it came
+ * from is older than the schema that now guarantees its shape.
+ */
+const painted = /^#[0-9a-f]{6}$/i.test(value) ? value.toLowerCase() : null;
+
+/** Where the picker opens from when there is nothing to open from — the
+    placeholder, so the two agree on what a colour looks like here. */
+const PICKER_FALLBACK = '#1a1a1a';
+---
+
+<label for={id} class="text-fg-subtle text-xs">{label}</label>
+<div class="relative mt-1">
+  <span
+    class="admin-swatch"
+    data-empty={painted ? undefined : ''}
+    style={painted ? `--swatch:${painted}` : undefined}
+  >
+    <input
+      type="color"
+      value={painted ?? PICKER_FALLBACK}
+      data-swatch-for={id}
+      tabindex="-1"
+      aria-label="Вибрати колір"
+    />
+  </span>
+  <input
+    id={id}
+    name={name}
+    type="text"
+    value={value}
+    maxlength={7}
+    autocomplete="off"
+    spellcheck="false"
+    placeholder={PICKER_FALLBACK}
+    data-swatch-input
+    class:list={['admin-field admin-field-swatch font-mono', invalid && 'border-danger']}
+  />
+</div>

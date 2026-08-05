@@ -320,6 +320,14 @@
 }
 
 /*
+ * The hex field, whose left end the colour swatch sits in — same arrangement as
+ * the phone prefix above, and same reason it is defined after `admin-field`.
+ */
+@utility admin-field-swatch {
+  padding-inline-start: 2.875rem;
+}
+
+/*
  * A `<select>` wearing `admin-field`'s pill. `appearance: none` (inherited from
  * that utility) is what makes it match the input beside it, and it also removes
  * the native arrow — hence the padding here, and the chevron the markup draws
@@ -394,6 +402,205 @@
 @utility admin-tone-negative {
   background-color: var(--admin-tone-negative-bg);
   color: var(--admin-tone-negative-fg);
+}
+
+/* ==========================================================================
+ * DISCLOSURES
+ *
+ * A `<details>` the panel's way, which starts with the UA triangle gone. That
+ * takes two rules and not one: `list-style: none` covers everything current,
+ * and Safari still draws its own marker until `::-webkit-details-marker` is
+ * hidden as well.
+ *
+ * What replaces it is deliberately *quieter* than `admin-btn-secondary`, even
+ * though it is the same pill and the same height. A disclosure sits among real
+ * submit buttons — «Додати варіант» opens a form whose own button also says
+ * «Додати варіант» — and a control that only reveals fields must not read as
+ * the control that saves them. So: no border, no fill until the pointer is on
+ * it, and the label pulled back flush with the form column above it, so the row
+ * reads as a line of the page that can be opened rather than as a widget. The
+ * chevron is the affordance, and it turns over when the section is open.
+ *
+ * Plain classes rather than `@utility`, for the same reason as the toast host
+ * below: the chevron's rule is about the *parent's* state, which is not
+ * something a utility on the summary can say.
+ * ========================================================================== */
+
+.admin-disclosure > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: var(--spacing-touch);
+  /* Cancels the padding below, so the label lines up with the fields above and
+     only the hover pill extends past them. */
+  margin-inline-start: -0.875rem;
+  padding-inline: 0.875rem;
+  border-radius: var(--radius-control);
+  color: var(--admin-fg-muted);
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.2;
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.admin-disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+
+.admin-disclosure > summary:hover {
+  background-color: var(--admin-surface-hover);
+  color: var(--admin-fg);
+}
+
+/* Open is a state worth seeing from across the form: the section below belongs
+   to this row. */
+.admin-disclosure[open] > summary {
+  color: var(--admin-fg);
+}
+
+.admin-disclosure > summary svg {
+  transition: rotate 0.15s ease;
+}
+
+.admin-disclosure[open] > summary svg {
+  rotate: 180deg;
+}
+
+/* ==========================================================================
+ * THE COLOUR SWATCH
+ *
+ * The circle in the left end of a variant's hex field. Why it is a `<span>` with
+ * an invisible `<input type="color">` stretched over it, rather than the colour
+ * input itself wearing a border:
+ *
+ *   - **A colour input has no empty state.** `colorHex` is nullable and most
+ *     variants have no chip, so the control has to be able to say «nothing yet»,
+ *     which is the diagonal below. Nothing in the native element can.
+ *   - **Three browsers, three colour wells.** Chrome, Firefox and Safari each
+ *     draw their own inset, border and radius through pseudo-elements that are
+ *     not the same set anywhere, and Safari's is not styleable at all. Painting
+ *     the span instead means one circle, the panel's border token, the panel's
+ *     pill radius, both themes — and nothing to re-check per browser.
+ *
+ * So the native control keeps exactly one job, opening the platform picker, and
+ * `--swatch` (set by the server, updated by the editor's script) is what the
+ * circle is actually filled with.
+ *
+ * Plain classes rather than `@utility`, like the two sections around it: the
+ * rules that matter here are about a child and an attribute, which is not
+ * something a utility on the span can say.
+ * ========================================================================== */
+
+.admin-swatch {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0.5rem;
+  /* With `inset-block: 0` and a fixed height, this is what centres it against
+     the field's 2.75rem. */
+  margin-block: auto;
+  display: block;
+  width: 1.75rem;
+  height: 1.75rem;
+  border: 1px solid var(--admin-border-strong);
+  border-radius: var(--radius-control);
+  background-color: var(--swatch, var(--admin-surface));
+  transition: border-color 0.15s ease;
+}
+
+/* Same hover as `admin-btn-secondary`, because it is the same promise: this
+   small round thing is a control. */
+.admin-swatch:hover {
+  border-color: var(--admin-fg-subtle);
+}
+
+/* No colour set. A slash through the surface, in the border's own colour so it
+   reads as «empty» rather than as a very thin grey colour. */
+.admin-swatch[data-empty] {
+  background-image: linear-gradient(
+    to top right,
+    transparent calc(50% - 0.5px),
+    var(--admin-border-strong) calc(50% - 0.5px),
+    var(--admin-border-strong) calc(50% + 0.5px),
+    transparent calc(50% + 0.5px)
+  );
+}
+
+/* Invisible, but a full-size hit target — everything visible is the span. */
+.admin-swatch input[type='color'] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  appearance: none;
+  background: transparent;
+  opacity: 0;
+  cursor: pointer;
+}
+
+/* If a browser does focus it — it is out of the tab order, so this is the
+   picker closing rather than a tab — the ring has to land on the circle. */
+.admin-swatch:has(:focus-visible) {
+  outline: 2px solid var(--admin-focus);
+  outline-offset: 2px;
+}
+
+/* ==========================================================================
+ * THE TOAST HOST
+ *
+ * Where a screen's answer goes once its enhancement layer is running. A save
+ * that no longer reloads the page also no longer scrolls it to the top, so a
+ * banner rendered above the form is an answer nobody sees — the click was at
+ * the bottom of a form several screens tall.
+ *
+ * There is no toast component: the host holds the *same* `<p>` the server
+ * rendered in the flow of the page, moved here by script. So the message text,
+ * its tone and its markup are the server's throughout, the scriptless page
+ * still shows it in place, and there is nothing to keep in step.
+ *
+ * Plain classes rather than `@utility`, because the only rule that has to reach
+ * the moved element is a descendant one — presentation decided by *where* the
+ * element sits, which is the whole trick.
+ * ========================================================================== */
+
+.admin-toast-host {
+  position: fixed;
+  inset-inline: 0;
+  bottom: 1.5rem;
+  /* Above the sticky header (`z-10`), which the bottom of a long form scrolls
+     under. */
+  z-index: 20;
+  display: flex;
+  justify-content: center;
+  padding-inline: var(--spacing-gutter);
+  /* The host spans the viewport; only the message itself may be clicked. */
+  pointer-events: none;
+}
+
+.admin-toast-host > * {
+  /* Clickable, and the click dismisses it — a refusal has no timer, and a strip
+     across the bottom of the screen must never be the thing standing between a
+     manager and the button under it. */
+  pointer-events: auto;
+  cursor: pointer;
+  /* The banner carries the page's own flow margin. It is not in the flow now. */
+  margin: 0;
+  max-width: 34rem;
+  box-shadow: 0 0.75rem 2rem -0.5rem color-mix(in srgb, #000 35%, transparent);
+  animation: admin-toast-in 0.18s ease-out;
+}
+
+@keyframes admin-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(0.75rem);
+  }
 }
 
 /* ==========================================================================

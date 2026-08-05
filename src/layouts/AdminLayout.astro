@@ -44,8 +44,17 @@ const admin = Astro.locals.admin;
 /** The one business-specific string in the panel. Change it, and nothing else. */
 const PANEL_NAME = 'Balier';
 
-/** Grows a row per section as Phase 4 lands them (products, content, settings). */
-const NAV = [{ href: '/admin/orders', label: 'Замовлення' }];
+/**
+ * Three rows, and deliberately not four: `/admin/categories` is reached from
+ * the product list instead, because a fourth item starts wrapping this header
+ * onto a second line at 320px and categories are opened far less often than
+ * anything here.
+ */
+const NAV = [
+  { href: '/admin/orders', label: 'Замовлення' },
+  { href: '/admin/products', label: 'Товари' },
+  { href: '/admin/settings', label: 'Налаштування' },
+];
 
 const pathname = Astro.url.pathname;
 ---

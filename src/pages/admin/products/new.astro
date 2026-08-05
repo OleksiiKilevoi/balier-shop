@@ -1,0 +1,311 @@
+---
+import { env } from 'cloudflare:workers';
+import AdminLayout from '~/layouts/AdminLayout.astro';
+import { createDb, createTxDb } from '~/lib/db';
+import { createProduct, listCategoryOptions } from '~/lib/db/queries/adminProducts';
+import { productStatus } from '~/lib/db/schema';
+import {
+  ADMIN_CATALOG_ERRORS,
+  ADMIN_PRODUCT_MESSAGES,
+  PRODUCT_STATUS_HINTS,
+  PRODUCT_STATUS_LABELS,
+} from '~/lib/i18n/admin';
+import type { AdminProductMessage } from '~/lib/i18n/admin';
+import { slugify, suggestSku } from '~/lib/products/slug';
+import { catalogFieldErrors, newProductSchema } from '~/lib/validation/catalog';
+import type { CatalogField } from '~/lib/validation/catalog';
+
+/**
+ * Creating a product.
+ *
+ * Deliberately thin: five fields, then straight into the editor. It does not
+ * assemble variants and images in a draft first, for two reasons that are
+ * properties of the schema rather than preferences — `product_images.product_id`
+ * is `NOT NULL`, so an image cannot exist before its product does; and
+ * `products.status` already *is* the mechanism for «half-finished and invisible
+ * to customers», so a draft product is a better holding state than a draft form.
+ *
+ * The first variant is created here too, without asking. Every product has at
+ * least one (the schema says so, and stock, SKU and every cart and order
+ * reference hang off the variant rather than the product), so the alternative
+ * would be a product that exists and cannot be bought, sitting in the catalog
+ * until somebody noticed.
+ *
+ * On refusal this re-renders with what was typed instead of redirecting, unlike
+ * `/admin/settings` — that screen carries one number a manager can retype in
+ * three seconds, and this one carries a title and a price they would have to
+ * find again.
+ */
+export const prerender = false;
+
+const SELF = '/admin/products/new';
+
+const db = createDb(env.DATABASE_URL);
+
+let invalid = new Set<CatalogField>();
+let banner: AdminProductMessage | null = null;
+
+/** What the form redraws with after a refusal — the body, not the database. */
+let values = {
+  title: '',
+  slug: '',
+  basePrice: '',
+  categoryId: '',
+  status: 'draft' as string,
+};
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+
+  const raw = {
+    title: String(form.get('title') ?? ''),
+    slug: String(form.get('slug') ?? ''),
+    basePrice: String(form.get('basePrice') ?? ''),
+    categoryId: String(form.get('categoryId') ?? ''),
+    status: String(form.get('status') ?? 'draft'),
+  };
+  values = raw;
+
+  /*
+   * An empty slug is filled in from the title *on the server*, which is what
+   * makes the suggestion work with no script at all — the script below only
+   * previews what would happen anyway. Typing a slug and clearing it again is
+   * therefore not a way to submit a product with no slug; there is no such
+   * product.
+   */
+  const parsed = newProductSchema.safeParse({
+    ...raw,
+    slug: raw.slug.trim() === '' ? slugify(raw.title) : raw.slug,
+  });
+
+  if (!parsed.success) {
+    invalid = catalogFieldErrors(parsed.error);
+    banner = 'bad_request';
+  } else {
+    const { db: txDb, close } = createTxDb(env.DATABASE_URL);
+    try {
+      const result = await createProduct(txDb, {
+        slug: parsed.data.slug,
+        title: parsed.data.title,
+        basePrice: parsed.data.basePrice,
+        categoryId: parsed.data.categoryId,
+        status: parsed.data.status,
+        // Derived, not asked for: one more required field on the create screen
+        // to name something the manager has no opinion about yet. It is editable
+        // on the next screen, where the colour it belongs to also lives.
+        sku: suggestSku(parsed.data.slug),
+      });
+
+      if (result.ok) {
+        return Astro.redirect(`/admin/products/${result.productId}?m=created`, 303);
+      }
+
+      banner = result.reason;
+      if (result.reason === 'slug_taken') invalid.add('slug');
+    } finally {
+      Astro.locals.cfContext?.waitUntil?.(close());
+    }
+  }
+}
+
+const categories = await listCategoryOptions(db);
+
+/* The suggestion shown under the field before anything is typed, and what the
+   script fills in as the title is typed. Same function the server falls back
+   to, so the two cannot disagree. */
+const suggestedSlug = slugify(values.title);
+---
+
+<AdminLayout title="Новий товар">
+  <nav class="text-fg-subtle text-sm">
+    <a href="/admin/products" class="underline-offset-2 hover:underline">← Товари</a>
+  </nav>
+
+  <h1 class="text-fg mt-3 text-2xl font-semibold sm:text-3xl">Новий товар</h1>
+  <p class="text-fg-muted mt-2 max-w-2xl text-sm">
+    Опис, варіанти, кольори та фото додаються на наступному кроці.
+  </p>
+
+  {
+    banner && (
+      <p role="alert" class="rounded-card admin-tone-negative mt-5 p-3 text-sm">
+        {ADMIN_PRODUCT_MESSAGES[banner]}
+      </p>
+    )
+  }
+
+  <form method="post" action={SELF} id="new-product-form" class="admin-card mt-6 max-w-2xl p-5">
+    <div>
+      <label for="title" class="text-fg-subtle text-xs">Назва</label>
+      <input
+        id="title"
+        name="title"
+        type="text"
+        value={values.title}
+        autocomplete="off"
+        maxlength={200}
+        class:list={['admin-field mt-1', invalid.has('title') && 'border-danger']}
+      />
+      {invalid.has('title') && <p class="text-danger mt-1 text-xs">{ADMIN_CATALOG_ERRORS.title}</p>}
+    </div>
+
+    <div class="mt-4">
+      <label for="slug" class="text-fg-subtle text-xs">Адреса сторінки</label>
+      <div class="mt-1 flex items-center gap-2">
+        <span class="text-fg-subtle shrink-0 font-mono text-sm">/products/</span>
+        <input
+          id="slug"
+          name="slug"
+          type="text"
+          value={values.slug}
+          autocomplete="off"
+          spellcheck="false"
+          placeholder={suggestedSlug || 'sumka-liunet'}
+          maxlength={60}
+          class:list={['admin-field font-mono', invalid.has('slug') && 'border-danger']}
+        />
+      </div>
+      {
+        invalid.has('slug') ? (
+          <p class="text-danger mt-1 text-xs">{ADMIN_CATALOG_ERRORS.slug}</p>
+        ) : (
+          <p class="text-fg-subtle mt-1 text-xs">
+            Можна лишити порожнім — тоді адреса складеться з назви за офіційною транслітерацією.
+          </p>
+        )
+      }
+    </div>
+
+    <div class="mt-4 flex flex-wrap gap-4">
+      <div class="w-full sm:w-48">
+        <label for="basePrice" class="text-fg-subtle text-xs">Ціна</label>
+        <div class="relative mt-1">
+          {/* `text` with a numeric keypad rather than `number`, for the reason
+              `/admin/settings` names: `admin-field` sets `appearance: none`, and
+              a number input refuses a value pasted as «1 850» outright. */}
+          <input
+            id="basePrice"
+            name="basePrice"
+            type="text"
+            inputmode="numeric"
+            value={values.basePrice}
+            autocomplete="off"
+            class:list={['admin-field pr-10', invalid.has('basePrice') && 'border-danger']}
+          />
+          <span
+            class="text-fg-subtle pointer-events-none absolute inset-y-0 right-4.5 flex items-center text-base sm:text-sm"
+            aria-hidden="true"
+          >
+            ₴
+          </span>
+        </div>
+        {
+          invalid.has('basePrice') && (
+            <p class="text-danger mt-1 text-xs">{ADMIN_CATALOG_ERRORS.basePrice}</p>
+          )
+        }
+      </div>
+
+      <div class="w-full flex-1 sm:w-auto">
+        <label for="categoryId" class="text-fg-subtle text-xs">Категорія</label>
+        <div class="relative mt-1">
+          <select id="categoryId" name="categoryId" class="admin-field admin-select">
+            <option value="">Без категорії</option>
+            {
+              categories.map((category) => (
+                <option value={category.id} selected={category.id === values.categoryId}>
+                  {category.title}
+                  {!category.isActive && ' (не опубліковано)'}
+                </option>
+              ))
+            }
+          </select>
+          <svg
+            class="text-fg-subtle pointer-events-none absolute top-1/2 right-4 h-4 w-4 -translate-y-1/2"
+            viewBox="0 0 16 16"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <path d="m4 6 4 4 4-4" />
+          </svg>
+        </div>
+        {
+          categories.length === 0 && (
+            <p class="text-fg-subtle mt-1 text-xs">
+              Категорій ще немає — <a href="/admin/categories" class="underline underline-offset-2">створіть першу</a>.
+            </p>
+          )
+        }
+      </div>
+    </div>
+
+    <fieldset class="mt-5">
+      <legend class="text-fg-subtle text-xs">Статус</legend>
+      <div class="mt-2 flex flex-wrap gap-2">
+        {
+          productStatus.enumValues.map((value) => (
+            /* One input+label pair per wrapper: Tailwind's `peer-checked:` is a
+               *general sibling* selector, so three radios in one flex row would
+               light up every label after the checked one. */
+            <div>
+              <input
+                type="radio"
+                id={`status-${value}`}
+                name="status"
+                value={value}
+                checked={value === values.status}
+                class="peer sr-only"
+              />
+              <label
+                for={`status-${value}`}
+                class="admin-badge peer-checked:bg-accent peer-checked:text-accent-fg border-border-strong text-fg-muted min-h-9 w-auto max-w-none cursor-pointer border px-4"
+              >
+                {PRODUCT_STATUS_LABELS[value]}
+              </label>
+            </div>
+          ))
+        }
+      </div>
+      <p class="text-fg-subtle mt-2 text-xs">{PRODUCT_STATUS_HINTS.draft}</p>
+    </fieldset>
+
+    <div class="mt-6 flex flex-wrap items-center gap-3">
+      <button type="submit" class="admin-btn admin-btn-primary">Створити</button>
+      <a href="/admin/products" class="admin-btn admin-btn-secondary">Скасувати</a>
+    </div>
+  </form>
+</AdminLayout>
+
+<script>
+  /*
+   * Enhancement only. The server fills an empty slug in from the title with the
+   * same function, so this page works exactly as well with the script blocked —
+   * all this adds is seeing the answer before submitting.
+   *
+   * It stops the moment the manager types in the slug field themselves. A
+   * suggestion that keeps overwriting a deliberate choice is worse than no
+   * suggestion, and there is no way to tell those apart other than by watching
+   * who typed last.
+   */
+  import { slugify } from '~/lib/products/slug';
+
+  const form = document.getElementById('new-product-form');
+  const title = document.getElementById('title') as HTMLInputElement | null;
+  const slug = document.getElementById('slug') as HTMLInputElement | null;
+
+  if (form && title && slug) {
+    let manual = slug.value.trim() !== '';
+
+    slug.addEventListener('input', () => {
+      manual = slug.value.trim() !== '';
+    });
+
+    title.addEventListener('input', () => {
+      if (!manual) slug.value = slugify(title.value);
+    });
+  }
+</script>

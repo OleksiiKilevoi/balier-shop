@@ -353,7 +353,7 @@ const DELIVERY_CHOICES = [
     method="post"
     action={SELF}
     id="new-order-form"
-    class="group aria-busy:pointer-events-none aria-busy:opacity-60 mt-6 space-y-6 transition-opacity"
+    class="group aria-busy:pointer-events-none aria-busy:opacity-40 mt-6 space-y-6 transition-opacity"
   >
     {
       banner && (
@@ -747,7 +747,7 @@ const DELIVERY_CHOICES = [
             disabled={!settlement}
             autocomplete="off"
             class:list={[
-              'admin-field disabled:cursor-not-allowed disabled:opacity-60',
+              'admin-field disabled:cursor-not-allowed disabled:opacity-40',
               invalid.has('warehouse') && !warehouse && 'border-danger',
             ]}
           />

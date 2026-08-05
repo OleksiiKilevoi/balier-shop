@@ -473,6 +473,7 @@ export const pageTranslationsRelations = relations(pageTranslations, ({ one }) =
 /* -------------------------------------------------------------------- types */
 
 export type AdminUser = typeof adminUsers.$inferSelect;
+export type Category = typeof categories.$inferSelect;
 export type Product = typeof products.$inferSelect;
 export type ProductVariant = typeof productVariants.$inferSelect;
 export type ProductImage = typeof productImages.$inferSelect;
@@ -481,6 +482,7 @@ export type NewOrder = typeof orders.$inferInsert;
 export type OrderItem = typeof orderItems.$inferSelect;
 export type Payment = typeof payments.$inferSelect;
 export type Locale = (typeof locale.enumValues)[number];
+export type ProductStatus = (typeof productStatus.enumValues)[number];
 export type OrderStatus = (typeof orderStatus.enumValues)[number];
 export type PaymentMethod = (typeof paymentMethod.enumValues)[number];
 export type DeliveryMethod = (typeof deliveryMethod.enumValues)[number];

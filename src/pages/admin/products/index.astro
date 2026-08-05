@@ -1,0 +1,310 @@
+---
+import { env } from 'cloudflare:workers';
+import ProductStatusBadge from '~/components/admin/ProductStatusBadge.astro';
+import AdminLayout from '~/layouts/AdminLayout.astro';
+import { createDb } from '~/lib/db';
+import { listAdminProducts, listCategoryOptions } from '~/lib/db/queries/adminProducts';
+import { productStatus } from '~/lib/db/schema';
+import type { ProductStatus } from '~/lib/db/schema';
+import { PRODUCT_STATUS_LABELS, formatAdminDateTime } from '~/lib/i18n/admin';
+import { pluralUk } from '~/lib/i18n/plural';
+import { formatPrice } from '~/lib/money';
+
+/**
+ * The catalog list.
+ *
+ * Built as a near-copy of `/admin/orders` on purpose — same GET form for filter
+ * and search, same page size, same cards-on-phone / table-on-desktop split. The
+ * two lists are the same job on different rows, and a manager should not have to
+ * learn the second one.
+ *
+ * Ordered by `updated_at` rather than by the catalog's own `position`: this is
+ * the working list, and what was touched last is what is being worked on. The
+ * curated order is what `/products` shows, and it is edited on the product page.
+ */
+export const prerender = false;
+
+const PAGE_SIZE = 25;
+const MAX_QUERY = 100;
+
+const params = Astro.url.searchParams;
+const db = createDb(env.DATABASE_URL);
+
+// An unknown `?status=` is ignored rather than 404ing, exactly as on the order
+// list — it can only come from a hand-edited URL.
+const status = productStatus.enumValues.find(
+  (value): value is ProductStatus => value === params.get('status'),
+);
+const query = (params.get('q') ?? '').trim().slice(0, MAX_QUERY);
+const page = Math.max(1, Number.parseInt(params.get('page') ?? '1', 10) || 1);
+
+// `?category=` is where «показати» on `/admin/categories` arrives. Checked
+// against the real list rather than passed through: an id that names no row
+// would otherwise render an empty list that looks like a category with no
+// products, and a malformed one would make Postgres throw on the uuid cast.
+const categoryOptions = await listCategoryOptions(db);
+const categoryId = categoryOptions.find(
+  (option) => option.id === params.get('category'),
+)?.id;
+
+const { rows, total } = await listAdminProducts(db, {
+  status,
+  categoryId,
+  query: query || undefined,
+  limit: PAGE_SIZE,
+  offset: (page - 1) * PAGE_SIZE,
+});
+
+const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+function pageHref(next: number): string {
+  const url = new URL(Astro.url);
+  url.searchParams.set('page', String(next));
+  return `${url.pathname}${url.search}`;
+}
+
+const countLabel = `${total} ${pluralUk(total, {
+  one: 'товар',
+  few: 'товари',
+  many: 'товарів',
+})}`;
+---
+
+<AdminLayout title="Товари">
+  <header class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+    <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+      <h1 class="text-fg text-2xl font-semibold sm:text-3xl">Товари</h1>
+      <p class="text-fg-muted text-sm">{countLabel}</p>
+    </div>
+    <div class="flex flex-wrap items-center gap-2">
+      {/* Categories live one click away rather than in the header nav: they are
+          edited once in a while, and a fourth nav row starts wrapping at 320px. */}
+      <a href="/admin/categories" class="admin-btn admin-btn-secondary">Категорії</a>
+      <a href="/admin/products/new" class="admin-btn admin-btn-primary">Створити товар</a>
+    </div>
+  </header>
+
+  {/* Three controls rather than the order list's two, so the row wraps instead
+      of squeezing the search field to nothing at the sm breakpoint. */}
+  <form
+    method="get"
+    action="/admin/products"
+    class="mt-5 flex max-w-3xl flex-col gap-2 sm:flex-row sm:flex-wrap"
+  >
+    <label for="products-q" class="sr-only">Назва, адреса або артикул</label>
+    <input
+      id="products-q"
+      name="q"
+      type="search"
+      value={query}
+      placeholder="Назва, slug або SKU"
+      maxlength={MAX_QUERY}
+      autocomplete="off"
+      class="admin-field sm:min-w-56 sm:flex-1"
+    />
+
+    <div class="relative sm:w-44">
+      <label for="products-category" class="sr-only">Категорія</label>
+      <select id="products-category" name="category" class="admin-field admin-select">
+        <option value="">Усі категорії</option>
+        {
+          categoryOptions.map((option) => (
+            <option value={option.id} selected={option.id === categoryId}>
+              {option.title}
+            </option>
+          ))
+        }
+      </select>
+      <svg
+        class="text-fg-subtle pointer-events-none absolute top-1/2 right-4 h-4 w-4 -translate-y-1/2"
+        viewBox="0 0 16 16"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.5"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true"
+      >
+        <path d="m4 6 4 4 4-4" />
+      </svg>
+    </div>
+
+    <div class="relative sm:w-44">
+      <label for="products-status" class="sr-only">Статус</label>
+      <select id="products-status" name="status" class="admin-field admin-select">
+        <option value="">Усі статуси</option>
+        {
+          productStatus.enumValues.map((value) => (
+            <option value={value} selected={value === status}>
+              {PRODUCT_STATUS_LABELS[value]}
+            </option>
+          ))
+        }
+      </select>
+      <svg
+        class="text-fg-subtle pointer-events-none absolute top-1/2 right-4 h-4 w-4 -translate-y-1/2"
+        viewBox="0 0 16 16"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.5"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true"
+      >
+        <path d="m4 6 4 4 4-4" />
+      </svg>
+    </div>
+
+    <button type="submit" class="admin-btn admin-btn-primary shrink-0">Знайти</button>
+  </form>
+
+  {
+    rows.length === 0 ? (
+      <p class="text-fg-muted mt-8">
+        {query || status || categoryId ? 'За цим фільтром товарів немає.' : 'Товарів поки немає.'}
+      </p>
+    ) : (
+      <>
+        <ul class="mt-6 space-y-3 md:hidden">
+          {rows.map((row) => (
+            <li class="admin-card hover:border-border-strong transition-colors">
+              <a href={`/admin/products/${row.id}`} class="flex gap-3 p-4">
+                {/* Fixed box either way, so a missing photo does not reflow the
+                    row — an empty card is itself worth seeing in the list. */}
+                <span class="bg-surface-hover border-border h-16 w-12 shrink-0 overflow-hidden rounded-md border">
+                  {row.imageUrl && (
+                    <img
+                      src={row.imageUrl}
+                      alt=""
+                      loading="lazy"
+                      class="h-full w-full object-cover"
+                    />
+                  )}
+                </span>
+                <span class="min-w-0 flex-1">
+                  <span class="flex items-start justify-between gap-3">
+                    <span class="text-fg truncate text-sm font-medium">{row.title}</span>
+                    <ProductStatusBadge status={row.status} />
+                  </span>
+                  <span class="text-fg-subtle mt-1 block truncate font-mono text-xs">
+                    /{row.slug}
+                  </span>
+                  <span class="text-fg mt-2 block font-medium tabular-nums">
+                    {formatPrice(row.displayPrice)}
+                  </span>
+                  <span class="text-fg-subtle mt-1 block text-xs">
+                    {row.activeVariantCount} з {row.variantCount} у продажу · залишок{' '}
+                    {row.totalStock}
+                  </span>
+                </span>
+              </a>
+            </li>
+          ))}
+        </ul>
+
+        <div class="admin-card mt-6 hidden overflow-x-auto md:block">
+          <table class="w-full border-collapse text-sm">
+            <thead class="text-fg-subtle border-border border-b text-left text-xs">
+              <tr>
+                <th scope="col" class="px-4 py-3 font-medium">Товар</th>
+                <th scope="col" class="px-4 py-3 font-medium">Категорія</th>
+                <th scope="col" class="px-4 py-3 text-right font-medium">Ціна</th>
+                <th scope="col" class="px-4 py-3 text-right font-medium">Варіанти</th>
+                <th scope="col" class="px-4 py-3 text-right font-medium">Залишок</th>
+                <th scope="col" class="px-4 py-3 font-medium">Оновлено</th>
+                <th scope="col" class="px-4 py-3 font-medium">Статус</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr class="border-border hover:bg-surface-hover border-b transition-colors last:border-b-0">
+                  <td class="px-4 py-3">
+                    <span class="flex items-center gap-3">
+                      <span class="bg-surface-hover border-border h-12 w-9 shrink-0 overflow-hidden rounded border">
+                        {row.imageUrl && (
+                          <img
+                            src={row.imageUrl}
+                            alt=""
+                            loading="lazy"
+                            class="h-full w-full object-cover"
+                          />
+                        )}
+                      </span>
+                      <span class="min-w-0">
+                        <a
+                          href={`/admin/products/${row.id}`}
+                          class="text-fg font-medium underline-offset-2 hover:underline"
+                        >
+                          {row.title}
+                        </a>
+                        <span class="text-fg-subtle block truncate font-mono text-xs">
+                          /{row.slug}
+                        </span>
+                      </span>
+                    </span>
+                  </td>
+                  <td class="text-fg-muted px-4 py-3">{row.categoryTitle ?? '—'}</td>
+                  <td class="text-fg px-4 py-3 text-right font-medium tabular-nums whitespace-nowrap">
+                    {formatPrice(row.displayPrice)}
+                  </td>
+                  <td class="text-fg-muted px-4 py-3 text-right tabular-nums">
+                    {row.activeVariantCount} / {row.variantCount}
+                  </td>
+                  <td class="px-4 py-3 text-right tabular-nums">
+                    {/* Zero stock on a published product is the one number in
+                        this table worth catching from across the room. */}
+                    <span
+                      class:list={[
+                        row.status === 'active' && row.totalStock === 0
+                          ? 'text-danger font-medium'
+                          : 'text-fg-muted',
+                      ]}
+                    >
+                      {row.totalStock}
+                    </span>
+                  </td>
+                  <td class="text-fg-muted px-4 py-3 whitespace-nowrap">
+                    {formatAdminDateTime(row.updatedAt)}
+                  </td>
+                  <td class="px-4 py-3">
+                    <ProductStatusBadge status={row.status} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </>
+    )
+  }
+
+  {
+    pageCount > 1 && (
+      <nav class="mt-6 flex items-center justify-between gap-3" aria-label="Сторінки">
+        <a
+          href={pageHref(page - 1)}
+          aria-disabled={page === 1}
+          class:list={[
+            'admin-btn admin-btn-secondary',
+            page === 1 && 'pointer-events-none opacity-40',
+          ]}
+        >
+          Назад
+        </a>
+        <span class="text-fg-muted text-sm tabular-nums">
+          {page} / {pageCount}
+        </span>
+        <a
+          href={pageHref(page + 1)}
+          aria-disabled={page === pageCount}
+          class:list={[
+            'admin-btn admin-btn-secondary',
+            page === pageCount && 'pointer-events-none opacity-40',
+          ]}
+        >
+          Далі
+        </a>
+      </nav>
+    )
+  }
+</AdminLayout>

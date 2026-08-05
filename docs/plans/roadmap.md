@@ -284,11 +284,11 @@ its fixture originally stubbed the pubkey as DER, the same wrong assumption the 
 so six green tests were confirming a broken path against itself. **A self-signed fixture cannot
 validate a wire format** — stub the shape the real API actually returns.
 
-## Phase 4 — Admin panel (2 days) — gate and orders done
+## Phase 4 — Admin panel (2 days) — done
 
-The gate is live and the orders screens are finished — listing, managing and now creating. What
-remains is the catalog side — products, content and image upload — plus the one-field
-cash-on-delivery setting.
+Every item is built: the gate, the order screens, the catalog screens, image upload and the
+cash-on-delivery setting. The panel can now run the shop without a developer, a terminal or a
+deploy.
 
 - [x] **The admin gate — the panel's own email/password login.** `src/lib/auth/` +
       `src/middleware.ts` gate `/admin/**` and `/api/admin/**`, fail-closed: PBKDF2 hashes in
@@ -329,13 +329,41 @@ cash-on-delivery setting.
       (`createNoopNotifier` — the manager is the notification). `payments.page_url` (migration
       `0005`) is what makes the link survive; `lastPayload` could not hold it, since every webhook
       overwrites that. The COD limit is enforced here too
-- [ ] Managing products and content
-- [ ] Image upload — POST the file to an admin route and call `storeImage`, the same code path
-      `pnpm media:ingest` uses. Since nothing is resized server-side, the form has to state the
-      expected dimensions and reject anything wildly off, or the storefront inherits whatever the
-      uploader happened to export
-- [ ] Configuring the cash-on-delivery limit — `settings.cod_limit` is already read and enforced at
-      checkout (`getCodLimitKopiykas`); what is missing is the one screen that writes it
+- [x] **Managing products and content** — `/admin/products` (list, search over title/slug/SKU,
+      status filter), `/admin/products/new`, `/admin/products/[id]` (the editor: text, price,
+      category, status, variants, images) and `/admin/categories`. Until this landed **nothing in
+      the running application could write the catalog** — `scripts/seed.ts` was the only creator
+      and every insert in it was `onConflictDoNothing`, so it could not even correct itself.
+      Decisions taken with the client rather than guessed: **«content» means products and
+      categories** — the seven static pages stay hardcoded `.astro` files and the unused
+      `pages`/`page_translations` tables stay untouched, their body format still undecided;
+      **archiving, never deleting** (`products.status`, `product_variants.is_active`), which keeps
+      order history intact by construction and never has to meet `order_items.variant_id`'s
+      `ON DELETE restrict`; and **slugs and SKUs are auto-suggested from the Ukrainian title and
+      always editable** (`~/lib/products/slug.ts`, КМУ 55). Create is deliberately thin — five
+      fields, then the editor — because `product_images.product_id` is `NOT NULL` and
+      `status: 'draft'` already *is* the holding state a draft form would be imitating. The one
+      rule that needed enforcing beyond the schema: **the last active variant cannot be
+      deactivated**, since `getProductBySlug` returns null for a product with none and would 404
+      a published product without touching its status
+- [x] **Image upload** — folded into the editor as a plain `multipart/form-data` POST with
+      `intent=image_add`, calling the same `storeImage` that `pnpm media:ingest` does; there is no
+      `/api/admin/media` route, because a JSON endpoint would only earn its keep with a script
+      layer driving it and these screens are plain PRG. Nothing is resized, so `~/lib/media/upload.ts`
+      is a real gate: ≤ 5 MB, shorter side ≥ 800 px, longer ≤ 4000 px, portrait or square, and one
+      of the four servable formats. **The format and dimensions come from what the Images binding
+      decoded, not from the filename or the browser's `Content-Type`** — a `curl -F` upload arrives
+      as `application/octet-stream` and is still a perfectly good WebP. Unreadable dimensions are a
+      refusal rather than the shrug `readDimensions` takes, since they are the input to every other
+      check; that also catches SVG and a corrupt file
+- [x] Configuring the cash-on-delivery limit — `/admin/settings`, the first thing in the product to
+      write the `settings` table (`scripts/seed.ts` was the only writer). The form is in hryvnias and
+      the row is in kopiykas, and `codLimitSchema` is the only place that conversion happens. The
+      screen edits the **amount only** — a decision taken rather than assumed: an off switch or a
+      «без обмеження» state would need a nullable value and a new checkout branch, since the
+      customer-facing message names an amount, so the hint says plainly that COD cannot be disabled
+      here. The write is an upsert, because the seed is not guaranteed to have run on a given
+      database
 
 > **Not in this phase, and not agreed either way: telling the customer when an admin moves an
 > order.** Marking an order shipped or cancelled currently sends nothing — Telegram and email fire

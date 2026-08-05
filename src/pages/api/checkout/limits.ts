@@ -7,8 +7,10 @@ export const prerender = false;
 
 /**
  * Primes `/checkout`'s payment-method step: the cash-on-delivery limit is an
- * admin-editable setting (`settings.cod_limit`, no admin UI to write it yet —
- * Phase 4), not a build-time constant, so the page has to ask for it.
+ * admin-editable setting (`settings.cod_limit`, written by `/admin/settings`),
+ * not a build-time constant, so the page has to ask for it. `cache-control:
+ * no-store` below is what makes an edit in the panel take effect on the next
+ * checkout rather than on the next deploy.
  */
 export const GET: APIRoute = async () => {
   const db = createDb(env.DATABASE_URL);

@@ -2,8 +2,8 @@
 import AdminLayout from '~/layouts/AdminLayout.astro';
 
 /**
- * Home of the panel. Orders are built; products, images and the
- * cash-on-delivery limit are the remaining Phase 4 items.
+ * Home of the panel. Orders and settings are built; products and images are the
+ * remaining Phase 4 items.
  */
 export const prerender = false;
 
@@ -12,8 +12,8 @@ const admin = Astro.locals.admin;
 /** Each becomes a card as it lands; `href: null` is "not built yet". */
 const SECTIONS: { label: string; hint: string; href: string | null }[] = [
   { label: 'Замовлення', hint: 'Статуси, накладні, пошук', href: '/admin/orders' },
-  { label: 'Товари', hint: 'Каталог і зображення', href: null },
-  { label: 'Ліміт післяплати', hint: 'Максимальна сума накладеного платежу', href: null },
+  { label: 'Товари', hint: 'Каталог, варіанти, фото', href: '/admin/products' },
+  { label: 'Налаштування', hint: 'Ліміт післяплати', href: '/admin/settings' },
 ];
 ---
 

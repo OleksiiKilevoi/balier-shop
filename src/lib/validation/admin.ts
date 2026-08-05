@@ -9,6 +9,7 @@ import {
   deliverySchema,
   paymentMethodSchema,
 } from './checkout';
+import { wholeHryvniaSchema } from './money';
 
 /**
  * The two things the order detail page can POST to itself. Both arrive as an
@@ -75,6 +76,34 @@ export const adminOrderActionSchema = z.discriminatedUnion('intent', [
 ]);
 
 export type AdminOrderAction = z.infer<typeof adminOrderActionSchema>;
+
+/**
+ * The cash-on-delivery limit, as `/admin/settings` submits it.
+ *
+ * The form is in hryvnias and the setting is in kopiykas; `wholeHryvniaSchema`
+ * is where that conversion happens, for this field and for every price on the
+ * catalog screens. The rules used to be written out here, and moved to
+ * `./money` once a second money field needed exactly the same ones.
+ *
+ * The bounds are typo guards, not policy: they exist to catch an empty field
+ * and an extra zero, not to express what Nova Poshta will actually carry
+ * cash-on-delivery — that is a real-world ceiling the panel does not know and
+ * must not pretend to. Note that the minimum is *not* an off switch either;
+ * setting the limit to 1 ₴ would refuse cash on delivery for every real order,
+ * which is why the screen says out loud that it cannot disable the method.
+ */
+export const COD_LIMIT_MIN_HRYVNIAS = 1;
+export const COD_LIMIT_MAX_HRYVNIAS = 1_000_000;
+
+export const codLimitSchema = wholeHryvniaSchema({
+  min: COD_LIMIT_MIN_HRYVNIAS,
+  max: COD_LIMIT_MAX_HRYVNIAS,
+  error: 'invalid_cod_limit',
+});
+
+export const adminSettingsSchema = z.object({ codLimit: codLimitSchema });
+
+export type AdminSettings = z.infer<typeof adminSettingsSchema>;
 
 /**
  * An order placed by a manager at `/admin/orders/new`.
