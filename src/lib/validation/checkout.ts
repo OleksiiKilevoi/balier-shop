@@ -81,7 +81,10 @@ export const checkoutRequestSchema = z.object({
   paymentMethod: paymentMethodSchema,
   comment: commentSchema,
   items: cartItemsSchema,
-  turnstileToken: z.string().min(1),
+  // Turnstile: disabled 2026-08-05 on request — see `src/pages/checkout.astro`.
+  // Zod strips unknown keys, so a cached client still sending the field is
+  // accepted rather than rejected.
+  // turnstileToken: z.string().min(1),
 });
 
 export type CheckoutRequest = z.infer<typeof checkoutRequestSchema>;

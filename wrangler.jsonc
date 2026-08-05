@@ -75,9 +75,12 @@
     // is a guess and the button currently points at nothing. `orderDeepLink`
     // validates it, so an empty value hides the button rather than breaking it.
     "PUBLIC_TELEGRAM_MANAGER": "balier_ua",
-    // Turnstile site key — public by definition, it's embedded in the
+    // Turnstile site key — public by definition, it was embedded in the
     // checkout page's HTML. The paired secret (`TURNSTILE_SECRET_KEY`) is a
     // Worker secret, never here.
+    // CURRENTLY UNUSED: Turnstile is commented out (2026-08-05, on request) —
+    // see the `Turnstile:` markers in `src/pages/checkout.astro`. Both values
+    // are kept set so uncommenting is all it takes to bring it back.
     "PUBLIC_TURNSTILE_SITE_KEY": "0x4AAAAAAEF8vF0-cXNWdOOY"
   },
 

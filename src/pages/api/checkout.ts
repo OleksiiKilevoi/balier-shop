@@ -6,7 +6,7 @@ import { createMonobankPayment } from '~/lib/monobank';
 import { createEmailNotifier } from '~/lib/notify/email';
 import { createTelegramNotifier } from '~/lib/notify/telegram';
 import { createOrder } from '~/lib/orders/create';
-import { createTurnstileCaptcha } from '~/lib/turnstile';
+// Turnstile: import { createTurnstileCaptcha } from '~/lib/turnstile';
 import { checkoutRequestSchema } from '~/lib/validation/checkout';
 
 export const prerender = false;
@@ -19,7 +19,8 @@ export const prerender = false;
  * moves.
  *
  * Rate limited per IP in `src/middleware.ts` (tightest budget of any route —
- * this one calls Turnstile/Monobank and creates a row).
+ * this one calls Monobank and creates a row; it is also the only bot defence
+ * left while Turnstile is commented out below).
  */
 export const POST: APIRoute = async ({ request, locals }) => {
   let payload: unknown;
@@ -34,12 +35,18 @@ export const POST: APIRoute = async ({ request, locals }) => {
   if (!parsed.success) return json({ error: 'invalid_request' }, 400);
   if (parsed.data.items.length === 0) return json({ error: 'empty_cart' }, 400);
 
-  const captcha = createTurnstileCaptcha(env.TURNSTILE_SECRET_KEY);
-  const captchaOk = await captcha.verify(
-    parsed.data.turnstileToken,
-    request.headers.get('cf-connecting-ip') ?? undefined,
-  );
-  if (!captchaOk) return json({ error: 'captcha_failed' }, 400);
+  // Turnstile: disabled 2026-08-05 on request — commented out, not deleted.
+  // `src/lib/turnstile/` and its tests are untouched; restoring means
+  // uncommenting this, the `turnstileToken` field in
+  // `src/lib/validation/checkout.ts`, and the blocks marked `Turnstile:` in
+  // `src/pages/checkout.astro`.
+  //
+  // const captcha = createTurnstileCaptcha(env.TURNSTILE_SECRET_KEY);
+  // const captchaOk = await captcha.verify(
+  //   parsed.data.turnstileToken,
+  //   request.headers.get('cf-connecting-ip') ?? undefined,
+  // );
+  // if (!captchaOk) return json({ error: 'captcha_failed' }, 400);
 
   const db = createDb(env.DATABASE_URL);
   const [codLimitKopiykas, reservationTtlMinutes] = await Promise.all([

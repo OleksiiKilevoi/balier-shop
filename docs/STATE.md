@@ -1,77 +1,44 @@
-# STATE — balier.ua
+﻿# STATE — balier.ua
 
 > Single source of truth for "where did we stop". Read aloud at session start.
 
 ## 📍 CURRENT STATE (overwrite this block; keep tight)
 
-- **Last done:** **the admin panel has its own login form — Cloudflare Access is gone.** On request.
-  Access worked and was live behind one-time PIN for a day; the reason for replacing it is
-  **ownership, not security**. The panel (with the cart, checkout and DB) is meant to be lifted into
-  the next business, and a gate configured in one Cloudflare account's Zero Trust dashboard is not
-  part of the code that gets lifted. **The property that mattered survived exactly: the check runs
-  inside the app** (`src/middleware.ts`), so it holds on every hostname the Worker answers on, with
-  no edge configuration to get wrong, and unconfigured still means deny.
-  - **`admin_users` (migration `0004`, applied to the dev DB)** — email, PBKDF2 hash, `isActive`,
-    `lastLoginAt`. `pnpm admin:user create|password|disable|enable|list` is the only way to manage
-    accounts; there is no screen for it, which is the chicken-and-egg the form cannot solve itself.
-    The password is **never an argument** — prompted for, or piped in.
-  - **PBKDF2-HMAC-SHA-256, 210 000 iterations** (`src/lib/auth/password.ts`), because it is the only
-    KDF the Workers runtime implements natively — bcrypt/argon2 would mean shipping WebAssembly, and
-    that trade was taken deliberately rather than by accident. The stored string carries its own cost
-    (`pbkdf2-sha256$210000$salt$hash`), so the number can be raised later without invalidating a
-    single row; a successful login silently re-hashes anything behind.
-  - **The session is a signed cookie with no server-side store** (`src/lib/auth/session.ts`):
-    HMAC-SHA-256 over `{sub,email,exp}`, `__Host-admin_session`, HttpOnly/Secure/SameSite=Lax, 12
-    hours. Verifying is one HMAC and no round trip. **The price, named rather than discovered later:
-    a session cannot be revoked before it expires.** Signing out clears the browser's copy; disabling
-    an account blocks the next login but not a live session; rotating `ADMIN_SESSION_SECRET` is the
-    only way to end all of them at once. 12 hours *is* the blast radius, which is why it is a working
-    day and not a month.
-  - **`secure: true` unconditionally, including in dev** — `__Host-` requires it, so a conditional
-    would make the browser silently *discard* the cookie locally and loop back to the form with no
-    error to explain why. Every browser accepts `Secure` on `http://localhost`. Rules out developing
-    against a LAN IP (`astro dev --host`); localhost or a tunnel.
-  - **No development bypass, unlike the gate it replaced.** That one needed one (nothing
-    authenticates in front of `pnpm dev`); this one does not, so the login path that ships is the one
-    exercised every day. `dev@localhost` is gone from the codebase.
-  - **Rate limiting lives in the login page, not the middleware table** (10 per 15 min per IP, the
-    existing KV limiter), so hitting it answers with the form and a message instead of a bare 429 in
-    front of somebody who mistyped their own password.
-    - **Only *wrong* passwords count.** The first cut charged every POST, which locked the panel's
-      own operator out on their first real attempt — reported immediately and fixed. `checkRateLimit`
-      is now built from `peekRateLimit` (read-only) + `recordRateLimitHit`, and the login page calls
-      them at the two different moments: check before, charge only on failure. The budget is
-      therefore entirely a guesser's to burn; 20 consecutive successful logins spend nothing.
-    - The message names the wait («Спробуйте за 14 хв») rather than saying "a few minutes" about a
-      fifteen-minute window.
-    - **In dev every client shares the bucket `admin-login:unknown`**, because `cf-connecting-ip`
-      only exists behind Cloudflare. Harmless in production, but it means curl testing and the
-      browser share one budget locally — which is exactly how the bug above surfaced.
-  - Also: `/admin/logout` is POST-only (a GET would be fired by any prefetcher), the `next=`
-    parameter is validated against an open redirect, the "no such admin" branch burns an equal KDF
-    run so the form cannot enumerate admins, and `AdminLayout` gained a `bare` mode plus a sign-out
-    button. Astro's origin check already covers both new forms — verified, both 403 cross-site.
-  - **Deleted:** `src/lib/access/` and its 18 tests, `CF_ACCESS_TEAM_DOMAIN`/`CF_ACCESS_AUD`.
-  `pnpm check` (0 errors)/`pnpm test` (115/115 — 23 new, 18 Access tests removed)/`pnpm build` clean,
-  with `secure: true` and the cookie name confirmed *in the built bundle* and `dev@localhost` absent
-  from it. Verified live against the dev server on the real dev Neon DB: `/admin`, `/admin/orders`
-  and an order detail each 303 to the form carrying `next`; `/api/admin/x` 401 JSON; login with a
-  mixed-case address 303s to `next` and sets the cookie with the right attributes; the panel then
-  opens; `/admin/login` while signed in redirects away; a **tampered payload carrying a real
-  signature** and a garbage cookie are both refused; logout clears the cookie and a GET to it does
-  not; `next=https://evil.com`, `//evil.com`, `/checkout` and `/adminevil` all fall back to `/admin`;
-  cross-site POSTs to login and logout both 403; the rate limit tripped and rendered its message;
-  `lastLoginAt` stamped; a disabled account refused with the *same* generic message, then re-enabled
-  and logged in. **Not eyeballed in a browser** — no CDP tool attached this session, so the login
-  screen's pixels are unverified (the same gap the session before this one had).
-  - **One real bug found by testing rather than by types, and it is a Windows one:** PowerShell
-    prepends a UTF-8 BOM when piping a string into a native command, so
-    `"pw" | pnpm admin:user create …` stored a hash of U+FEFF + the password and the browser could
-    then never reproduce it — a login that fails with correct credentials and nothing in any log.
-    `scripts/admin-user.ts` strips a leading BOM; noted in `docs/OVERVIEW.md`'s sharp edges.
-  - Also updated, because they described a module that no longer exists: `docs/CONVENTIONS.md`'s
-    admin rule, `docs/OVERVIEW.md` (stack table, module map, the gate section, sharp edges) and
-    `docs/plans/roadmap.md`'s Phase 4 first item.
+- **Last done:** **Cloudflare Turnstile is commented out of the checkout form.** On request ("we
+  don't need it for now"). **Commented, not deleted** — `src/lib/turnstile/index.ts` and its six
+  tests are untouched, `TURNSTILE_SECRET_KEY` and `PUBLIC_TURNSTILE_SITE_KEY` stay set, and every
+  disabled block carries a `Turnstile:` marker so `grep -rn "Turnstile:" src wrangler.jsonc` finds
+  all of them at once. Four files: `src/pages/checkout.astro` (the `env` import — its only use — the
+  site key, the widget `div`, the `api.js` tag, the `window.turnstile` global, the token read and its
+  «Пройдіть перевірку безпеки» guard, `turnstileToken` in the payload, the `resetTurnstile()` call
+  and the `captcha_failed` branch), `src/lib/validation/checkout.ts` (the `turnstileToken` field),
+  `src/pages/api/checkout.ts` (the import and the verify block) and a "currently unused" note in
+  `wrangler.jsonc`.
+  - **The rate limiter is now the only bot defence on `/api/checkout`** (10/min per IP,
+    `src/middleware.ts`) — said here rather than left to be rediscovered. Zod strips unknown keys, so
+    a cached client still sending `turnstileToken` is accepted, not rejected.
+  - **This unblocks two things.** The Phase 3 leftover "a real browser pass through `/checkout`
+    (Turnstile-gated, so curl can't do it)" is no longer gated — curl can now drive the whole order
+    path. And the open blocker "the Turnstile widget's hostname allowlist may not include
+    `balier.mlosko.dev`" is **dormant**, not resolved: it comes back the moment this is uncommented.
+  - `pnpm check` (0 errors)/`pnpm test` (115/115, unchanged — the adapter's own tests still pass
+    because the module is untouched)/`pnpm build` clean, with `cf-turnstile`,
+    `challenges.cloudflare.com`, `turnstileToken` and `captcha_failed` all grepped out of `dist/`
+    rather than assumed. Live on the dev server against the real dev Neon DB: `/checkout` 200 with
+    zero Turnstile references in its HTML; a token-less POST to `/api/checkout` carrying a
+    non-existent variant came back `cart_changed` — i.e. it reached the repricing layer, which is
+    past where `captcha_failed` used to stop it, with no side effects; then a **real cash-on-delivery
+    order with no token at all succeeded**, `B260805-XVFYQ`, success page 200. **Not eyeballed in a
+    browser** — no CDP tool attached, so the form's new layout without the widget is visually
+    unverified.
+  - The dev server had to be restarted first: `astro check`/`astro build` re-optimise Vite's deps and
+    left the running one 500ing on a stale `@neondatabase_serverless` chunk. Not caused by this
+    change, but it will happen again.
+- **Before that:** the admin panel got **its own login form** — PBKDF2 + a signed session cookie in
+  `src/lib/auth/`, `admin_users` (migration `0004`), `pnpm admin:user`, and a rewritten `adminGate`;
+  Cloudflare Access and `src/lib/access/` are deleted. Full account in the session log below and in
+  `docs/OVERVIEW.md`. **The one cost worth carrying forward: a session cannot be revoked before its
+  12 hours are up** — rotating `ADMIN_SESSION_SECRET` is the only way to end all of them at once.
 - **In progress:** **Phase 4 — the admin panel.** The gate is done — now the panel's own login form
   (see the top entry) — and orders are done. What is left of the phase: **products and content
   management**, **image upload** via `storeImage`, and the **cash-on-delivery limit**
@@ -90,7 +57,8 @@
   an admin status change — «Відправлено» emails are not in the roadmap item, so Telegram and email
   stay wired to order creation and payment only.
   Phase 3 is **code-complete**; what's left there is not code — a domain for Email Sending, and a
-  real browser pass through `/checkout` (Turnstile-gated, so curl can't do it). Phase 2 still
+  real browser pass through `/checkout` (**no longer Turnstile-gated**, so curl can drive it now —
+  and did, this session). Phase 2 still
   carries its own leftover: the seven static pages render a heading, a lead and a
   `ContentPlaceholder`. Writing them is a Phase 5 content item, and the legal ones gate Monobank.
 - **Next step:** the rest of Phase 4 — products/content management and image upload, or the
@@ -99,7 +67,8 @@
   an email address, to watch the confirmation email attempt and its graceful
   `E_SENDER_NOT_VERIFIED` failure.)
 - **Blockers (waiting on me):**
-  - **Three things the auth switch needs before it can be deployed, all mine, none of them code:**
+  - **Three things the auth switch needs, all mine, none of them code — and it is now *already
+    deployed*, so these are urgent rather than pre-flight:**
     1. **`wrangler secret put ADMIN_SESSION_SECRET --name balier-dev`** — the deployed Worker has no
        value for it, and until it does every `/admin` request there is denied (correct failure
        direction, but the panel is unopenable). Generate 48 random bytes; **not** the same value as
@@ -122,24 +91,27 @@
       the six records it needs — three MX on `cf-bounce.mail`, SPF, DKIM, DMARC — must be created
       in the zone by hand; `wrangler email sending dns get mail.mlosko.dev` prints them exactly.
       Until they exist, order emails keep failing closed.
-    - **The Turnstile widget's hostname allowlist may not include `balier.mlosko.dev`.** The
-      widget (`0x4AAAAAAEF8vF0-cXNWdOOY`) was created when `localhost` and the `workers.dev` URL
-      were the only hosts. If checkout on the new domain returns `captcha_failed`, this is why —
-      add the hostname in the Turnstile dashboard. Not yet tested either way.
+    - ~~**The Turnstile widget's hostname allowlist may not include `balier.mlosko.dev`.**~~ —
+      **dormant since 2026-08-05**, not resolved: Turnstile is commented out, so nothing calls the
+      widget. It comes back the moment it is uncommented. The widget (`0x4AAAAAAEF8vF0-cXNWdOOY`)
+      was created when `localhost` and the `workers.dev` URL were the only hosts; if checkout on the
+      new domain ever returns `captcha_failed`, this is why — add the hostname in the Turnstile
+      dashboard. Never tested either way.
   - `PUBLIC_TELEGRAM_MANAGER` in `wrangler.jsonc` is a **placeholder handle**.
   - ~~`DATABASE_URL` missing as a Worker secret~~ — resolved; it is set, and as of 2026-08-04 so are
     the other five runtime secrets.
-- **Dev DB state (real rows, harmless, deliberately not cleaned up):** `B260804-6DN8Q` (card, paid
-  through the real webhook), `B260804-BYP3K` / `B260804-S86Y7` (cash on delivery), and
+- **Dev DB state (real rows, harmless, deliberately not cleaned up):** `B260805-XVFYQ` (cash on
+  delivery, placed by curl with no captcha token — the proof Turnstile is off), `B260804-6DN8Q`
+  (card, paid through the real webhook), `B260804-BYP3K` / `B260804-S86Y7` (cash on delivery), and
   `B260804-DAMN7`, which the admin screens have been walked all over — it is `delivered` with the
   fake TTN `20450123456789`. `B260804-L6NJG` and `B260804-LHB7A` are `cancelled` from before
   migration `0003`, so they correctly offer no revert. One admin account: `lxstspxrk@gmail.com`.
   The Phase 3 money path was verified live against this data — COD end to end, the strict
   `cart_changed` rejection rolling back with zero side effects, and card payment including the
   `paid` transition and webhook idempotency. Full accounts in `docs/history.md`.
-- **Active branch:** `main` (only branch; tracks `origin/main`). Local `main` is at `5d0968b`, **one
-  commit ahead of `origin/main` (`c144535`)**, and the auth switch above is **uncommitted** on top of
-  that. So neither is deployed.
+- **Active branch:** `main` (only branch; tracks `origin/main`). Local `main` and `origin/main` are
+  both at `7e6f936` — **the auth switch has been pushed, and therefore deployed.** The Turnstile
+  change above is **uncommitted** on top of that, so it is not.
   A push to `main` deploys (Workers Builds is connected to `mykhailoshulezhko/balier`, production
   branch `main`, build `pnpm run build`, deploy `npx wrangler deploy`) — **do not push the auth
   switch before the three blocker items above are done**, or the deployed panel locks itself out.
@@ -150,7 +122,8 @@
 - [x] Phase 1 — Foundation (schema, migrations, seed, design components, deploy verified)
 - [~] Phase 2 — Catalog / storefront (every page built; static-page copy outstanding)
 - [~] Phase 3 — Cart and payment (code-complete: cart, `/checkout`, both payment methods,
-      Turnstile, the webhook, both Telegram notifications, rate limiting, and now the order-
+      Turnstile (built, then **commented out on request 2026-08-05** — the code stays), the webhook,
+      both Telegram notifications, rate limiting, and now the order-
       confirmation email. `balier-cron` is deployed. Only external/non-code items remain: onboarding
       a domain for Email Sending, and a live browser pass through `/checkout`. The admin COD-limit
       UI is Phase 4's item, not this one)
@@ -164,6 +137,35 @@
 ---
 
 ## 🗒️ SESSION LOG (newest first; 3–6 lines each)
+
+### 2026-08-05 — Turnstile commented out of the checkout form
+
+- Did, on request ("comment out cloudflare turnstile, we don't need it for now — we don't need it in
+  the website's order form"): every Turnstile call site disabled behind a `Turnstile:` marker in
+  `src/pages/checkout.astro`, `src/lib/validation/checkout.ts` and `src/pages/api/checkout.ts`, plus
+  a "currently unused" note on the site key in `wrangler.jsonc`. **Nothing deleted** —
+  `src/lib/turnstile/` and its six tests are byte-identical, and both keys stay set, so restoring is
+  `grep -rn "Turnstile:" src wrangler.jsonc` and uncommenting.
+- Decisions made rather than asked: the `env` import in the checkout frontmatter goes too (the site
+  key was its only use, and an unused import fails `pnpm check`); the client's `captcha_failed`
+  branch goes with it, since the server can no longer return that; and the schema field is commented
+  rather than made optional, because Zod strips unknown keys — a cached client still sending
+  `turnstileToken` is accepted, not rejected. Config and secrets are left in place: removing
+  `TURNSTILE_SECRET_KEY` from `.dev.vars` would mean a `pnpm cf-typegen` round trip to put it back.
+- **Named rather than left to be found: `/api/checkout` now has only the KV rate limiter in front of
+  it** (10/min per IP), which is the whole security consequence of this change.
+- Verified: `pnpm check` (0 errors)/`pnpm test` (115/115, unchanged — the adapter's own tests still
+  pass because the module is untouched)/`pnpm build` clean, with `cf-turnstile`,
+  `challenges.cloudflare.com`, `turnstileToken` and `captcha_failed` all **grepped out of `dist/`**
+  rather than assumed. Live against the real dev Neon DB: `/checkout` 200 with zero Turnstile
+  references in its HTML; a token-less POST carrying a non-existent variant returned `cart_changed`,
+  i.e. it reached the repricing layer — past where `captcha_failed` used to stop it — with no side
+  effects; then a real COD order with no token succeeded (`B260805-XVFYQ`), success page 200. **No
+  browser pass** — no CDP tool attached, so the form without the widget is visually unverified.
+- Note for next time: `astro check`/`astro build` re-optimise Vite's deps and leave a running
+  `pnpm dev` 500ing on a stale `@neondatabase_serverless` chunk. Restart the dev server after the
+  gate, not before.
+- Next: unchanged — the rest of Phase 4 (products/content management, image upload, the COD limit).
 
 ### 2026-08-05 — Cloudflare Access out, our own login form in
 

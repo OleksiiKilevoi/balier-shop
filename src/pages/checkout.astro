@@ -1,5 +1,9 @@
 ---
-import { env } from 'cloudflare:workers';
+// TURNSTILE DISABLED (2026-08-05, on request) — commented out, not deleted.
+// To restore, uncomment every block marked `Turnstile:` in this file, plus
+// `turnstileToken` in `src/lib/validation/checkout.ts` and the captcha check
+// in `src/pages/api/checkout.ts`. `src/lib/turnstile/` is untouched.
+// Turnstile: import { env } from 'cloudflare:workers';
 import BaseLayout from '~/layouts/BaseLayout.astro';
 import Container from '~/components/Container.astro';
 import Breadcrumbs from '~/components/Breadcrumbs.astro';
@@ -13,7 +17,7 @@ import {
 
 export const prerender = false;
 
-const turnstileSiteKey = env.PUBLIC_TURNSTILE_SITE_KEY;
+// Turnstile: const turnstileSiteKey = env.PUBLIC_TURNSTILE_SITE_KEY;
 
 const inputClass =
   'border-line-strong bg-paper-raised text-ink placeholder:text-ink-muted rounded-btn h-touch w-full min-w-0 appearance-none border px-4 text-base sm:h-11 sm:text-sm';
@@ -213,7 +217,9 @@ const phoneInputClass = inputClass.replace('px-4', 'pl-16 pr-4');
               ></textarea>
             </fieldset>
 
+            {/* Turnstile: the widget itself.
             <div class="cf-turnstile" data-sitekey={turnstileSiteKey} data-action="checkout" data-turnstile-widget></div>
+            */}
 
             <p class="text-ink hidden text-sm" data-submit-error role="alert"></p>
 
@@ -239,10 +245,11 @@ const phoneInputClass = inputClass.replace('px-4', 'pl-16 pr-4');
   </Container>
 </BaseLayout>
 
-{/* Renders the widget declared above (`.cf-turnstile[data-sitekey]`) and
-    populates its hidden `cf-turnstile-response` input — read directly off
-    the form's `FormData` in the submit handler below, no separate global. */}
+{/* Turnstile: renders the widget declared above (`.cf-turnstile[data-sitekey]`)
+    and populates its hidden `cf-turnstile-response` input — read directly off
+    the form's `FormData` in the submit handler below, no separate global.
 <script is:inline src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+*/}
 
 <script>
   import type { CartLine, CartSummary } from '~/lib/cart';
@@ -266,14 +273,15 @@ const phoneInputClass = inputClass.replace('px-4', 'pl-16 pr-4');
     description: string;
   }
 
-  declare global {
-    interface Window {
-      // Loaded by the external `api.js` script above.
-      turnstile?: { reset(widgetId?: string): void };
-    }
-  }
-
-  const resetTurnstile = () => window.turnstile?.reset();
+  // Turnstile:
+  // declare global {
+  //   interface Window {
+  //     // Loaded by the external `api.js` script above.
+  //     turnstile?: { reset(widgetId?: string): void };
+  //   }
+  // }
+  //
+  // const resetTurnstile = () => window.turnstile?.reset();
 
   const root = document.querySelector<HTMLElement>('[data-checkout]');
   const form = root?.querySelector<HTMLFormElement>('[data-checkout-form]');
@@ -598,14 +606,15 @@ const phoneInputClass = inputClass.replace('px-4', 'pl-16 pr-4');
 
       const data = new FormData(form);
 
-      const turnstileToken = String(data.get('cf-turnstile-response') ?? '');
-      if (!turnstileToken) {
-        if (submitError) {
-          submitError.textContent = 'Пройдіть перевірку безпеки нижче.';
-          submitError.hidden = false;
-        }
-        return;
-      }
+      // Turnstile:
+      // const turnstileToken = String(data.get('cf-turnstile-response') ?? '');
+      // if (!turnstileToken) {
+      //   if (submitError) {
+      //     submitError.textContent = 'Пройдіть перевірку безпеки нижче.';
+      //     submitError.hidden = false;
+      //   }
+      //   return;
+      // }
 
       const delivery =
         deliveryMethod === 'np_courier'
@@ -631,7 +640,7 @@ const phoneInputClass = inputClass.replace('px-4', 'pl-16 pr-4');
         paymentMethod: String(data.get('paymentMethod') ?? 'card'),
         comment: String(data.get('comment') ?? ''),
         items: cartItems.get(),
-        turnstileToken,
+        // Turnstile: turnstileToken,
       };
 
       if (submitButton) submitButton.disabled = true;
@@ -674,13 +683,14 @@ const phoneInputClass = inputClass.replace('px-4', 'pl-16 pr-4');
           return;
         }
 
-        if (body.error === 'captcha_failed') {
-          if (submitError) {
-            submitError.textContent = 'Перевірка безпеки не пройдена. Спробуйте ще раз.';
-            submitError.hidden = false;
-          }
-          return;
-        }
+        // Turnstile:
+        // if (body.error === 'captcha_failed') {
+        //   if (submitError) {
+        //     submitError.textContent = 'Перевірка безпеки не пройдена. Спробуйте ще раз.';
+        //     submitError.hidden = false;
+        //   }
+        //   return;
+        // }
 
         window.location.href = '/checkout/failure';
       } catch (error) {
@@ -691,7 +701,7 @@ const phoneInputClass = inputClass.replace('px-4', 'pl-16 pr-4');
         }
       } finally {
         if (submitButton) submitButton.disabled = false;
-        resetTurnstile();
+        // Turnstile: resetTurnstile();
       }
     });
 
