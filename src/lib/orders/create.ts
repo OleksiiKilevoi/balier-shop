@@ -4,7 +4,7 @@ import { lockCheckoutVariants } from '~/lib/db/queries/cart';
 import type { Order, OrderItem } from '~/lib/db/schema';
 import { orderItems, orders, payments, productVariants, stockReservations } from '~/lib/db/schema';
 import type { Kopiykas } from '~/lib/money';
-import type { NotifierPort, PaymentPort } from '~/lib/ports';
+import type { Invoice, NotifierPort, PaymentPort } from '~/lib/ports';
 import type { CartItemInput } from '~/lib/validation/cart';
 import type { DeliveryInput } from '~/lib/validation/checkout';
 import { type CheckoutLine, type CheckoutNotice, resolveCheckoutCart } from './checkoutCart';
@@ -239,9 +239,13 @@ export async function createOrder(
 
   // Card: the order sits `pending` with its reservation. Monobank is called
   // *outside* the transaction above — a network call must never hold a DB
-  // transaction open.
+  // transaction open. The id survives outside the `try` so the catch can tell
+  // the two failure shapes apart: no invoice (Monobank refused) versus an
+  // invoice that exists but whose order failed to record it — the latter
+  // leaves a live payment link behind unless it is removed.
+  let createdInvoiceId: string | undefined;
   try {
-    const invoice = await deps.payment.createInvoice({
+    const invoice: Invoice = await deps.payment.createInvoice({
       orderNumber: created.orderNumber,
       amount: created.total,
       items: created.lines.map((line) => ({
@@ -254,6 +258,7 @@ export async function createOrder(
       webhookUrl: deps.webhookUrl,
       validitySeconds: deps.reservationTtlMinutes * 60,
     });
+    createdInvoiceId = invoice.invoiceId;
 
     const [updatedOrder] = await txDb.transaction(async (tx) => {
       await tx.insert(payments).values({
@@ -280,6 +285,16 @@ export async function createOrder(
 
     return { ok: true, orderNumber: created.orderNumber, redirectUrl: invoice.pageUrl };
   } catch {
+    // An invoice that was created but not recorded is a live payment link with
+    // no order behind it — a customer who somehow reaches it would pay into
+    // `invoice_not_found`. Best-effort: the invoice also dies on its own at
+    // `validitySeconds`, so a failed removal narrows the window, not safety.
+    if (createdInvoiceId) {
+      await deps.payment.removeInvoice(createdInvoiceId).catch((err) => {
+        console.error(`Failed to remove Monobank invoice ${createdInvoiceId}`, err);
+      });
+    }
+
     // The invoice call failed — release the hold rather than leave stock
     // silently reserved against a payment that was never actually offered.
     await txDb.transaction(async (tx) => {

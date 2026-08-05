@@ -20,9 +20,14 @@ import {
 } from '~/lib/i18n/admin';
 import type { AdminOrderMessage } from '~/lib/i18n/admin';
 import { formatPrice } from '~/lib/money';
+import { createMonobankPayment } from '~/lib/monobank';
 import { DELIVERY_METHOD_LABELS, PAYMENT_METHOD_LABELS, deliveryDestination } from '~/lib/notify/format';
 import { allowedTransitions, revertCrossesPayment, revertTarget } from '~/lib/orders/status';
-import { setOrderTrackingNumber, updateOrderStatus } from '~/lib/orders/updateStatus';
+import {
+  removeCancelledOrderInvoices,
+  setOrderTrackingNumber,
+  updateOrderStatus,
+} from '~/lib/orders/updateStatus';
 import { TRACKING_NUMBER_LENGTH, adminOrderActionSchema } from '~/lib/validation/admin';
 
 /**
@@ -71,7 +76,21 @@ if (Astro.request.method === 'POST') {
       next: parsed.data.next,
     });
 
-    if (result.ok) return done('status_updated');
+    if (result.ok) {
+      // Cancelling an order whose card payment hasn't happened yet leaves its
+      // Monobank link payable until the invoice's own validity runs out — kill
+      // it now, after the transition committed, off the response path.
+      if (result.order.status === 'cancelled' && result.order.paidAt === null) {
+        Astro.locals.cfContext.waitUntil(
+          removeCancelledOrderInvoices(
+            createDb(env.DATABASE_URL),
+            createMonobankPayment(env.MONOBANK_TOKEN),
+            result.order.id,
+          ),
+        );
+      }
+      return done('status_updated');
+    }
     if (result.reason === 'not_found') {
       return new Response('Замовлення не знайдено', { status: 404 });
     }

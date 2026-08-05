@@ -59,5 +59,15 @@ export function createTelegramNotifier(botToken: string, chatId: string): Notifi
   return {
     orderCreated: (notification) => send(formatOrderMessage('Нове замовлення', notification)),
     orderPaid: (notification) => send(formatOrderMessage('Оплачено', notification)),
+    // The one webhook outcome that needs a person: money landed on an order
+    // that is already cancelled, and nothing downstream will ever look at it
+    // again. Loud on purpose — the fix is a manual refund.
+    paymentAfterCancellation: (notification) =>
+      send(
+        formatOrderMessage(
+          '⚠️ Оплата за СКАСОВАНИМ замовленням — потрібне повернення коштів',
+          notification,
+        ),
+      ),
   };
 }

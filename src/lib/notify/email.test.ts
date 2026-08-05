@@ -146,6 +146,18 @@ describe('createEmailNotifier', () => {
     expect(binding.send).not.toHaveBeenCalled();
   });
 
+  it('never emails the customer about a payment for a cancelled order', async () => {
+    const binding = fakeEmailBinding();
+    const notifier = createEmailNotifier(binding, 'noreply@balier.ua');
+
+    await notifier.paymentAfterCancellation({
+      order: order({ status: 'cancelled', paymentMethod: 'card' }),
+      items: [item()],
+    });
+
+    expect(binding.send).not.toHaveBeenCalled();
+  });
+
   it('never throws when the send() call rejects', async () => {
     const binding = {
       send: vi.fn(async () => {

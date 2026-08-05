@@ -69,6 +69,17 @@ export function createMonobankPayment(token: string): PaymentPort {
       return { status: result.status, amount: result.amount };
     },
 
+    async removeInvoice(invoiceId: string): Promise<void> {
+      // «Інвалідація рахунку»: kills the hosted payment page for an invoice
+      // whose payment has not started. Monobank rejects it for a finished
+      // invoice, which surfaces here as a throw — the port documents removal
+      // as best-effort, so callers catch and log rather than unwind anything.
+      await request<unknown>('invoice/remove', {
+        method: 'POST',
+        body: JSON.stringify({ invoiceId }),
+      });
+    },
+
     async verifyWebhook(rawBody: string, signature: string | null): Promise<boolean> {
       if (!signature) return false;
 

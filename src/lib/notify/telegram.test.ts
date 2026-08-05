@@ -111,6 +111,26 @@ describe('createTelegramNotifier', () => {
     expect(sent.text).toContain('Карткою онлайн');
   });
 
+  it('sends the paid-after-cancellation alert with the refund heading', async () => {
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        new Response(JSON.stringify({ ok: true }), { status: 200 }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const notifier = createTelegramNotifier('bot-token', 'chat-id');
+    await notifier.paymentAfterCancellation({
+      order: order({ status: 'cancelled', paymentMethod: 'card' }),
+      items: [item()],
+    });
+
+    const [, init] = fetchMock.mock.calls[0]!;
+    const sent = JSON.parse(init!.body as string) as { text: string };
+    expect(sent.text).toContain('СКАСОВАНИМ');
+    expect(sent.text).toContain('повернення коштів');
+    expect(sent.text).toContain('B260804-TEST1');
+  });
+
   it('never throws when Telegram is unreachable', async () => {
     vi.stubGlobal(
       'fetch',

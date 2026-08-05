@@ -1,7 +1,8 @@
 import { eq, inArray, sql } from 'drizzle-orm';
 import type { Db, TxDb } from '~/lib/db';
 import type { Order, OrderStatus } from '~/lib/db/schema';
-import { orderItems, orders, productVariants, stockReservations } from '~/lib/db/schema';
+import { orderItems, orders, payments, productVariants, stockReservations } from '~/lib/db/schema';
+import type { PaymentPort } from '~/lib/ports';
 import { allowedTransitions, isStockCommitted } from './status';
 
 /**
@@ -143,6 +144,42 @@ export async function updateOrderStatus(
 
     return { ok: true, order: updated };
   });
+}
+
+/** Provider statuses whose payment link may still accept money. */
+const LIVE_INVOICE_STATUSES = new Set(['created', 'processing', 'hold']);
+
+/**
+ * The follow-up to cancelling a not-yet-paid card order: invalidate its
+ * Monobank invoice so the payment link dies with the order. Without this the
+ * link stays payable until its own validity runs out, and a customer holding
+ * it can pay a cancelled order — which lands in `confirmPayment`'s
+ * `paid_after_cancellation` alert, a refund conversation this call exists to
+ * prevent.
+ *
+ * Best-effort by design, called via `waitUntil` after the transition has
+ * already committed: a removal Monobank refuses (or a network failure) leaves
+ * only the shrinking window the invoice's own validity closes anyway, so it is
+ * logged, never surfaced to the operator as a failed cancellation.
+ */
+export async function removeCancelledOrderInvoices(
+  db: Db,
+  payment: PaymentPort,
+  orderId: string,
+): Promise<void> {
+  const rows = await db
+    .select({ invoiceId: payments.invoiceId, status: payments.status })
+    .from(payments)
+    .where(eq(payments.orderId, orderId));
+
+  for (const row of rows) {
+    if (!LIVE_INVOICE_STATUSES.has(row.status)) continue;
+    try {
+      await payment.removeInvoice(row.invoiceId);
+    } catch (err) {
+      console.error(`Failed to remove Monobank invoice ${row.invoiceId}`, err);
+    }
+  }
 }
 
 /**

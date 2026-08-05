@@ -4,12 +4,18 @@
 
 ## 📍 CURRENT STATE (overwrite this block; keep tight)
 
-- **Last done:** the catalog became editable — `/admin/products` (list + editor),
-  `/admin/categories` and image upload. The last two items of Phase 4, so **the phase is closed**.
-  Six catalog tables that had no write path outside `scripts/seed.ts` now have one; archive only,
-  never delete. `pnpm check` / `pnpm test` (209/209) / `pnpm build` clean and the whole lifecycle
-  verified over curl against the real dev Neon DB; **no browser pass**. Full account in
-  `docs/history.md`.
+- **Last done:** closed the **paid-money-on-a-cancelled-order hole** an audit found (2026-08-05,
+  second session). Three doors, one room: the TTL cron cancelled `awaiting_payment` on our clock
+  alone (a last-minute payment with a late webhook died silently), an admin cancel left the
+  Monobank link payable, and a lost webhook meant a paid order got cancelled with no trace. Now:
+  the cron **reconciles** `awaiting_payment` against `invoice/status` before touching it (also the
+  lost-webhook recovery — it sends the notifications the webhook would have), cancelling an unpaid
+  card order **removes the invoice** (`invoice/remove`, best-effort, also on `createOrder`'s
+  payment-failure path), and money landing on a cancelled order raises a ⚠️ **Telegram refund
+  alert** (`confirmPayment` → `paid_after_cancellation`, idempotent via the payment row's own
+  `success`; customer email deliberately silent). `pnpm check` / `pnpm test` (213/213) /
+  `pnpm build` / cron dry-run all clean. **Not verified against live Monobank** — `invoice/remove`
+  is from the API docs, unconfirmed by a real call, same caveat the webhook formats carried.
 - **In progress:** nothing — Phase 4 is complete and **none of it is deployed**. See «Active branch».
 - **Next step:** **commit and deploy Phase 4** — three sessions of unpushed work
   (`/admin/orders/new`, `/admin/settings`, the catalog screens, migration `0005`). Then a **browser
@@ -45,6 +51,11 @@
   - Deliberately not built and unasked-for: any customer-facing notification on an admin status
     change. Telegram and email stay wired to order creation and payment only.
 - **Blockers (waiting on me):**
+  - **`balier-cron` needs three new secrets before its next deploy** — the reconciliation sweep
+    calls Monobank and Telegram now: `wrangler secret put MONOBANK_TOKEN -c
+    workers/cron/wrangler.jsonc`, likewise `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` (same values as
+    the app Worker; secrets are per-Worker). Until set, the sweep fails closed: expired stock is
+    still freed, `awaiting_payment` orders are left untouched rather than cancelled on a guess.
   - **Email Sending DNS records are not added yet.** Sending is enabled on `mail.mlosko.dev`
     (tag `1d4ba47f…`, DKIM selector `cf-bounce`, return path `cf-bounce.mail.mlosko.dev`), but the
     six records it needs — three MX on `cf-bounce.mail`, SPF, DKIM, DMARC — must be created in the
@@ -106,3 +117,14 @@
 > Empty by design. Everything through the end of Phase 4 was moved to **`docs/history.md`** on
 > 2026-08-05, not rewritten — this file is read in full at every session start and had reached
 > 852 lines. New session entries go here; move a phase's entries across once the phase is done.
+
+**2026-08-05 (audit session).** A consultation audit of the whole money path found one real gap —
+a customer could pay an order that ends up `cancelled`, silently (cron-vs-webhook race, admin
+cancel leaving the invoice payable, lost webhook). Fixed all three: cron reconciles
+`awaiting_payment` against Monobank instead of cancelling on TTL alone (doubles as lost-webhook
+recovery), cancellation now removes the invoice (`PaymentPort.removeInvoice` → `invoice/remove`),
+and `confirmPayment` returns `paid_after_cancellation` → manager Telegram refund alert. Touched:
+`ports.ts`, `monobank/`, `notify/*`, `confirmPayment.ts`, `create.ts`, `updateStatus.ts`, the
+webhook route, `[orderNumber].astro`, `workers/cron/*`. 213/213 tests; uncommitted like the rest.
+Audit also noted (not built): `confirmPayment` doesn't compare the paid amount; pubkey fetched per
+webhook (works, diverges from OVERVIEW's KV-cache plan); checkout's 5/5min IP budget vs CGNAT.

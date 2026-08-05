@@ -118,3 +118,31 @@ describe('verifyWebhook', () => {
     await expect(payment.verifyWebhook('{}', 'not-base64-signature!!')).resolves.toBe(false);
   });
 });
+
+describe('removeInvoice', () => {
+  it('POSTs the invoice id to invoice/remove under the merchant token', async () => {
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) => new Response('{}', { status: 200 }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const payment = createMonobankPayment('test-token');
+    await payment.removeInvoice('inv-123');
+
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(String(url)).toBe('https://api.monobank.ua/api/merchant/invoice/remove');
+    expect(init?.method).toBe('POST');
+    expect((init?.headers as Record<string, string>)['X-Token']).toBe('test-token');
+    expect(JSON.parse(init?.body as string)).toEqual({ invoiceId: 'inv-123' });
+  });
+
+  it('throws on a non-2xx response — removal is best-effort and callers log it', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('already finished', { status: 400 })),
+    );
+
+    const payment = createMonobankPayment('test-token');
+    await expect(payment.removeInvoice('inv-123')).rejects.toThrow('invoice/remove failed: 400');
+  });
+});

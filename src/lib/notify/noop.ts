@@ -19,5 +19,6 @@ export function createNoopNotifier(): NotifierPort {
   return {
     async orderCreated() {},
     async orderPaid() {},
+    async paymentAfterCancellation() {},
   };
 }

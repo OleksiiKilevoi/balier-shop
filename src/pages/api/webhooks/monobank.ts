@@ -60,6 +60,16 @@ export const POST: APIRoute = async ({ request, locals }) => {
       const email = createEmailNotifier(env.EMAIL, env.ORDER_EMAIL_FROM);
       locals.cfContext.waitUntil(notifier.orderPaid({ order: result.order, items: result.items }));
       locals.cfContext.waitUntil(email.orderPaid({ order: result.order, items: result.items }));
+    } else if (result.transitioned === 'paid_after_cancellation') {
+      // The customer paid an order that was already cancelled (late webhook
+      // after the TTL sweep, or a link that outlived an admin cancel). The
+      // order stays cancelled; a person has to refund — so this goes to the
+      // manager chat and never to the customer as a confirmation.
+      console.error(`Monobank webhook: payment received for cancelled order ${result.order.orderNumber}`);
+      const notifier = createTelegramNotifier(env.TELEGRAM_BOT_TOKEN, env.TELEGRAM_CHAT_ID);
+      locals.cfContext.waitUntil(
+        notifier.paymentAfterCancellation({ order: result.order, items: result.items }),
+      );
     }
   } finally {
     locals.cfContext.waitUntil(close());

@@ -26,6 +26,17 @@ export type ConfirmPaymentResult =
    * ever returned once per order: a redelivered webhook lands on `unchanged`.
    */
   | { ok: true; transitioned: 'paid'; order: Order; items: readonly OrderItem[] }
+  /**
+   * Monobank reports `success` for an order that is already `cancelled` — the
+   * customer paid in the gap between cancellation and this call (a late
+   * webhook after the TTL sweep, or a payment link that outlived an admin
+   * cancel). The order is deliberately NOT resurrected: its stock may be sold,
+   * its cancellation may have been communicated. What must happen instead is a
+   * refund, and that takes a person — the caller alerts the manager. Returned
+   * once per order, same idempotency as `paid`: the payment row's own `success`
+   * marks the alert as already raised.
+   */
+  | { ok: true; transitioned: 'paid_after_cancellation'; order: Order; items: readonly OrderItem[] }
   | { ok: true; transitioned: 'cancelled' | 'unchanged' }
   | { ok: false; reason: 'invoice_not_found' };
 
@@ -44,6 +55,21 @@ export async function confirmPayment(
 
     const order = payment.order;
     if (TERMINAL_STATUSES.has(order.status)) {
+      // Money on a cancelled order is the one terminal case that must not pass
+      // silently. Recording `success` on the payment row does double duty: the
+      // admin order page shows Monobank's side of the disagreement, and a
+      // redelivered webhook sees it already recorded and stays quiet.
+      if (order.status === 'cancelled' && statusResult.status === 'success') {
+        if (payment.status === 'success') return { ok: true, transitioned: 'unchanged' };
+
+        await tx
+          .update(payments)
+          .set({ status: 'success', amount: statusResult.amount, lastPayload: rawPayload, updatedAt: sql`now()` })
+          .where(eq(payments.id, payment.id));
+
+        return { ok: true, transitioned: 'paid_after_cancellation', order, items: order.items };
+      }
+
       return { ok: true, transitioned: 'unchanged' };
     }
 

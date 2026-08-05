@@ -1,8 +1,12 @@
-import { and, inArray, lt, sql } from 'drizzle-orm';
+import { and, eq, inArray, lt, sql } from 'drizzle-orm';
 import { createDb, createTxDb } from '~/lib/db';
-import { orders, stockReservations } from '~/lib/db/schema';
+import { orders, payments, stockReservations } from '~/lib/db/schema';
+import { createMonobankPayment } from '~/lib/monobank';
+import { createEmailNotifier } from '~/lib/notify/email';
+import { createTelegramNotifier } from '~/lib/notify/telegram';
 import { createNovaPoshtaClient } from '~/lib/novaposhta/client';
 import { syncNovaPoshtaReferenceData } from '~/lib/novaposhta/sync';
+import { confirmPayment } from '~/lib/orders/confirmPayment';
 
 /**
  * Scheduled jobs run in their own Worker rather than in the Astro Worker.
@@ -41,6 +45,24 @@ export default {
  * delivery never leaves a reservation lying around — `createOrder` resolves
  * it immediately — so this only ever finds card orders that stalled at
  * `pending`/`awaiting_payment`.
+ *
+ * Two steps, deliberately unequal in caution:
+ *
+ * 1. **Expired reservations are deleted and `pending` orders cancelled
+ *    outright.** `pending` means the invoice was never recorded (`createOrder`
+ *    moves to `awaiting_payment` in the same transaction that records it), so
+ *    there is nothing to ask Monobank about.
+ * 2. **`awaiting_payment` orders are never cancelled on our clock alone.**
+ *    The customer may have paid in the invoice's final minute with the
+ *    webhook still in flight — or the webhook may simply have been lost. So
+ *    every `awaiting_payment` order whose reservation is gone is *reconciled*:
+ *    ask Monobank for the invoice's live status and let `confirmPayment`
+ *    apply it — `paid` (with the notifications the webhook would have sent),
+ *    cancelled on a definitive failure, or left alone until the invoice
+ *    itself expires. This doubles as the recovery path for lost webhooks.
+ *
+ * The freed stock can be resold before a late payment lands; `confirmPayment`
+ * accepts that (money beats inventory) and the oversell is handled by hand.
  */
 async function releaseExpiredReservations(env: Env): Promise<void> {
   const { db, close } = createTxDb(env.DATABASE_URL);
@@ -58,12 +80,79 @@ async function releaseExpiredReservations(env: Env): Promise<void> {
       await tx
         .update(orders)
         .set({ status: 'cancelled', cancelledAt: sql`now()`, updatedAt: sql`now()` })
-        .where(
-          and(inArray(orders.id, orderIds), inArray(orders.status, ['pending', 'awaiting_payment'])),
-        );
+        .where(and(inArray(orders.id, orderIds), eq(orders.status, 'pending')));
     });
+
+    await reconcileAwaitingPayment(env, db);
   } finally {
     await close();
+  }
+}
+
+/**
+ * Step 2 above. Picks up every `awaiting_payment` order with no live
+ * reservation — this sweep's expiries and any stragglers a previous sweep left
+ * `unchanged` (invoice still `processing`, or Monobank unreachable) — so an
+ * order can never get stuck between sweeps. Network calls happen between
+ * transactions, never inside one; `confirmPayment` is idempotent, so a webhook
+ * racing this loop is harmless whichever lands first.
+ */
+async function reconcileAwaitingPayment(
+  env: Env,
+  db: ReturnType<typeof createTxDb>['db'],
+): Promise<void> {
+  const stale = await db
+    .select({ orderNumber: orders.orderNumber, invoiceId: payments.invoiceId })
+    .from(orders)
+    .innerJoin(payments, eq(payments.orderId, orders.id))
+    .where(
+      and(
+        eq(orders.status, 'awaiting_payment'),
+        sql`not exists (
+          select 1 from ${stockReservations}
+          where ${stockReservations.orderId} = ${orders.id}
+            and ${stockReservations.expiresAt} > now()
+        )`,
+      ),
+    );
+
+  if (stale.length === 0) return;
+
+  const payment = createMonobankPayment(env.MONOBANK_TOKEN);
+  const notifier = createTelegramNotifier(env.TELEGRAM_BOT_TOKEN, env.TELEGRAM_CHAT_ID);
+  const email = createEmailNotifier(env.EMAIL, env.ORDER_EMAIL_FROM);
+
+  for (const row of stale) {
+    try {
+      const status = await payment.getInvoiceStatus(row.invoiceId);
+      const result = await confirmPayment(db, row.invoiceId, status, {
+        reconciledBy: 'cron',
+        status: status.status,
+      });
+      if (!result.ok) continue;
+
+      if (result.transitioned === 'paid') {
+        // The webhook never landed — this sweep is standing in for it, so it
+        // also owes the notifications the webhook would have sent.
+        console.warn(`Reconciliation: order ${row.orderNumber} paid, webhook never arrived`);
+        await notifier.orderPaid({ order: result.order, items: result.items });
+        await email.orderPaid({ order: result.order, items: result.items });
+      } else if (result.transitioned === 'cancelled') {
+        console.log(`Reconciliation: order ${row.orderNumber} cancelled (${status.status})`);
+      } else if (result.transitioned === 'paid_after_cancellation') {
+        // The order was cancelled between our select and this call (a racing
+        // webhook or operator) and the money landed anyway — same alert the
+        // webhook route raises: a person has to refund.
+        console.error(`Reconciliation: payment received for cancelled order ${row.orderNumber}`);
+        await notifier.paymentAfterCancellation({ order: result.order, items: result.items });
+      }
+      // 'unchanged' (created/processing/hold): the invoice is still live —
+      // the next sweep will find the order again, still reservation-less.
+    } catch (err) {
+      // One unreachable invoice must not stall the rest of the sweep; the
+      // order stays `awaiting_payment` and the next sweep retries it.
+      console.error(`Reconciliation failed for invoice ${row.invoiceId}`, err);
+    }
   }
 }
 

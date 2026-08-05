@@ -9,13 +9,26 @@
   },
   "triggers": {
     "crons": [
-      // Release stock reserved by orders that were never paid.
+      // Release stock reserved by orders that were never paid, and reconcile
+      // `awaiting_payment` orders against Monobank before cancelling them.
       "*/15 * * * *",
       // Refresh the Nova Poshta settlement/warehouse cache.
       "0 4 * * *"
     ]
+  },
+  // Same binding and address as the app Worker (`../../wrangler.jsonc`): the
+  // reconciliation sweep sends the order-paid email the lost webhook would
+  // have sent. Fails closed until the Email Sending DNS records exist, exactly
+  // like the app's sends.
+  "send_email": [{ "name": "EMAIL" }],
+  "vars": {
+    "ORDER_EMAIL_FROM": "noreply@mail.mlosko.dev"
   }
-  // Needs its own DATABASE_URL secret:
+  // Secrets this Worker needs (its own copies — secrets are per-Worker):
   //   wrangler secret put DATABASE_URL -c workers/cron/wrangler.jsonc
-  // and NOVAPOSHTA_API_KEY for the sync job.
+  // likewise NOVAPOSHTA_API_KEY (the sync job) and, for the reservation-sweep
+  // reconciliation (added 2026-08-05): MONOBANK_TOKEN, TELEGRAM_BOT_TOKEN,
+  // TELEGRAM_CHAT_ID. Without MONOBANK_TOKEN every status check throws and the
+  // sweep leaves `awaiting_payment` orders untouched — fail closed, an order
+  // is never cancelled on a guess.
 }

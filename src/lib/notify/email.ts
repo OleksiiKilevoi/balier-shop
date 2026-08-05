@@ -102,5 +102,9 @@ export function createEmailNotifier(email: SendEmail, fromAddress: string): Noti
     orderCreated: (notification) =>
       notification.order.paymentMethod === 'cod' ? send(notification) : Promise.resolve(),
     orderPaid: (notification) => send(notification),
+    // Deliberate no-op: the customer must not get an order *confirmation* for a
+    // cancelled order. The manager's Telegram alert carries this case, and the
+    // refund conversation happens by phone — the number every order has.
+    paymentAfterCancellation: () => Promise.resolve(),
   };
 }

@@ -46,6 +46,13 @@ export interface PaymentPort {
   getInvoiceStatus(invoiceId: string): Promise<{ status: InvoiceStatus; amount: Kopiykas }>;
   /** Verifies the raw request body against the provider signature header. */
   verifyWebhook(rawBody: string, signature: string | null): Promise<boolean>;
+  /**
+   * Invalidates a not-yet-paid invoice so its payment link stops working.
+   * Called when the order behind an invoice is cancelled — without it the link
+   * outlives the order and a customer holding it can still pay. May throw
+   * (e.g. the invoice already finished); callers treat removal as best-effort.
+   */
+  removeInvoice(invoiceId: string): Promise<void>;
 }
 
 /* ----------------------------------------------------------------- shipping */
@@ -91,6 +98,14 @@ export interface OrderNotification {
 export interface NotifierPort {
   orderCreated(notification: OrderNotification): Promise<void>;
   orderPaid(notification: OrderNotification): Promise<void>;
+  /**
+   * Money arrived for an order that is already `cancelled` — the one webhook
+   * outcome that must never pass silently, because nothing downstream will
+   * ever look at the order again. Manager-facing only: the customer must not
+   * receive an order *confirmation* for a cancelled order, so the email
+   * adapter implements this as a no-op and Telegram carries the alert.
+   */
+  paymentAfterCancellation(notification: OrderNotification): Promise<void>;
 }
 
 /* ------------------------------------------------------------ bot protection */
