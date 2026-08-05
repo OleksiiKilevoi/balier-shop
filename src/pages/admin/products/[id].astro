@@ -1409,6 +1409,17 @@ const variantLabel = (variant: (typeof variants)[number]) =>
 
         editor.innerHTML = next.innerHTML;
 
+        /*
+         * The banner leaves the flow before anything below forces a layout.
+         * `focus()` flushes one, and with the banner still a block above the
+         * viewport at that moment, the browser picks its scroll anchor against
+         * a page one banner taller than the one finally painted — then
+         * "corrects" the scroll by that height, a small upward jump on every
+         * save. Moved out first, no intermediate layout differs from the
+         * painted one and there is nothing to correct.
+         */
+        showAnswer();
+
         for (const id of opened) {
           const node = document.getElementById(id);
           if (node instanceof HTMLDetailsElement) node.open = true;
@@ -1437,8 +1448,6 @@ const variantLabel = (variant: (typeof variants)[number]) =>
           );
           if (button instanceof HTMLElement) button.focus({ preventScroll: true });
         }
-
-        showAnswer();
 
         /* A refusal marks the field it is about, and «Зберегти» can be a screen
            below it. `nearest` means an already-visible field is not scrolled. */
