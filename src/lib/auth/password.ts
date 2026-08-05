@@ -11,7 +11,7 @@
  *
  * The stored string is self-describing:
  *
- *   pbkdf2-sha256$210000$<salt base64>$<derived key base64>
+ *   pbkdf2-sha256$100000$<salt base64>$<derived key base64>
  *
  * so the cost can be raised later without invalidating a single existing hash —
  * `verifyPassword` reads the iterations out of the row it is checking, and
@@ -22,20 +22,59 @@
 const SCHEME = 'pbkdf2-sha256';
 
 /**
- * OWASP's floor for PBKDF2-HMAC-SHA-256. Costs a few hundred milliseconds of
- * Worker CPU per login, which is invisible on a form submit and expensive
- * enough to make offline guessing against a leaked row unattractive.
+ * **The runtime's ceiling, not ours.** The deployed Workers runtime refuses
+ * PBKDF2 above one hundred thousand iterations outright —
+ *
+ *   NotSupportedError: Pbkdf2 failed: iteration counts above 100000 are not
+ *   supported (requested 210000).
+ *
+ * — a deliberate DoS guard in workerd, and there is no flag that lifts it.
+ *
+ * This shipped broken because **nothing local enforces it**: Node (so `pnpm
+ * test` and `scripts/admin-user.ts`), Vite's dev server (so `pnpm dev`) and
+ * even `wrangler dev`'s own workerd all derive at 210 000 without complaint —
+ * checked, not assumed. Only the deployed Worker throws. So a count above this
+ * is refused *here*, in code that runs everywhere, rather than left to a
+ * runtime that only objects in the one place we cannot iterate quickly.
+ *
+ * The cost of the cap is real and worth stating plainly: 100 000 is under
+ * OWASP's 600 000 for PBKDF2-HMAC-SHA-256, so the compensation this module's
+ * header claims for choosing PBKDF2 is weaker than it reads. What buys it back
+ * is chaining several capped derivations into one hash — deliberately not done
+ * here, because it multiplies the CPU every login spends and this fix's job was
+ * to make the panel openable again.
  */
-export const DEFAULT_ITERATIONS = 210_000;
+export const MAX_ITERATIONS = 100_000;
+
+/**
+ * As expensive as the runtime permits (see `MAX_ITERATIONS`). Costs on the
+ * order of a hundred milliseconds of Worker CPU per login, which is invisible
+ * on a form submit and enough to make offline guessing against a leaked row
+ * unattractive rather than trivial.
+ */
+export const DEFAULT_ITERATIONS = MAX_ITERATIONS;
 
 const SALT_BYTES = 16;
 const KEY_BITS = 256;
 
-/** Hash a password for storage. A fresh random salt every time, by design. */
+/**
+ * Hash a password for storage. A fresh random salt every time, by design.
+ *
+ * Throws above `MAX_ITERATIONS` rather than clamping: a hash written at a cost
+ * the deployed runtime cannot re-derive is one nobody can ever log in with, and
+ * the caller (`scripts/admin-user.ts`, run on Node, where the ceiling does not
+ * exist) is exactly the place that would never find out.
+ */
 export async function hashPassword(
   password: string,
   iterations: number = DEFAULT_ITERATIONS,
 ): Promise<string> {
+  if (!Number.isInteger(iterations) || iterations < 1 || iterations > MAX_ITERATIONS) {
+    throw new RangeError(
+      `PBKDF2 iterations must be between 1 and ${MAX_ITERATIONS} (got ${iterations}).`,
+    );
+  }
+
   const salt = crypto.getRandomValues(new Uint8Array(SALT_BYTES));
   const derived = await deriveKey(password, salt, iterations);
 
@@ -64,6 +103,10 @@ export async function verifyPassword(password: string, stored: string): Promise<
  * signal to re-hash on the next successful login, which is the only moment the
  * plaintext exists to do it with. Also true for anything unparseable, so a row
  * written by some future scheme is replaced rather than left behind.
+ *
+ * A row above `MAX_ITERATIONS` counts as unparseable, and re-hashing will never
+ * reach it: the login that would trigger it cannot succeed in the first place.
+ * Those rows are reset with `pnpm admin:user password`, not repaired here.
  */
 export function needsRehash(stored: string, iterations: number = DEFAULT_ITERATIONS): boolean {
   const parsed = parse(stored);
@@ -75,10 +118,21 @@ export function needsRehash(stored: string, iterations: number = DEFAULT_ITERATI
  * no row: without it the "no such user" answer comes back in a millisecond
  * while a real address takes the full derivation, and that difference alone
  * tells an attacker which addresses are admins.
+ *
+ * Swallows its own failures, and that is the point rather than laziness: this
+ * is the module's only call site with no result to report, so an exception here
+ * escapes into the login page and becomes a 500 in front of a person who simply
+ * mistyped their address. It did — the iteration ceiling threw here while
+ * `verifyPassword`'s catch quietly absorbed the identical throw next door, so a
+ * wrong address 500'd and a right password came back «wrong password».
  */
 export async function equalizeVerifyTiming(password: string): Promise<void> {
-  const salt = crypto.getRandomValues(new Uint8Array(SALT_BYTES));
-  await deriveKey(password, salt, DEFAULT_ITERATIONS);
+  try {
+    const salt = crypto.getRandomValues(new Uint8Array(SALT_BYTES));
+    await deriveKey(password, salt, DEFAULT_ITERATIONS);
+  } catch {
+    /* Nothing to report: the work was the whole product. */
+  }
 }
 
 /**
@@ -107,6 +161,12 @@ function parse(stored: string): ParsedHash | null {
 
   const iterations = Number(iterationsPart);
   if (!Number.isInteger(iterations) || iterations < 1) return null;
+  // Above the runtime's ceiling the derivation would throw rather than return a
+  // wrong answer, and `verifyPassword`'s catch would turn that into a silent
+  // «wrong password» for a password that is right. Rows written before the cap
+  // was known are unusable, so say so here — one branch, and `needsRehash`
+  // reports them as needing replacement for free.
+  if (iterations > MAX_ITERATIONS) return null;
 
   const salt = fromBase64(saltPart);
   const hash = fromBase64(hashPart);

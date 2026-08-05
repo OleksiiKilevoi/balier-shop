@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_ITERATIONS,
+  MAX_ITERATIONS,
+  equalizeVerifyTiming,
   hashPassword,
   needsRehash,
   normalizeEmail,
@@ -13,6 +15,40 @@ import {
  * suite fast; the two cases that care about the real number say so explicitly.
  */
 const FAST = 1_000;
+
+/**
+ * A stored hash from before the runtime's iteration ceiling was known. Built by
+ * hand rather than by `hashPassword`, which now refuses to produce one — and
+ * deriving it for real is exactly what the deployed Worker cannot do.
+ */
+const ABOVE_CEILING = `pbkdf2-sha256$${MAX_ITERATIONS + 1}$c2FsdHNhbHRzYWx0c2FsdA$aGFzaGhhc2hoYXNoaGFzaA`;
+
+/**
+ * The ceiling is the deployed runtime's, and **nothing in this suite enforces
+ * it** — vitest runs on Node, where 210 000 iterations derive happily. That gap
+ * is the whole reason the panel shipped unopenable, so these tests assert the
+ * boundary as a number rather than by observing a throw that never comes here.
+ */
+describe('the runtime iteration ceiling', () => {
+  it('is what the shipped cost is set to, never more', () => {
+    expect(MAX_ITERATIONS).toBe(100_000);
+    expect(DEFAULT_ITERATIONS).toBeLessThanOrEqual(MAX_ITERATIONS);
+  });
+
+  it('refuses to write a hash the deployed runtime could never re-derive', async () => {
+    await expect(hashPassword('x', MAX_ITERATIONS + 1)).rejects.toThrow(RangeError);
+    await expect(hashPassword('x', 210_000)).rejects.toThrow(/100000/);
+    // The boundary itself is allowed — it is the shipped cost.
+    await expect(hashPassword('x', MAX_ITERATIONS)).resolves.toBeTruthy();
+  });
+
+  it('treats a hash written above it as a failed login, not as a wrong password', async () => {
+    // The distinction that matters: `false` here means the operator is told to
+    // reset the password, not left retyping one that is already correct.
+    expect(await verifyPassword('anything', ABOVE_CEILING)).toBe(false);
+    expect(needsRehash(ABOVE_CEILING)).toBe(true);
+  });
+});
 
 describe('hashPassword', () => {
   it('produces a self-describing string carrying its own cost', async () => {
@@ -95,13 +131,23 @@ describe('needsRehash', () => {
   it('flags a hash cheaper than the current cost, and only that', async () => {
     expect(needsRehash(await hashPassword('x', FAST))).toBe(true);
     expect(needsRehash(await hashPassword('x'), DEFAULT_ITERATIONS)).toBe(false);
-    // Someone raised the cost on a machine ahead of ours; leave it alone.
-    expect(needsRehash(await hashPassword('x', DEFAULT_ITERATIONS * 2))).toBe(false);
+    // Someone raised the cost on a machine ahead of ours; leave it alone. Only
+    // as far as the ceiling, though — past it the row is unusable, not ahead.
+    expect(needsRehash(await hashPassword('x', FAST * 2), FAST)).toBe(false);
   });
 
   it('flags anything it cannot parse, so an alien row is replaced', () => {
     expect(needsRehash('not-a-hash')).toBe(true);
     expect(needsRehash('')).toBe(true);
+  });
+});
+
+describe('equalizeVerifyTiming', () => {
+  it('resolves rather than throwing, whatever the derivation does', async () => {
+    // It has no result to report, so anything it threw would escape into the
+    // login page as a 500 — which is precisely how the ceiling surfaced.
+    await expect(equalizeVerifyTiming('anything at all')).resolves.toBeUndefined();
+    await expect(equalizeVerifyTiming('')).resolves.toBeUndefined();
   });
 });
 

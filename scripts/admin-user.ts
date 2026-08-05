@@ -46,7 +46,12 @@ const db = drizzle(neon(databaseUrl), { schema });
 
 const [command, emailArg, ...rest] = process.argv.slice(2);
 
-/** Long enough that 210 000 PBKDF2 iterations are the attacker's cheapest path. */
+/**
+ * Long enough that the PBKDF2 work is the attacker's cheapest path. It carries
+ * more weight than it used to: the Workers runtime caps the iteration count at
+ * 100 000 (`src/lib/auth/password.ts`), so length is the half of the trade that
+ * is still ours to set.
+ */
 const MIN_PASSWORD_LENGTH = 12;
 
 async function readPassword(): Promise<string> {
