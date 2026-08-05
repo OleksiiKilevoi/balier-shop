@@ -53,7 +53,7 @@
 
   --admin-canvas: light-dark(#f7f7f8, #09090b);
   --admin-surface: light-dark(#ffffff, #131316);
-  --admin-surface-hover: light-dark(#fafafa, #1a1a1f);
+  --admin-surface-hover: light-dark(#eeeef1, #1a1a1f);
 
   --admin-fg: light-dark(#111113, #f4f4f6);
   --admin-fg-muted: light-dark(#57575f, #a1a1aa);
