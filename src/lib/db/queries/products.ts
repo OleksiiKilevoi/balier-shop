@@ -280,6 +280,78 @@ export async function searchProducts(db: Db, tokens: string[]): Promise<ProductC
   return hydrateProductCards(db, rows);
 }
 
+/** One buyable line in the admin panel's product picker. */
+export interface AdminVariantResult {
+  variantId: string;
+  sku: string;
+  productTitle: string;
+  /** NULL when the product has no colour choice. */
+  colorName: string | null;
+  price: Kopiykas;
+  available: number;
+}
+
+/**
+ * The product picker on `/admin/orders/new` — the same substring matching
+ * `searchProducts` uses (see its comment for why not full-text), but resolved
+ * to **variants** rather than products, because a variant is what an order line
+ * references and what has a price and a stock figure of its own.
+ *
+ * Filtered exactly like `lockCheckoutVariants`: active variants of active
+ * products, and nothing else. A looser filter here would let a manager add a
+ * draft product to a basket and then be refused at the last step with
+ * `cart_changed`, which reads as a bug rather than as a rule.
+ *
+ * Out-of-stock variants *are* returned — the count is shown next to each row,
+ * and hiding them would leave a manager searching for something they can see in
+ * the catalog with no explanation. Adding one is refused when the order is
+ * created, by the same repricing every checkout goes through.
+ */
+export async function searchAdminVariants(
+  db: Db,
+  tokens: string[],
+  limit = 20,
+): Promise<AdminVariantResult[]> {
+  if (tokens.length === 0) return [];
+
+  const patterns = sql`array[${sql.join(
+    tokens.map((token) => sql`${likeContains(token)}`),
+    sql`, `,
+  )}]`;
+
+  // Title, colour and SKU: the three things a manager reads off a chat message.
+  const haystack = sql`concat_ws(' ',
+    ${productTranslations.title},
+    ${productVariants.colorName},
+    ${productVariants.sku}
+  )`;
+
+  return db
+    .select({
+      variantId: productVariants.id,
+      sku: productVariants.sku,
+      productTitle: productTranslations.title,
+      colorName: productVariants.colorName,
+      price: sql<number>`coalesce(${productVariants.priceOverride}, ${products.basePrice})`,
+      available: availableStock(),
+    })
+    .from(productVariants)
+    .innerJoin(products, eq(products.id, productVariants.productId))
+    .innerJoin(
+      productTranslations,
+      and(eq(productTranslations.productId, products.id), eq(productTranslations.locale, LOCALE)),
+    )
+    .where(
+      and(
+        eq(productVariants.isActive, true),
+        eq(products.status, 'active'),
+        sql`${haystack} ilike all (${patterns})`,
+      ),
+    )
+    .orderBy(asc(productTranslations.title), asc(productVariants.position), asc(productVariants.sku))
+    .limit(limit);
+}
+
 /**
  * One product page. Returns null for an unknown slug and for anything not
  * `active` — a draft or archived product must 404 rather than be reachable by

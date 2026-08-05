@@ -4,7 +4,9 @@ import OrderStatusBadge from '~/components/admin/OrderStatusBadge.astro';
 import AdminLayout from '~/layouts/AdminLayout.astro';
 import { createDb, createTxDb } from '~/lib/db';
 import { findAdminOrder } from '~/lib/db/queries/orders';
+import { getReservationTtlMinutes } from '~/lib/db/queries/settings';
 import {
+  ADMIN_CARD_LINK_EXPIRED,
   ADMIN_ORDER_MESSAGES,
   ORDER_REVERT_FROM_REFUNDED_WARNING,
   ORDER_REVERT_HINTS,
@@ -13,6 +15,7 @@ import {
   ORDER_STATUS_LABELS,
   ORDER_TRANSITION_HINTS,
   ORDER_TRANSITION_LABELS,
+  cardLinkExpiryText,
   formatAdminDateTime,
 } from '~/lib/i18n/admin';
 import type { AdminOrderMessage } from '~/lib/i18n/admin';
@@ -78,9 +81,36 @@ if (Astro.request.method === 'POST') {
   }
 }
 
-const order = await findAdminOrder(createDb(env.DATABASE_URL), orderNumber);
+const db = createDb(env.DATABASE_URL);
+const order = await findAdminOrder(db, orderNumber);
 
 if (!order) Astro.response.status = 404;
+
+/**
+ * The Monobank payment link, for a card order that has not been paid yet.
+ *
+ * This exists for orders created in the panel: the customer is in a Telegram
+ * chat, not in a browser being redirected, so somebody has to send them the
+ * link — and possibly send it again. A storefront order shows it too, which is
+ * the useful side effect: a customer who closed the payment tab used to be
+ * unreachable, and now the link is simply here. `pageUrl` is NULL for anything
+ * created before the column existed, and the block hides itself.
+ */
+const unpaidCard =
+  order?.paymentMethod === 'card' &&
+  (order.status === 'pending' || order.status === 'awaiting_payment');
+const cardPayment = unpaidCard ? order.payments.find((payment) => payment.pageUrl) : undefined;
+
+/**
+ * When the invoice stops being payable. Monobank was handed the reservation TTL
+ * as the invoice's own validity, and the cron cancels the order once the
+ * reservation lapses — so this one moment is both deadlines, and it is worth
+ * showing as a clock time rather than as "30 minutes from some earlier point".
+ */
+const linkExpiresAt = cardPayment
+  ? new Date(cardPayment.createdAt.getTime() + (await getReservationTtlMinutes(db)) * 60_000)
+  : null;
+const linkExpired = linkExpiresAt !== null && linkExpiresAt.getTime() <= Date.now();
 
 const messageParam = Astro.url.searchParams.get('m');
 const message =
@@ -313,6 +343,30 @@ const leavingTerminal = order?.status === 'cancelled' || order?.status === 'refu
                 </div>
               ))}
             </dl>
+
+            {/* The link to send the customer. `select-all` for the same reason
+                the tracking number below has it: the only thing anyone does
+                with this is copy it into a chat. */}
+            {cardPayment?.pageUrl && (
+              <div class="border-border mt-4 border-t pt-4">
+                <p class="text-fg-subtle text-xs">Посилання на оплату</p>
+                <a
+                  href={cardPayment.pageUrl}
+                  rel="noreferrer"
+                  target="_blank"
+                  class="text-fg mt-1 block text-sm break-all underline underline-offset-2 select-all"
+                >
+                  {cardPayment.pageUrl}
+                </a>
+                <p
+                  class:list={['mt-2 text-xs', linkExpired ? 'text-danger' : 'text-fg-subtle']}
+                >
+                  {linkExpired
+                    ? ADMIN_CARD_LINK_EXPIRED
+                    : cardLinkExpiryText(formatAdminDateTime(linkExpiresAt!))}
+                </p>
+              </div>
+            )}
 
             {/* The tracking number is a *value* until someone asks to change it.
                 A live input alongside read-only fields reads as something that

@@ -21,7 +21,7 @@ export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
  */
 export const ORDER_TRANSITION_LABELS: Record<OrderStatus, string> = {
   ...ORDER_STATUS_LABELS,
-  packed: 'Позначити зібраним',
+  packed: 'Позначити упакованим',
   shipped: 'Позначити відправленим',
   delivered: 'Позначити доставленим',
   cancelled: 'Скасувати замовлення',
@@ -44,7 +44,7 @@ export const ORDER_TRANSITION_HINTS: Partial<Record<OrderStatus, string>> = {
  * The button that undoes a wrong click, keyed by the status it steps back to.
  * A verb of its own (`~/lib/orders/status.ts`'s `revertTarget`) rather than
  * reusing `ORDER_TRANSITION_LABELS`, since the same target status reads as
- * *progress* going forward but as *undo* going back — «Позначити зібраним»
+ * *progress* going forward but as *undo* going back — «Позначити упакованим»
  * would be a strange thing to click while looking at a `shipped` order.
  *
  * `paid` and `confirmed` appear here two ways: as the two faces of reverting
@@ -96,6 +96,7 @@ export const ORDER_REVERT_FROM_REFUNDED_WARNING =
 
 /** Result of a POST, carried back through the redirect so a refresh is harmless. */
 export const ADMIN_ORDER_MESSAGES = {
+  created: 'Замовлення створено.',
   status_updated: 'Статус замовлення оновлено.',
   ttn_updated: 'Номер накладної збережено.',
   ttn_cleared: 'Номер накладної видалено.',
@@ -107,6 +108,57 @@ export const ADMIN_ORDER_MESSAGES = {
 } as const;
 
 export type AdminOrderMessage = keyof typeof ADMIN_ORDER_MESSAGES;
+
+/**
+ * The order a manager types in themselves — `/admin/orders/new`.
+ *
+ * Messages sit next to the control that has to change, so each one names the
+ * fix rather than the rule that was broken. The phone is the one worth spelling
+ * out: it is the field most often pasted out of a chat message, and the only
+ * one with a format that silently rejects an otherwise perfectly real number.
+ */
+export const ADMIN_NEW_ORDER_ERRORS = {
+  customerName: 'Вкажіть ім’я клієнта — щонайменше два символи.',
+  customerPhone: 'Потрібен український мобільний — дев’ять цифр після +380.',
+  customerEmail: 'Схоже, у пошті помилка. Її можна лишити порожньою.',
+  settlement: 'Оберіть населений пункт.',
+  warehouse: 'Оберіть відділення або поштомат.',
+  address: 'Вкажіть адресу для кур’єра — від 5 до 200 символів.',
+  items: 'Додайте щонайменше один товар.',
+} as const;
+
+/**
+ * A refusal that belongs to the order as a whole rather than to one field.
+ *
+ * `cart_changed` is the same repricing refusal a customer gets at checkout: the
+ * order is never created from what the screen last showed, always from what the
+ * database says at that moment, so a variant that sold out while the manager
+ * was typing stops the order rather than overselling it.
+ */
+export const ADMIN_NEW_ORDER_MESSAGES = {
+  cart_changed:
+    'Наявність змінилася, поки замовлення складали. Нічого не створено — перевірте товари нижче.',
+  payment_failed:
+    'Monobank не видав рахунок, тож замовлення не створено. Спробуйте ще раз або оформіть накладений платіж.',
+} as const;
+
+/**
+ * Shown next to the «карткою» option and again above a created card order's
+ * link. Both halves matter and neither is obvious: the link stops working, and
+ * the order does not just sit there unpaid afterwards — the cron that releases
+ * expired reservations cancels it.
+ */
+export function cardLinkValidityText(minutes: number): string {
+  return `Посилання на оплату дійсне ${minutes} хв. Якщо клієнт не оплатить за цей час, замовлення скасується автоматично й товар повернеться в наявність.`;
+}
+
+/** The same deadline on the order page, where the exact moment is known. */
+export function cardLinkExpiryText(deadline: string): string {
+  return `Дійсне до ${deadline}. Після цього замовлення скасується автоматично й товар повернеться в наявність.`;
+}
+
+export const ADMIN_CARD_LINK_EXPIRED =
+  'Термін дії посилання минув. Замовлення скасується автоматично, якщо цього ще не сталося.';
 
 /**
  * Sign-in results.

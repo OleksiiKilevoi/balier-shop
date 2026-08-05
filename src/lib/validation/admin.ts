@@ -1,5 +1,14 @@
 import { z } from 'zod';
 import { orderStatus } from '~/lib/db/schema';
+import { cartItemsSchema } from './cart';
+import {
+  MAX_CUSTOMER_NAME,
+  commentSchema,
+  customerEmailSchema,
+  customerPhoneSchema,
+  deliverySchema,
+  paymentMethodSchema,
+} from './checkout';
 
 /**
  * The two things the order detail page can POST to itself. Both arrive as an
@@ -66,3 +75,77 @@ export const adminOrderActionSchema = z.discriminatedUnion('intent', [
 ]);
 
 export type AdminOrderAction = z.infer<typeof adminOrderActionSchema>;
+
+/**
+ * An order placed by a manager at `/admin/orders/new`.
+ *
+ * Every field is the storefront's own rule, imported rather than restated:
+ * the phone is normalised to `+380XXXXXXXXX` by the same transform, the
+ * delivery union is the same discriminated union, and the basket is the same
+ * `cartItemsSchema`. A manager typing an order out of a Telegram message must
+ * not be able to create one the checkout form could not — the difference
+ * between the two paths is who is holding the keyboard, not what an order is.
+ *
+ * The one addition is `.min(1)` on the items: `/api/checkout` rejects an empty
+ * cart with its own branch before validating, and here the basket is part of
+ * the same form, so it belongs in the same check.
+ */
+export const adminNewOrderSchema = z.object({
+  customerName: z.string().trim().min(2).max(MAX_CUSTOMER_NAME),
+  customerPhone: customerPhoneSchema,
+  customerEmail: customerEmailSchema,
+  delivery: deliverySchema,
+  paymentMethod: paymentMethodSchema,
+  comment: commentSchema,
+  items: cartItemsSchema.min(1),
+});
+
+export type AdminNewOrder = z.infer<typeof adminNewOrderSchema>;
+
+/** Where a rejection is shown on the form. */
+export type AdminOrderField =
+  | 'customerName'
+  | 'customerPhone'
+  | 'customerEmail'
+  | 'settlement'
+  | 'warehouse'
+  | 'address'
+  | 'items';
+
+/**
+ * Sorts Zod's issues into the fields the form actually renders.
+ *
+ * The delivery union is the awkward part: a missing settlement, a missing
+ * branch and a too-short courier address all fail as `delivery`, and each one
+ * needs its message under a different control — so the issue's *path* decides,
+ * and anything unrecognised falls back to the settlement, which is the first
+ * step of that section and the one that gates the rest.
+ */
+export function adminOrderFieldErrors(error: z.ZodError): Set<AdminOrderField> {
+  const fields = new Set<AdminOrderField>();
+
+  for (const issue of error.issues) {
+    const [head, next] = issue.path;
+
+    switch (head) {
+      case 'customerName':
+      case 'customerPhone':
+      case 'customerEmail':
+      case 'items':
+        fields.add(head);
+        break;
+      case 'delivery':
+        if (next === 'npAddress') fields.add('address');
+        else if (next === 'npWarehouseRef' || next === 'npWarehouseName') fields.add('warehouse');
+        else fields.add('settlement');
+        break;
+      default:
+        // `paymentMethod` and `comment` cannot fail from the form's own
+        // controls — a radio and a length-capped textarea — so there is nowhere
+        // to put a message and nothing a manager could do about it.
+        break;
+    }
+  }
+
+  return fields;
+}

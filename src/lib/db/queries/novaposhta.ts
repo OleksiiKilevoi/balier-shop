@@ -33,7 +33,13 @@ function likeStartsWith(token: string): string {
   return `${token.replace(/[\\%_]/g, (char) => `\\${char}`)}%`;
 }
 
-const MIN_QUERY_LENGTH = 2;
+/**
+ * Below this a settlement search returns nothing at all — 26 791 rows and two
+ * letters of input is not a result set worth rendering. Exported because the
+ * screens that draw the dropdown need to tell "keep typing" apart from "no such
+ * place".
+ */
+export const SETTLEMENT_MIN_QUERY_LENGTH = 2;
 
 export async function searchSettlements(
   db: Db,
@@ -41,7 +47,7 @@ export async function searchSettlements(
   limit = 10,
 ): Promise<SettlementResult[]> {
   const trimmed = query.trim();
-  if (trimmed.length < MIN_QUERY_LENGTH) return [];
+  if (trimmed.length < SETTLEMENT_MIN_QUERY_LENGTH) return [];
 
   /**
    * Plain alphabetical order buried "Київ" behind villages whose name also
@@ -66,6 +72,63 @@ export async function searchSettlements(
     .where(ilike(npSettlements.name, likeContains(trimmed)))
     .orderBy(desc(startsWith), desc(npSettlements.warehouseCount), asc(npSettlements.name))
     .limit(limit);
+}
+
+/**
+ * One settlement by ref.
+ *
+ * The admin panel's order form carries only the ref through its submits and
+ * resolves the name here on every render, rather than shipping the name as a
+ * second hidden field: a hidden name is a second copy of the truth that a
+ * forged body could disagree with, and `orders.np_settlement_name` is what the
+ * courier label is printed from.
+ */
+export async function findSettlement(db: Db, ref: string): Promise<SettlementResult | null> {
+  const [row] = await db
+    .select({
+      ref: npSettlements.ref,
+      name: npSettlements.name,
+      area: npSettlements.area,
+      region: npSettlements.region,
+      type: npSettlements.type,
+    })
+    .from(npSettlements)
+    .where(eq(npSettlements.ref, ref))
+    .limit(1);
+
+  return row ?? null;
+}
+
+/**
+ * One warehouse by ref, carrying the two facts needed to decide whether it is
+ * still a *valid* choice: which settlement it is in, and whether it is a
+ * postomat. Switching the delivery method from «відділення» to «поштомат»
+ * leaves the previously chosen ref pointing at the wrong kind of branch, and
+ * only the row itself can say so — the ref is an opaque GUID.
+ *
+ * `isPostomat` reads `type_ref`'s resolved Ukrainian description, the same
+ * match `listWarehouses` filters on; see its comment for why that column holds
+ * text rather than NP's type-ref GUID.
+ */
+export interface WarehouseDetail extends WarehouseResult {
+  settlementRef: string;
+  isPostomat: boolean;
+}
+
+export async function findWarehouse(db: Db, ref: string): Promise<WarehouseDetail | null> {
+  const [row] = await db
+    .select({
+      ref: npWarehouses.ref,
+      number: npWarehouses.number,
+      description: npWarehouses.description,
+      settlementRef: npWarehouses.settlementRef,
+      isPostomat: sql<boolean>`${npWarehouses.typeRef} ilike '%поштомат%'`,
+    })
+    .from(npWarehouses)
+    .where(and(eq(npWarehouses.ref, ref), eq(npWarehouses.isActive, true)))
+    .limit(1);
+
+  return row ?? null;
 }
 
 /**

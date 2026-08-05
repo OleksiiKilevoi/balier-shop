@@ -309,6 +309,17 @@
 }
 
 /*
+ * The phone input, which is preceded by a fixed `+380` the markup draws over
+ * its left end — the value itself is only the nine local digits (see
+ * `~/lib/phone.ts`), so the text has to start clear of the prefix. Defined
+ * after `admin-field` because it overrides that utility's `padding-inline`
+ * shorthand, the same arrangement `admin-select` below relies on.
+ */
+@utility admin-field-phone {
+  padding-inline-start: 4rem;
+}
+
+/*
  * A `<select>` wearing `admin-field`'s pill. `appearance: none` (inherited from
  * that utility) is what makes it match the input beside it, and it also removes
  * the native arrow — hence the padding here, and the chevron the markup draws
@@ -321,6 +332,22 @@
   /* A long status must not push the chevron off the control on a narrow
      screen. */
   text-overflow: ellipsis;
+}
+
+/*
+ * A `<textarea>` wearing `admin-field`. The pill is a shape for one line of
+ * text; on a box several lines tall it curves in far enough to clip the first
+ * and last lines, so the corner drops to the card radius. The fixed control
+ * height has to go with it — `rows` decides how tall the box starts — and the
+ * inline padding stays, so a comment box lines up with the inputs above it.
+ */
+@utility admin-textarea {
+  height: auto;
+  padding-block: 0.625rem;
+  border-radius: var(--radius-card);
+  line-height: 1.5;
+  /* Horizontal resize would break out of the grid column. */
+  resize: vertical;
 }
 
 /* Status pills, filter tabs, any small label. */

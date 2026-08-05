@@ -213,7 +213,7 @@ const phoneInputClass = inputClass.replace('px-4', 'pl-16 pr-4');
                 name="comment"
                 rows="3"
                 maxlength={MAX_COMMENT_LENGTH}
-                class={`${inputClass} h-auto py-3`}
+                class={`${inputClass} min-h-[64px] py-3`}
               ></textarea>
             </fieldset>
 
@@ -256,7 +256,7 @@ const phoneInputClass = inputClass.replace('px-4', 'pl-16 pr-4');
   import { fetchCartSummary } from '~/lib/cart/client';
   import { checkoutNoticeText, codOverLimitText, settlementLabel } from '~/lib/i18n/checkout';
   import { formatPrice } from '~/lib/money';
-  import { formatPhoneDigits, isCompletePhoneDigits, phoneDigitsFromInput } from '~/lib/phone';
+  import { applyPhoneMask, isCompletePhoneDigits, phoneDigitsFromInput } from '~/lib/phone';
   import { cartItems, clearCart } from '~/stores/cart';
 
   interface SettlementResult {
@@ -323,28 +323,7 @@ const phoneInputClass = inputClass.replace('px-4', 'pl-16 pr-4');
     const currentDeliveryMethod = () =>
       form.querySelector<HTMLInputElement>('[data-delivery-method]:checked')?.value ?? 'np_warehouse';
 
-    // Re-formats on every keystroke (so a pasted/autofilled full number gets
-    // normalised down to the 9 local digits too), preserving caret position
-    // by counting digits rather than characters — a straight
-    // `value = formatted` would otherwise always snap the caret to the end.
-    phoneInput?.addEventListener('input', () => {
-      const caretDigitsBefore = phoneInput.value
-        .slice(0, phoneInput.selectionStart ?? phoneInput.value.length)
-        .replace(/\D/g, '').length;
-
-      phoneInput.value = formatPhoneDigits(phoneDigitsFromInput(phoneInput.value));
-
-      let seenDigits = 0;
-      let caret = caretDigitsBefore === 0 ? 0 : phoneInput.value.length;
-      for (let i = 0; i < phoneInput.value.length; i++) {
-        if (/\d/.test(phoneInput.value.charAt(i))) seenDigits++;
-        if (seenDigits === caretDigitsBefore) {
-          caret = i + 1;
-          break;
-        }
-      }
-      phoneInput.setSelectionRange(caret, caret);
-    });
+    phoneInput?.addEventListener('input', () => applyPhoneMask(phoneInput));
 
     const paintSummary = (summary: CartSummary) => {
       if (!summaryLines || !totalOutput) return;

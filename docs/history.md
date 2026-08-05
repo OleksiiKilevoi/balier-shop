@@ -89,7 +89,7 @@
 
 ### 2026-08-04 — live on the deployed Worker: captcha always failing, then the webhook always 403ing
 
-- Did, on report from live testing against `balier-dev.mykhailoshulezhko.workers.dev` ("captcha
+- Did, on report from live testing against `balier.mlosko.dev` ("captcha
   keeps failing, submit stays on the page"): two independent bugs, both invisible to local testing.
   - **`captcha_failed` on every submit** — the deployed Worker had no runtime `TURNSTILE_SECRET_KEY`.
     Chased a false trail first (dashboard showed all six secrets, `wrangler secret list` showed one;
@@ -230,7 +230,7 @@
     input only holds 9 local digits and auto-formats to `50 123 45 67` on every keystroke,
     cursor-position preserved. Handles a pasted/autofilled full number in any shape (`0…`, `380…`,
     `+380 …`) by normalising down to the same 9 digits. Submit blocks with a message if incomplete.
-  - **Settlement search:** display format changed to `м. Шостка - Сумська обл.` (type abbreviation
+  - **Settlement search:** display format changed to `м. [Місто] - [Область] обл.` (type abbreviation
     + name + **oblast**; was showing the raion before). Fixed "Ки" not surfacing "Київ" — added
     `np_settlements.warehouse_count` (migration `0002`, backfilled via `pnpm np:sync`) as a
     popularity proxy, since Nova Poshta's `getSettlements` has no population field but a real city

@@ -54,9 +54,13 @@ const countLabel = `${total} ${pluralUk(total, {
 ---
 
 <AdminLayout title="Замовлення">
-  <header class="flex flex-wrap items-baseline justify-between gap-2">
-    <h1 class="text-fg text-2xl font-semibold sm:text-3xl">Замовлення</h1>
-    <p class="text-fg-muted text-sm">{countLabel}</p>
+  <header class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+    <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+      <h1 class="text-fg text-2xl font-semibold sm:text-3xl">Замовлення</h1>
+      <p class="text-fg-muted text-sm">{countLabel}</p>
+    </div>
+    {/* For an order that arrived in a chat rather than through the shop. */}
+    <a href="/admin/orders/new" class="admin-btn admin-btn-primary">Створити замовлення</a>
   </header>
 
   {/*

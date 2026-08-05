@@ -44,7 +44,7 @@ export interface CreateOrderDeps {
   email: NotifierPort;
   /**
    * Origin the customer's browser is actually on — e.g. `http://localhost:4321`
-   * or `https://balier-dev.mykhailoshulezhko.workers.dev` — used to build the
+   * or `https://balier.mlosko.dev` — used to build the
    * post-checkout redirect (`/checkout/success`). Deliberately request-derived
    * rather than a fixed site URL, so the redirect works wherever this is being
    * tested from.
@@ -261,6 +261,11 @@ export async function createOrder(
         invoiceId: invoice.invoiceId,
         status: 'created',
         amount: created!.total,
+        // Kept so the link can be shown again later. A storefront customer is
+        // redirected to it immediately and never needs it twice, but an order
+        // created in the admin panel has no browser to redirect — the manager
+        // sends this to someone on Telegram, and may need it again.
+        pageUrl: invoice.pageUrl,
       });
       return tx
         .update(orders)

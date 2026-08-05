@@ -99,7 +99,7 @@ the critical path and nothing here is under our control.
 - [x] Types and ports (`src/lib/ports.ts`): payment, shipping, notifier, captcha
 - [x] Base page layout, design tokens, self-hosted Cyrillic fonts
 - [x] Build verified (`pnpm check` + `pnpm build`), homepage renders
-- [x] Verify a real deploy — live at `balier-dev.mykhailoshulezhko.workers.dev`, deployed by
+- [x] Verify a real deploy — live at `balier.mlosko.dev`, deployed by
       Cloudflare Workers Builds from GitHub `main` (2026-08-03). Immutable asset caching, the
       self-hosted Cyrillic fonts and the mobile layout all confirmed on the deployed artifact.
 
@@ -286,8 +286,9 @@ validate a wire format** — stub the shape the real API actually returns.
 
 ## Phase 4 — Admin panel (2 days) — gate and orders done
 
-The gate is live and the orders screen is finished. What remains is the catalog side — products,
-content and image upload — plus the one-field cash-on-delivery setting.
+The gate is live and the orders screens are finished — listing, managing and now creating. What
+remains is the catalog side — products, content and image upload — plus the one-field
+cash-on-delivery setting.
 
 - [x] **The admin gate — the panel's own email/password login.** `src/lib/auth/` +
       `src/middleware.ts` gate `/admin/**` and `/api/admin/**`, fail-closed: PBKDF2 hashes in
@@ -313,6 +314,21 @@ content and image upload — plus the one-field cash-on-delivery setting.
       The panel runs with no client-side JavaScript — GET forms for the view, POST + 303 for the
       writes, a `<details>` disclosure instead of a `confirm()`. Verified live against the dev DB,
       including both restock paths and four kinds of forged POST
+- [x] **Creating an order from the panel** — `/admin/orders/new`. Added on request 2026-08-05, and
+      **not in the original phase**: the case is a customer who orders in Telegram, where nobody
+      ever opens the shop. It is a screen over the storefront's own `createOrder`, not a second
+      order path — same repricing, same `FOR UPDATE` locking, same reservation, same state machine,
+      so `paid` stays webhook-only and an oversell is refused with `cart_changed` exactly as at
+      checkout. The draft lives in the form's own fields (`src/lib/orders/draft.ts`): every button
+      is a submit, the server is a pure function of the body, and there is no draft stored anywhere
+      — which is also what keeps a customer's name and phone out of URLs and Worker logs. Only the
+      create submit redirects. Decisions taken: **both payment methods** (a card order
+      shows the Monobank link to paste into the chat, and the 30-minute reservation window was
+      accepted as-is — the link dies and the cron cancels the order), **no query-string state**,
+      **no oversell**, and **the customer email fires but the manager's Telegram message does not**
+      (`createNoopNotifier` — the manager is the notification). `payments.page_url` (migration
+      `0005`) is what makes the link survive; `lastPayload` could not hold it, since every webhook
+      overwrites that. The COD limit is enforced here too
 - [ ] Managing products and content
 - [ ] Image upload — POST the file to an admin route and call `storeImage`, the same code path
       `pnpm media:ingest` uses. Since nothing is resized server-side, the form has to state the

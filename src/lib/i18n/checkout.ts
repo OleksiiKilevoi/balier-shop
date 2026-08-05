@@ -43,7 +43,7 @@ const SETTLEMENT_TYPE_ABBREVIATIONS: Record<string, string> = {
   'селище міського типу': 'смт',
 };
 
-/** `/checkout`'s settlement picker: "м. Шостка - Сумська обл." */
+/** `/checkout`'s settlement picker */
 export function settlementLabel(settlement: {
   name: string;
   type: string | null;

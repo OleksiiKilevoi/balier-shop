@@ -273,6 +273,20 @@ export const payments = pgTable(
     status: text('status').notNull(),
     /** Kopiykas. */
     amount: integer('amount').notNull(),
+    /**
+     * The provider's hosted payment page, captured when the invoice is created.
+     *
+     * Stored rather than shown once and forgotten, because an order created in
+     * the admin panel has no browser to redirect: the manager has to *send* this
+     * link to a customer who is talking to them on Telegram, and may well need
+     * it again a minute later. NULL for anything created before this column
+     * existed, and for a provider that does not hand back a URL.
+     *
+     * Deliberately not folded into `lastPayload`, which every webhook
+     * overwrites — the link would vanish on the first `processing` callback,
+     * which is exactly while it is still needed.
+     */
+    pageUrl: text('page_url'),
     /** Last webhook/status payload, kept for support and disputes. */
     lastPayload: jsonb('last_payload'),
     createdAt,

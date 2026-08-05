@@ -1,9 +1,9 @@
 /**
- * `/checkout`'s phone field mask. The visible input only ever holds the 9
- * local digits after +380 — the country code is a fixed prefix in the UI, so
- * these functions never see or emit it, matching `customerPhoneSchema`
- * (`src/lib/validation/checkout.ts`) which is what actually needs the full
- * `+380XXXXXXXXX` form.
+ * The phone field mask, shared by `/checkout` and `/admin/orders/new`. The
+ * visible input only ever holds the 9 local digits after +380 — the country
+ * code is a fixed prefix in the UI, so these functions never see or emit it,
+ * matching `customerPhoneSchema` (`src/lib/validation/checkout.ts`) which is
+ * what actually needs the full `+380XXXXXXXXX` form.
  */
 
 const LOCAL_DIGITS = 9;
@@ -28,4 +28,32 @@ export function formatPhoneDigits(digits: string): string {
 
 export function isCompletePhoneDigits(digits: string): boolean {
   return digits.length === LOCAL_DIGITS;
+}
+
+/**
+ * Re-formats a masked field in place. Meant to run on every keystroke, so a
+ * pasted or autofilled full number gets normalised down to the 9 local digits
+ * too, and the caret is restored by counting *digits* rather than characters —
+ * a straight `value = formatted` would otherwise snap it to the end.
+ *
+ * The one DOM-touching function here; the rest are pure, and the server reads
+ * a submitted field with `phoneDigitsFromInput` alone.
+ */
+export function applyPhoneMask(input: HTMLInputElement): void {
+  const caretDigitsBefore = input.value
+    .slice(0, input.selectionStart ?? input.value.length)
+    .replace(/\D/g, '').length;
+
+  input.value = formatPhoneDigits(phoneDigitsFromInput(input.value));
+
+  let seenDigits = 0;
+  let caret = caretDigitsBefore === 0 ? 0 : input.value.length;
+  for (let i = 0; i < input.value.length; i++) {
+    if (/\d/.test(input.value.charAt(i))) seenDigits++;
+    if (seenDigits === caretDigitsBefore) {
+      caret = i + 1;
+      break;
+    }
+  }
+  input.setSelectionRange(caret, caret);
 }

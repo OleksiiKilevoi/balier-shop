@@ -226,10 +226,14 @@ still means deny.
 
 - **`admin_users`** (migration `0004`) holds email, a PBKDF2 hash, `is_active` and `last_login_at`.
   Adding, resetting and disabling admins is `pnpm admin:user` — there is no screen for it yet.
-- **Passwords are PBKDF2-HMAC-SHA-256, 210 000 iterations** (`src/lib/auth/password.ts`), because it
+- **Passwords are PBKDF2-HMAC-SHA-256, 100 000 iterations** (`src/lib/auth/password.ts`), because it
   is the only KDF the Workers runtime implements natively — bcrypt/argon2 would mean shipping
   WebAssembly. The stored string carries its own cost, so it can be raised later without
-  invalidating a row; a login re-hashes anything behind.
+  invalidating a row; a login re-hashes anything behind. **100 000 is the runtime's hard ceiling**,
+  not a choice — it is under OWASP's 600 000, and the deployed Worker throws
+  `NotSupportedError: Pbkdf2 failed` above it while Node, `pnpm dev` and `wrangler dev` all derive
+  more without complaint. This shipped as 210 000 and made the deployed panel unopenable; see
+  `docs/STATE.md`, 2026-08-05.
 - **Sessions are a signed cookie, with no server-side store** (`src/lib/auth/session.ts`):
   HMAC-SHA-256 over `{sub, email, exp}`, `__Host-admin_session`, HttpOnly/Secure/SameSite=Lax, 12
   hours. Verifying costs one HMAC and no round trip. **The price: a session cannot be revoked before

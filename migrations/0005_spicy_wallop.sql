@@ -1,0 +1,1 @@
+ALTER TABLE "payments" ADD COLUMN "page_url" text;

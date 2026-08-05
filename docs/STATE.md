@@ -4,43 +4,55 @@
 
 ## 📍 CURRENT STATE (overwrite this block; keep tight)
 
-- **Last done:** **Cloudflare Turnstile is commented out of the checkout form.** On request ("we
-  don't need it for now"). **Commented, not deleted** — `src/lib/turnstile/index.ts` and its six
-  tests are untouched, `TURNSTILE_SECRET_KEY` and `PUBLIC_TURNSTILE_SITE_KEY` stay set, and every
-  disabled block carries a `Turnstile:` marker so `grep -rn "Turnstile:" src wrangler.jsonc` finds
-  all of them at once. Four files: `src/pages/checkout.astro` (the `env` import — its only use — the
-  site key, the widget `div`, the `api.js` tag, the `window.turnstile` global, the token read and its
-  «Пройдіть перевірку безпеки» guard, `turnstileToken` in the payload, the `resetTurnstile()` call
-  and the `captcha_failed` branch), `src/lib/validation/checkout.ts` (the `turnstileToken` field),
-  `src/pages/api/checkout.ts` (the import and the verify block) and a "currently unused" note in
-  `wrangler.jsonc`.
-  - **The rate limiter is now the only bot defence on `/api/checkout`** (10/min per IP,
-    `src/middleware.ts`) — said here rather than left to be rediscovered. Zod strips unknown keys, so
-    a cached client still sending `turnstileToken` is accepted, not rejected.
-  - **This unblocks two things.** The Phase 3 leftover "a real browser pass through `/checkout`
-    (Turnstile-gated, so curl can't do it)" is no longer gated — curl can now drive the whole order
-    path. And the open blocker "the Turnstile widget's hostname allowlist may not include
-    `balier.mlosko.dev`" is **dormant**, not resolved: it comes back the moment this is uncommented.
-  - `pnpm check` (0 errors)/`pnpm test` (115/115, unchanged — the adapter's own tests still pass
-    because the module is untouched)/`pnpm build` clean, with `cf-turnstile`,
-    `challenges.cloudflare.com`, `turnstileToken` and `captcha_failed` all grepped out of `dist/`
-    rather than assumed. Live on the dev server against the real dev Neon DB: `/checkout` 200 with
-    zero Turnstile references in its HTML; a token-less POST to `/api/checkout` carrying a
-    non-existent variant came back `cart_changed` — i.e. it reached the repricing layer, which is
-    past where `captcha_failed` used to stop it, with no side effects; then a **real cash-on-delivery
-    order with no token at all succeeded**, `B260805-XVFYQ`, success page 200. **Not eyeballed in a
-    browser** — no CDP tool attached, so the form's new layout without the widget is visually
-    unverified.
-  - The dev server had to be restarted first: `astro check`/`astro build` re-optimise Vite's deps and
-    left the running one 500ing on a stale `@neondatabase_serverless` chunk. Not caused by this
-    change, but it will happen again.
-- **Before that:** the admin panel got **its own login form** — PBKDF2 + a signed session cookie in
-  `src/lib/auth/`, `admin_users` (migration `0004`), `pnpm admin:user`, and a rewritten `adminGate`;
-  Cloudflare Access and `src/lib/access/` are deleted. Full account in the session log below and in
-  `docs/OVERVIEW.md`. **The one cost worth carrying forward: a session cannot be revoked before its
-  12 hours are up** — rotating `ADMIN_SESSION_SECRET` is the only way to end all of them at once.
-- **In progress:** **Phase 4 — the admin panel.** The gate is done — now the panel's own login form
-  (see the top entry) — and orders are done. What is left of the phase: **products and content
+- **Last done:** **the two Nova Poshta fields on `/admin/orders/new` became `/checkout`'s
+  input-with-a-dropdown**, on request («make them behave similar to /checkout — an input with a ul
+  listbox, not the way it is right now»). Each of «Населений пункт» and «Відділення або поштомат» is
+  now one `type="search"` box with an absolutely-positioned `<ul role="listbox">` under it; the
+  read-only «Не обрано» line and the «Знайти» button are gone (Enter still asks for the same
+  render — that is what the form's sr-only default submit has always been for).
+  - **The box is both the query and the display of what is picked**, so the server needs a rule to
+    tell them apart: `isSearchQuery(query, pickedLabel)` in `~/lib/orders/draft.ts` — the label
+    exactly as rendered means "still picked" (an untouched field is resubmitted on every click),
+    anything else is a search, and **a search un-picks**. Typing over the city drops the branch with
+    it, exactly as `/checkout`'s `clearWarehouses()` does. `pickSettlement`/`pickWarehouse` now
+    clear their own query, which is what closes the dropdown after a pick.
+  - **The branch box is compared against the row its ref names, not the row it is still allowed to
+    name.** Switching «відділення» → «поштомат» invalidates a choice the manager never touched, and
+    reading the label left behind as a query would search the postomats for the name of a counter;
+    this way the label leaves with the branch.
+  - **Branches are listed even with the box empty** (the list is already scoped to one city, so
+    "the first few" is a useful answer), and it is the dropdown's *visibility* that waits for
+    focus — `hidden group-focus-within/wh:block`, pure CSS, so it needs no script and a keyboard tab
+    into the list keeps it open. Without that, every render after picking a city would drop an open
+    dropdown over the payment section. The settlement list has no such gate: it only exists when
+    something was typed.
+  - Click-away dismissal was added to the enhancement layer (a `pointerdown` listener that adds
+    `hidden`), matching `/checkout`. It is deliberately not state — the list is server-rendered and
+    returns with the next render.
+  - Verified: `pnpm check` (0 errors)/`pnpm test` (142/142, 5 new)/`pnpm build` clean, with
+    `.group-focus-within\/wh\:block` confirmed *after* `.hidden` in the built `AdminLayout.*.css`
+    (and more specific, so the gate actually works). Live over curl against the real dev Neon DB,
+    seven states: type → dropdown of 8 cities; pick → label in the box, ref in the hidden field,
+    dropdown gone; **an untouched resubmit keeps both picks** (the one that would break creating an
+    order if the rule were wrong); typing over the branch un-picks only the branch; typing over the
+    city un-picks both and re-disables the branch box; a create attempt with the pair picked was
+    refused for name/phone **only**, i.e. the picks reached validation intact; and the two delivery
+    switches (`np_postomat`, `np_courier`) behave. **No browser pass** — still no CDP tool attached,
+    so the dropdown has never been clicked, only rendered. **No order was created** — the create
+    path is untouched and stops before `createOrder` in the test above, so the dev DB is unchanged.
+- **Before that (three things still worth carrying, details in the session log):**
+  - **`MAX_ITERATIONS = 100_000` in `src/lib/auth/password.ts` is a hard runtime ceiling, not a
+    tuning choice** — the Workers runtime refuses PBKDF2 above it, and *only the deployed runtime
+    does*: Node, Vite's dev server and `wrangler dev`'s own workerd all derive 210 000 happily, so
+    no local gate can catch a breach of it. It is also under OWASP's 600 000, which leaves the
+    "expensive iterations justify PBKDF2" argument in that module's header weaker than it reads —
+    an open decision, deliberately not taken.
+  - **A session cannot be revoked before its 12 hours are up** — rotating `ADMIN_SESSION_SECRET` is
+    the only way to end all of them at once. The price of the stateless signed cookie.
+  - **Turnstile is commented out, not deleted** (`grep -rn "Turnstile:" src wrangler.jsonc` to
+    restore), so **the KV rate limiter is the only bot defence on `/api/checkout`** — 10/min per IP.
+- **In progress:** **Phase 4 — the admin panel.** The gate is done — the panel's own login form —
+  and orders are done: listing, managing, and now creating. What is left of the phase: **products and content
   management**, **image upload** via `storeImage`, and the **cash-on-delivery limit**
   (`settings.cod_limit` is read at checkout already; nothing writes it). All three are developed
   against `pnpm dev`, which **no longer bypasses the gate** — sign in with the account
@@ -50,42 +62,41 @@
   storefront token
   appearing under `/admin` is now a bug, not a shortcut, and `source(none)` means it would silently
   compile to nothing anyway. Colours go in as `light-dark()` pairs on a token; nothing should read
-  `prefers-color-scheme` directly, or it will ignore the theme switch. The no-script rule still
-  stands for *behaviour* — the theme switch is the one sanctioned exception, and image upload is the
-  next item likely to argue for another.
+  `prefers-color-scheme` directly, or it will ignore the theme switch. **The no-script rule is
+  dead as of 2026-08-05** - The
+  replacement is progressive enhancement, as `/admin/orders/new` now does it: the form must work
+  as a plain form, and script makes it reload-free on top. New panel screens should follow that
+  pattern, not require script. (`docs/CONVENTIONS.md` may still word the old rule — other docs
+  change only on explicit ask.)
   Deliberately *not* built with orders, and unasked-for so far: any customer-facing notification on
   an admin status change — «Відправлено» emails are not in the roadmap item, so Telegram and email
   stay wired to order creation and payment only.
-  Phase 3 is **code-complete**; what's left there is not code — a domain for Email Sending, and a
-  real browser pass through `/checkout` (**no longer Turnstile-gated**, so curl can drive it now —
-  and did, this session). Phase 2 still
+  Phase 3 is **code-complete**; what's left there is not code — the Email Sending DNS records, and a
+  real browser pass through `/checkout` (**no longer Turnstile-gated**, so curl can drive it now).
+  Phase 2 still
   carries its own leftover: the seven static pages render a heading, a lead and a
   `ContentPlaceholder`. Writing them is a Phase 5 content item, and the legal ones gate Monobank.
-- **Next step:** the rest of Phase 4 — products/content management and image upload, or the
+- **Next step:** a browser pass over `/admin/orders/new` first — it now carries a fetch-based
+  enhancement layer *and* two focus-driven dropdowns, neither of which curl can exercise, so it has
+  never once been driven the way a manager will drive it. Then the rest of Phase 4 — products/content management and image upload, or the
   cash-on-delivery limit (much the smaller of the two, and it closes a checkout setting that is
-  currently read-only). (Still open from Phase 3, unchanged: a real browser checkout pass, COD with
-  an email address, to watch the confirmation email attempt and its graceful
-  `E_SENDER_NOT_VERIFIED` failure.)
+  currently read-only). (Still open from Phase 3, unchanged: a real browser checkout pass. The
+  *confirmation email* half of that is now partly answered — an admin-created COD order with an
+  email address does reach `EMAIL.send`, confirmed in the dev log, but locally miniflare writes the
+  message to `.wrangler/tmp/email/` instead of sending it, so the real
+  `E_SENDER_NOT_VERIFIED` failure is still unobserved and still waiting on the DNS records.)
 - **Blockers (waiting on me):**
-  - **Three things the auth switch needs, all mine, none of them code — and it is now *already
-    deployed*, so these are urgent rather than pre-flight:**
-    1. **`wrangler secret put ADMIN_SESSION_SECRET --name balier-dev`** — the deployed Worker has no
-       value for it, and until it does every `/admin` request there is denied (correct failure
-       direction, but the panel is unopenable). Generate 48 random bytes; **not** the same value as
-       the local one in `.dev.vars`.
-    2. **Delete the Zero Trust application in front of `balier.mlosko.dev`.** Until it goes, both
-       gates are chained: a one-time PIN *and* a password for every login. Also
-       `wrangler secret delete CF_ACCESS_TEAM_DOMAIN` / `CF_ACCESS_AUD --name balier-dev`, which are
-       now read by nothing.
-    3. **Create the real admin account against whatever DB the deployment uses** —
-       `pnpm admin:user create <email> <name>`. Today that is the same dev Neon DB, which already has
-       `lxstspxrk@gmail.com`; **its password is a throwaway I set for testing, so reset it**
-       (`pnpm admin:user password lxstspxrk@gmail.com`).
+  - ~~**Three things the auth switch needs**~~ — **all three done 2026-08-05.**
+    `ADMIN_SESSION_SECRET` is set on `balier-dev` (confirmed in `wrangler secret list`), the Zero
+    Trust application in front of `balier.mlosko.dev` is gone (the login form answers directly, with
+    no redirect to `mlosko.cloudflareaccess.com`), and the admin account exists and signs in.
+    **One leftover, small:** `wrangler secret delete CF_ACCESS_TEAM_DOMAIN` / `CF_ACCESS_AUD` — both
+    are still set on the Worker and read by nothing.
   - Phase 0 externals unchanged: Monobank Acquiring registration, Nova Poshta business account +
     cash-on-delivery setup, Telegram manager account / bot / chat.
   - ~~**No domain on this Cloudflare account**~~ — **resolved 2026-08-04.** `mlosko.dev` was bought
     and onboarded, which cleared both halves of this blocker at once. Two things still outstanding
-    on it, both small and both Mykhailo's:
+    on it, both small and both developer's:
     - **Email Sending DNS records are not added yet.** Sending is enabled on `mail.mlosko.dev`
       (tag `1d4ba47f…`, DKIM selector `cf-bounce`, return path `cf-bounce.mail.mlosko.dev`), but
       the six records it needs — three MX on `cf-bounce.mail`, SPF, DKIM, DMARC — must be created
@@ -109,12 +120,21 @@
   The Phase 3 money path was verified live against this data — COD end to end, the strict
   `cart_changed` rejection rolling back with zero side effects, and card payment including the
   `paid` transition and webhook idempotency. Full accounts in `docs/history.md`.
-- **Active branch:** `main` (only branch; tracks `origin/main`). Local `main` and `origin/main` are
-  both at `7e6f936` — **the auth switch has been pushed, and therefore deployed.** The Turnstile
-  change above is **uncommitted** on top of that, so it is not.
+  **Three more orders from 2026-08-05, all made by the panel's own create screen:**
+  `B260805-67RJB` (COD, `confirmed`, 2 × CROSS-MINI-BLK — this is what took that variant's stock
+  from 3 to 1), `B260805-A88BY` (card, `awaiting_payment`, with a **real Monobank invoice and a live
+  payment link**; it holds a reservation and the cron will cancel it about half an hour after
+  12:15Z unless someone pays it), and `B260805-BLF43` (COD, courier to a Kyiv street address, with
+  an email address, which is the one that proves the confirmation email fires on this path).
+- **Active branch:** `main` (only branch; tracks `origin/main`). `origin/main` is at `6fd8c5f` —
+  auth switch, Turnstile and the iteration fix are pushed and therefore deployed. **The order-
+  creation screen and migration `0005` are uncommitted**, so the deployed Worker does not have them
+  yet; the migration *is* already applied to the dev Neon DB, which is the safe order (a column the
+  code does not read yet is harmless, the reverse is not).
   A push to `main` deploys (Workers Builds is connected to `mykhailoshulezhko/balier`, production
-  branch `main`, build `pnpm run build`, deploy `npx wrangler deploy`) — **do not push the auth
-  switch before the three blocker items above are done**, or the deployed panel locks itself out.
+  branch `main`, build `pnpm run build`, deploy `npx wrangler deploy`) — and it is **not instant**:
+  the iteration fix was tested against the live URL before the build finished and looked unfixed.
+  `npx wrangler deployments list` shows when the new version actually landed.
 
 ## ✅ Phase tracker (high-level; detail in docs/plans/roadmap.md)
 
@@ -128,8 +148,9 @@
       a domain for Email Sending, and a live browser pass through `/checkout`. The admin COD-limit
       UI is Phase 4's item, not this one)
 - [~] Phase 4 — Admin panel (the gate is the panel's own login form — PBKDF2 + signed session cookie,
-      fail-closed, built and verified live; it replaced Cloudflare Access. The orders screen — list,
-      detail, transitions, TTN — is done and verified live. Products and content management, image
+      fail-closed, and verified **on the deployed Worker**, not just on `pnpm dev`; it replaced
+      Cloudflare Access. Orders are done: list, detail, transitions, TTN, and **creating an order by
+      hand** for the Telegram case — all verified live. Products and content management, image
       upload and the COD limit are unstarted)
 - [ ] Phase 5 — Launch (incl. migrating off the dev Neon/Cloudflare accounts)
 - [ ] Phase 6 — Improvements
@@ -137,6 +158,134 @@
 ---
 
 ## 🗒️ SESSION LOG (newest first; 3–6 lines each)
+
+### 2026-08-05 (later still) — the delivery pickers become `/checkout`'s dropdown
+
+- Did, on request («make "Населений пункт" and "Відділення або поштомат" behave similar to
+  /checkout — i want it to be input with ul listbox, not the way it is right now»): both fields on
+  `/admin/orders/new` are now one search box with an absolutely-positioned `<ul role="listbox">`
+  under it. The «Не обрано» line and the «Знайти» buttons are gone; each result row is still a real
+  submit button carrying its ref, so the picker works with script off exactly as before.
+- **The rule that makes a single box work on a server that only sees the body:**
+  `isSearchQuery(query, pickedLabel)` — the picked label round-trips as "still picked" (every button
+  on the page resubmits the whole form), anything else is a search, and a search un-picks. Typing
+  over the city drops the branch with it, which is what `/checkout` does client-side. The branch box
+  compares against the row its ref *names*, not the row it is still *allowed* to name, so a
+  «відділення» → «поштомат» switch takes the stale label out of the box instead of turning it into a
+  query. `pickSettlement`/`pickWarehouse` clear their own query, and that is what closes the list.
+- **Branch browse is CSS, not script:** the empty box lists the first 12 branches, and the dropdown
+  is `hidden group-focus-within/wh:block` — otherwise every render after picking a city would drop
+  an open list over the payment section. Verified in the built CSS that the focus rule lands *after*
+  `.hidden` and is more specific, since the whole gate depends on that. Click-away dismissal
+  (`pointerdown` → add `hidden`) went into the enhancement layer, matching `/checkout`.
+- Verified: `pnpm check` (0 errors)/`pnpm test` (142/142, 5 new)/`pnpm build` clean. Live over curl
+  against the real dev Neon DB, seven states — search, pick, **untouched resubmit keeping both
+  picks**, typing over each box, a create attempt refused for name/phone only (so the picks survived
+  into validation), and both delivery-method switches. **No browser pass** (no CDP tool), and **no
+  order created** — nothing in the dev DB changed. The QA account was re-enabled for the curl pass
+  and disabled again.
+- Next: unchanged — the browser pass over this screen, then the rest of Phase 4.
+
+### 2026-08-05 (later) — `/admin/orders/new` UI fixes, and the end of the no-JS rule
+
+- Did, on request (three complaints: labels overflowing their capsules, the COD-limit warning
+  showing regardless of the selected payment method, and «going with no js was an awful idea for
+  the admin experience»). Capsules: `admin-badge`'s `max-width: 125px` + `nowrap` was sized for
+  status pills; overridden per call site with `w-auto max-w-none` rather than touching the shared
+  utility. COD warning (and the card-link hint, and the create button's caption — same latent bug):
+  they rendered from `draft.paymentMethod`, the state as of the last *submit*, while radios flip
+  without one; all three now render always and CSS picks from the live radio via `group` on the
+  form + `group-has-[#pm-…:checked]`.
+- **The no-JS rule is formally over for the panel.** `/admin/orders/new` gained an enhancement
+  layer: submits become `fetch`es of the byte-identical POST, the response re-renders the form in
+  place (focus, caret and keystrokes newer than the response preserved), searches fire debounced as
+  the manager types, quantity and delivery-method changes re-render themselves. The server stays a
+  pure function of the body; a fetch failure falls back to a real submit; create is flag-guarded
+  against racing/repeat and its redirect is followed as a real navigation. The pattern for future
+  screens is progressive enhancement, not script-required.
+- Named trade: with script the URL never changes, so a mid-draft refresh silently starts over
+  (the scriptless «resend?» prompt could restore the draft). In the page's header comment too.
+- Verified: `pnpm check` (0 errors)/`pnpm test` (137/137)/`pnpm build` clean; built CSS has the new
+  rules with the overrides *after* `.admin-badge` (checked, not assumed — the fix depends on
+  cascade order), and the script inlines into the server render, so production still ships no JS
+  asset. Live over curl (dev server, real dev Neon DB): search → pick → warehouse box, add-to-basket
+  with its quantity input, empty create refused with all field errors. `qa-neworder@balier.test`
+  was re-enabled for this (fresh password) and disabled again after. **No browser pass** — the
+  fetch layer is untested by an actual click; that browser pass is now first in line next session.
+- Next: browser pass over `/admin/orders/new`, then the rest of Phase 4 (products/content
+  management, image upload, the COD limit).
+
+### 2026-08-05 — the manager can create an order: `/admin/orders/new`
+
+- Did, on request ("we need an option for admin to create an order — a client contacted via telegram
+  and manager needs to create an order"). Flagged first that this is **not in the roadmap** and
+  added it to Phase 4 rather than slipping it in. It is a screen over the storefront's own
+  `createOrder`, called with exactly the input `/api/checkout` builds — so the repricing, the
+  `FOR UPDATE` lock, the reservation, the invoice and the state machine are the code already running
+  in production, and `paid` stays webhook-only by construction.
+- Four decisions asked rather than guessed: **both payment methods** (card shows the Monobank link
+  to paste into the chat, and the 30-minute reservation window was accepted as-is — the link dies
+  and the cron cancels the order, which the screen says out loud twice), **query-string draft
+  state**, **no oversell**, and **customer email but no manager Telegram message**.
+- **Then changed one of them, and said so rather than quietly shipping it:** the draft lives in the
+  form's own hidden fields, not the query string. Same shape — every button is a submit, the server
+  is a pure function of the body, nothing typed is lost to a round trip — but it keeps customer
+  names and phone numbers out of URLs, browser history and Worker logs. The cost is a «resend?»
+  prompt on a mid-draft refresh (harmless: the post re-renders the same screen) and a draft that
+  only lives in the open tab. Only the create submit redirects (303).
+- Decisions made rather than asked: **no `required` attribute anywhere and the email field is a
+  `text` input** — browser validation fires on *every* submit, so a required name would refuse to
+  let a manager search for a product before typing one; **the branch ref is re-validated against its
+  row on every render**, since switching city or «відділення»→«поштомат» leaves a ref naming a real
+  place that is no longer a legal answer; **the COD limit is enforced here too**; and
+  `payments.page_url` (migration `0005`) rather than `lastPayload`, which **every webhook
+  overwrites** — including the `processing` one that lands while the link still matters. That column
+  also fixes an older gap: a storefront customer who closed the payment tab was unreachable.
+- **Found by building, not by types: Tailwind's `peer-checked:` is a *general sibling* selector.**
+  Three radios and three labels in one flex row would light up every label after the checked one;
+  one input+label pair per wrapper scopes it. Named peers (`peer/warehouse`) would also work but
+  cannot come from a `.map()` — Tailwind only sees static class names. Confirmed by reading the
+  generated rule out of the built CSS, along with the `group-has-[#dm-courier:checked]` toggle.
+- Verified: `pnpm check` (0 errors)/`pnpm test` (137/137, 18 new)/`pnpm build` clean, storefront
+  isolation re-checked in `AdminLayout.*.css`. Live against the real dev Neon DB over curl: a COD
+  order (stock 3→1), a card order with a real invoice and its link, a courier order whose
+  confirmation email reached the `EMAIL` binding, three field refusals at once, an empty basket, an
+  oversell that created nothing (16→17 orders across both), a re-add that bumps rather than
+  duplicates, and a branch ref correctly dropped on a method switch. In a built Worker the new route
+  redirects to the login form, POST included. **No browser pass** — no CDP tool attached.
+- Note for next time: the daemonised `pnpm dev` from an earlier session was serving a **stale Vite
+  dep chunk** and 500ing on every route, including `/admin/login`. `astro dev stop` then start
+  again. This is the same hazard the 2026-08-05 Turnstile entry warns about, and it is worth
+  checking *before* concluding anything from a 500.
+- Next: unchanged — the rest of Phase 4 (products/content management, image upload, the COD limit).
+
+### 2026-08-05 — the deployed login was unopenable: PBKDF2 above the runtime's ceiling
+
+- Reported as two bugs ("correct mail & password says its incorrect", "the incorrect ones are with
+  error 500"). One cause: **the Workers runtime refuses PBKDF2 above 100 000 iterations** and
+  `DEFAULT_ITERATIONS` was 210 000. `verifyPassword` catches everything and returns `false`, so a
+  right password read as a wrong one; `equalizeVerifyTiming` — the timing equaliser for an address
+  with no row — had no catch, so the identical throw became a 500. Diagnosed from the Worker's own
+  log via `npx wrangler tail balier-dev` (positional, not `--name`), reproduced with curl.
+- **The ceiling is a production-only check**, which is exactly why every gate passed: Node, Vite's
+  dev server **and `wrangler dev`'s local workerd** all derive 210 000 happily — probed a throwaway
+  Worker at 1 000/100 000/100 001/210 000 with this project's `compatibility_date` and flags rather
+  than assuming, and all four returned OK. `pnpm preview` would not have caught this.
+- Fixed: `MAX_ITERATIONS = 100_000`, `hashPassword` **throws** above it rather than clamping (a hash
+  the runtime cannot re-derive locks the account out forever, and the caller is a Node script that
+  would never notice), `parse()` rejects an over-cap stored count so a legacy row fails cleanly
+  instead of throwing, and `equalizeVerifyTiming` swallows its own failures. **The stored 210 000
+  hash had to be reset by hand** (`pnpm admin:user password`) — rehash-on-login can never reach it,
+  because the login that would trigger it cannot succeed.
+- Named rather than quietly accepted: 100 000 is under OWASP's 600 000, so this **weakens** the
+  argument the module's header makes for choosing PBKDF2 at all. Chaining capped derivations buys it
+  back at more CPU per login; left open, because the fix's job was to make the panel openable.
+- Verified: `pnpm check` (0 errors)/`pnpm test` (119/119, 6 new)/`pnpm build` clean, guards grepped
+  out of the built chunk. Live after the 08:37Z deploy: unknown address 200 with «Невірна пошта або
+  пароль.», real sign-in works. Also confirmed `ADMIN_SESSION_SECRET` is set and the Zero Trust app
+  is gone. Learned: `wrangler tail --status error` misses this class of bug entirely — Astro catches
+  the exception and returns its own 500, so the invocation outcome is `Ok`.
+- Next: unchanged — the rest of Phase 4 (products/content management, image upload, the COD limit).
 
 ### 2026-08-05 — Turnstile commented out of the checkout form
 
@@ -188,7 +337,7 @@
   failing login, nothing in any log. The script strips it now. Also caught before shipping:
   `next=/adminevil` passed a `startsWith('/admin')` check that was meant to mean "inside the panel".
 - **Fixed on report, same session: the limiter charged every login attempt, not just failed ones.**
-  Mykhailo's first real sign-in came back «забагато спроб» — my own curl testing had drained the
+  First real sign-in came back «забагато спроб» — my own curl testing had drained the
   shared dev bucket (`cf-connecting-ip` is absent locally, so every client is `unknown`). Clearing
   the bucket was the smaller half; the design flaw was charging successes at all, which lets an
   operator lock themselves out by signing in. `checkRateLimit` is now composed from `peekRateLimit`
@@ -520,7 +669,7 @@
   living in a Cloudflare dashboard cannot be lifted into the next business with the code. Left
   unedited as the record of what was decided here, and why.
 - **`workers.dev` is now off.** Adding a `routes` entry makes wrangler disable it by default;
-  `balier-dev.mykhailoshulezhko.workers.dev` 404s. Kept that way and made explicit
+  `balier.mlosko.dev` 404s. Kept that way and made explicit
   (`"workers_dev": false`) rather than left to a default — it was a second public surface no Access
   policy could cover. **Entries in `docs/history.md` that name it as the live test URL are
   historical**; the live dev URL is `https://balier.mlosko.dev`.
