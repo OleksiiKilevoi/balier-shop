@@ -21,6 +21,8 @@ Package manager is pnpm, pinned in `packageManager`. Full command list: `docs/CO
 ## 🧭 Docs map (load only when relevant — don't auto-read these)
 
 - `docs/STATE.md` — current state + session log (updated every session)
+- `docs/history.md` — the session log for finished phases, split out of STATE.md. Never read at
+  session start; read it when you need why something already built was built that way
 - `docs/OVERVIEW.md` — what it is, stack, architecture, module map, integrations, sharp edges
 - `docs/CONVENTIONS.md` — rules to always follow (domain, design, code, safety)
 - `docs/plans/roadmap.md` — the phased build plan and the open decisions
@@ -40,4 +42,7 @@ Package manager is pnpm, pinned in `packageManager`. Full command list: `docs/CO
 
 - Update `docs/STATE.md` at the END of every session (always) or on "update docs".
 - Don't spawn new per-session .md files — append to STATE.md's session log.
+- **Keep the CURRENT STATE block to one "Last done"**, not a chain of them. It grew to 548 lines of
+  entries that were already written out in the session log below it; the log is the history, that
+  block is the handover. When a phase closes, move its log entries to `docs/history.md`.
 - Other docs change only when I explicitly ask.

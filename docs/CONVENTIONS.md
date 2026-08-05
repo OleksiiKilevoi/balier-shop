@@ -191,8 +191,11 @@ Non-negotiables, all enforced by tokens in `global.css`:
   repository, never in chat, never in the client bundle. Public keys get the `PUBLIC_` prefix.
 - A secret must be an **encrypted Secret**, never a plaintext dashboard variable — see the incident
   in `docs/OVERVIEW.md`.
-- `/admin/**` and admin APIs are behind Cloudflare Access, plus a server-side check of the Access JWT
-  header inside the app — do not rely on edge configuration alone.
+- `/admin/**` and admin APIs are gated **inside the app** (`src/middleware.ts`), by a signed session
+  cookie minted from the panel's own login form against `admin_users`. Never rely on edge
+  configuration for this: the Worker is reachable on more hostnames than any edge policy covers.
+  Unconfigured means deny. Passwords are PBKDF2 via Web Crypto (`src/lib/auth/`) — never plaintext,
+  never a home-made hash, never a Node crypto import.
 - Rate limiting on all public API routes (checkout, search, order creation).
 - Do not log PII (phone, address, full name) or tokens. Telegram order notifications carry the
   minimum data needed.

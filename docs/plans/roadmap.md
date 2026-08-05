@@ -289,12 +289,15 @@ validate a wire format** — stub the shape the real API actually returns.
 The gate is live and the orders screen is finished. What remains is the catalog side — products,
 content and image upload — plus the one-field cash-on-delivery setting.
 
-- [x] **Cloudflare Access, plus a server-side check of the Access JWT in the app itself.**
-      `src/lib/access/` + `src/middleware.ts` gate `/admin/**` and `/api/admin/**`, fail-closed;
-      Access itself sits in front of `balier.mlosko.dev` (a domain had to be bought for this — an
-      Access application needs a hostname on a zone in the account, and `*.workers.dev` cannot be
-      one). Login is **one-time PIN**, so no admin ever needs a Cloudflare account. `pnpm dev`
-      bypasses the gate, which is how the rest of the panel gets built
+- [x] **The admin gate — the panel's own email/password login.** `src/lib/auth/` +
+      `src/middleware.ts` gate `/admin/**` and `/api/admin/**`, fail-closed: PBKDF2 hashes in
+      `admin_users`, a signed session cookie, and `pnpm admin:user` to manage accounts.
+      **This replaced Cloudflare Access on 2026-08-05** (built first, and live behind one-time PIN
+      for a day). Access worked; it did not travel — the panel is meant to be lifted into the next
+      business, and a gate configured in one account's Zero Trust dashboard is not part of the code.
+      What survived the swap is the property that mattered: the check runs inside the app, so it
+      holds on every hostname the Worker answers on. There is no `pnpm dev` bypass any more — the
+      form works locally, so the path that ships is the one exercised daily
 - [x] **Managing orders** — `/admin/orders` (list: status filter, search over order number /
       customer name / phone, pagination) and `/admin/orders/[orderNumber]` (detail: line items,
       customer, delivery, the Monobank invoice row, the allowed status transitions, and the Nova

@@ -1,7 +1,7 @@
 /// <reference types="../worker-configuration.d.ts" />
 
 import type { Runtime } from '@astrojs/cloudflare';
-import type { AccessIdentity } from '~/lib/access';
+import type { AdminSession } from '~/lib/auth';
 
 declare global {
   /**
@@ -19,21 +19,21 @@ declare global {
     TELEGRAM_BOT_TOKEN: string;
     TELEGRAM_CHAT_ID: string;
     /**
-     * Cloudflare Access, for the `/admin/**` gate in `src/middleware.ts`.
-     * Neither is a credential — the gate's security is the JWT signature, not
-     * the secrecy of these — but both are account-specific and do not exist
-     * yet, so they are set per environment rather than committed to
-     * `wrangler.jsonc`. Unset means the gate denies every request.
+     * Signing key for the admin session cookie (`~/lib/auth/session.ts`).
+     * Unlike the Cloudflare Access values this replaced, it **is** a real
+     * credential: anyone holding it can mint a session for any admin. At least
+     * 32 random bytes, different per environment, and rotating it signs
+     * everyone out — which is also the only way to revoke a session early.
+     * Unset means the gate denies every request.
      */
-    CF_ACCESS_TEAM_DOMAIN: string;
-    CF_ACCESS_AUD: string;
+    ADMIN_SESSION_SECRET: string;
   }
 
   /** `Astro.locals.cfContext.waitUntil(...)` — see `docs/OVERVIEW.md`. */
   namespace App {
     interface Locals extends Runtime {
       /** Set by the admin gate for `/admin/**` and `/api/admin/**` only. */
-      admin?: AccessIdentity;
+      admin?: AdminSession;
     }
   }
 }

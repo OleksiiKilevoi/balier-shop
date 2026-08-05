@@ -13,10 +13,12 @@ is worse than asking.
 
 Phase 1 (foundation), the Phase 2 storefront and Phase 3 (cart, checkout, both payment methods, the
 Monobank webhook, notifications, rate limiting) are built. Phase 4, the admin panel, has its auth
-gate and nothing else yet: `/admin` exists as a placeholder behind Cloudflare Access.
+gate and the orders screen; products, content and image upload are unstarted.
 
 The dev deployment lives at **`https://balier.mlosko.dev`**. The `workers.dev` URL is switched off —
-it was a second public surface no Access policy could cover.
+it was a second public surface, and while the gate was Cloudflare Access no policy could cover it.
+The gate is now inside the app and covers every hostname, but the URL stays off: one public surface
+is easier to reason about than two.
 
 ## Stack
 
@@ -32,7 +34,7 @@ it was a second public surface no Access policy could cover.
 | Payments | Monobank Acquiring |
 | Shipping | Nova Poshta API |
 | Bot protection | Cloudflare Turnstile |
-| Admin access | Cloudflare Access |
+| Admin access | Own login form — PBKDF2 + signed session cookie (`src/lib/auth/`) |
 | Notifications | Telegram Bot API + email |
 
 ## Architecture
@@ -51,7 +53,7 @@ src/
     products/index.astro, [slug].astro
     cart.astro, checkout.astro
     checkout/success.astro, failure.astro
-    admin/**              # behind Cloudflare Access
+    admin/**              # behind the session gate in src/middleware.ts
     api/**                # API routes (export const prerender = false)
   layouts/
   components/             # .astro, reusable, no business logic
@@ -129,10 +131,12 @@ What exists in the repository today, as distinct from the target shape above.
 | `src/pages/checkout.astro` + `checkout/{success,failure}.astro` | The order form and its two outcomes |
 | `src/pages/api/checkout.ts`, `api/checkout/*` | Order creation; the COD limit and the two Nova Poshta lookups |
 | `src/pages/api/webhooks/monobank.ts` | The only place an order becomes `paid` |
-| `src/pages/admin/index.astro` | Placeholder panel home — behind Access, shows the signed-in identity |
+| `src/pages/admin/index.astro` | Panel home — section cards, shows the signed-in address |
+| `src/pages/admin/login.astro`, `logout.ts` | The login form and sign-out; the only ungated `/admin` routes |
 | `src/layouts/AdminLayout.astro` | Admin shell; deliberately not `BaseLayout` (no storefront chrome) |
-| `src/middleware.ts` | Two gates in sequence: the `/admin/**` Access check, then per-IP rate limiting |
-| `src/lib/access/index.ts` | Access JWT verification — the app-side half of the admin gate (+ tests) |
+| `src/middleware.ts` | Two gates in sequence: the `/admin/**` session check, then per-IP rate limiting |
+| `src/lib/auth/` | Password hashing and the signed session cookie (+ tests) |
+| `scripts/admin-user.ts` | `pnpm admin:user` — create, reset, disable an admin |
 | `src/lib/orders/` | Order creation, the state machine, stock reservations |
 | `src/lib/monobank/index.ts` | `PaymentPort` — invoices, status, ECDSA webhook verification (+ tests) |
 | `src/lib/novaposhta/` | `ShippingPort` client + the reference-data sync the cron runs |
@@ -208,23 +212,40 @@ What exists in the repository today, as distinct from the target shape above.
   needs it yet.
 - The Neon project, the Cloudflare account **and the `mlosko.dev` domain** are the developer's own,
   for development only. The store ships on the client's accounts, stood up again during Phase 5.
-  `mlosko.dev` was bought because both Cloudflare Access and Email Sending need a *zone on the
-  account* and `*.workers.dev` cannot be one; `balier.ua` replaces it at launch.
+  `mlosko.dev` was bought because both Cloudflare Access (since retired — see the gate below) and
+  Email Sending need a *zone on the account* and `*.workers.dev` cannot be one; `balier.ua` replaces
+  it at launch.
 
-### Cloudflare Access — the admin gate
+### The admin gate — the panel's own login form
 
-- Zero Trust team `mlosko`; one self-hosted application over four destinations on
-  `balier.mlosko.dev`: `admin`, `admin/*`, `api/admin`, `api/admin/*`.
-- **Login is one-time PIN**, not a Cloudflare account: the admin types an email, receives a 6-digit
-  code, and is in. Adding an admin is adding an address to the Allow policy. This is why the app
-  does not hand-roll email/password auth — it would buy nothing and cost password hashing, sessions
-  and reset flows in a runtime with no native bcrypt/argon2.
-- Access authenticates at the edge; `src/middleware.ts` **independently verifies the JWT** it
-  forwards (`Cf-Access-Jwt-Assertion`, falling back to the `CF_Authorization` cookie). Unconfigured
-  means deny. `pnpm dev` bypasses the gate behind `import.meta.env.DEV`, a build-time constant that
-  is `false` in everything `pnpm build` emits.
-- `CF_ACCESS_TEAM_DOMAIN` and `CF_ACCESS_AUD` are Worker secrets. Neither is a credential — security
-  rests on the RS256 signature — but both are account-specific and change in Phase 5.
+**Replaced Cloudflare Access on 2026-08-05.** Access worked; it did not *travel*. The panel is meant
+to be lifted into the next business, and a gate living in one account's Zero Trust dashboard is not
+part of the code. What was kept from it exactly: the check runs **inside the app**, so it holds on
+every hostname the Worker answers on, with no edge configuration to get wrong, and unconfigured
+still means deny.
+
+- **`admin_users`** (migration `0004`) holds email, a PBKDF2 hash, `is_active` and `last_login_at`.
+  Adding, resetting and disabling admins is `pnpm admin:user` — there is no screen for it yet.
+- **Passwords are PBKDF2-HMAC-SHA-256, 210 000 iterations** (`src/lib/auth/password.ts`), because it
+  is the only KDF the Workers runtime implements natively — bcrypt/argon2 would mean shipping
+  WebAssembly. The stored string carries its own cost, so it can be raised later without
+  invalidating a row; a login re-hashes anything behind.
+- **Sessions are a signed cookie, with no server-side store** (`src/lib/auth/session.ts`):
+  HMAC-SHA-256 over `{sub, email, exp}`, `__Host-admin_session`, HttpOnly/Secure/SameSite=Lax, 12
+  hours. Verifying costs one HMAC and no round trip. **The price: a session cannot be revoked before
+  it expires** — signing out clears the browser's copy, disabling an account stops the next login but
+  not a live session, and rotating `ADMIN_SESSION_SECRET` is the only way to end all of them at once.
+- `/admin/login` and `/admin/logout` are the only routes under `/admin` the gate lets through. The
+  login form carries its own per-IP budget (10 per 15 min, KV) so it can answer with a message
+  rather than a bare 429; logout is POST-only so no prefetcher can trigger it.
+- **The login budget charges failures only** — `peekRateLimit` before, `recordRateLimitHit` on a
+  wrong password. Charging every attempt (the first cut) means an operator can lock themselves out
+  by signing in, which happened on the first real login. Note that locally every client shares the
+  bucket `admin-login:unknown`, since `cf-connecting-ip` only exists behind Cloudflare.
+- **There is no development bypass**, unlike the Access gate, which needed one. The form works
+  locally, so the path that ships is the path exercised daily.
+- `ADMIN_SESSION_SECRET` is a Worker secret and **is** a real credential, unlike the two
+  account-specific Access values it replaced.
 
 ## Known sharp edges
 
@@ -239,11 +260,16 @@ Each of these has already cost time at least once.
   the dashboard as Text is silently dropped by the next push. This took the deployed site down
   once: `DATABASE_URL` vanished, every DB-backed route 500ed, and the homepage — which queries
   nothing — stayed green. Encrypted secrets live outside that file and are preserved.
-- **An Access path matches exactly, and a wildcard does not cover its own parent.** `admin` protects
-  `/admin` but *not* `/admin/orders`; `admin/*` protects `/admin/orders` but *not* `/admin`. Both
-  are needed, per path — which is why the application carries four destinations for what looks like
-  two. Getting this wrong leaves an admin route silently unprotected at the edge, with nothing in
-  the dashboard flagging it.
+- **An Access path matched exactly, and a wildcard did not cover its own parent.** `admin` protected
+  `/admin` but *not* `/admin/orders`; `admin/*` the reverse. Both were needed, per path, and getting
+  it wrong left a route silently unprotected with nothing in the dashboard flagging it. Kept here
+  after Access was retired because it is exactly the class of mistake the app-side gate exists to
+  make impossible — `src/middleware.ts` matches a prefix *and* its children in one place, in code
+  that is reviewed and tested.
+- **PowerShell prepends a UTF-8 BOM when piping a string to a native command.** `"pw" | pnpm
+  admin:user create …` stored a hash of U+FEFF + the password, and the browser could then never
+  reproduce it — a login that fails with correct credentials and no error anywhere.
+  `scripts/admin-user.ts` strips a leading BOM for this reason.
 - **Adding a `routes` entry silently disables the `workers.dev` URL.** wrangler defaults
   `workers_dev` to `false` as soon as any route exists, so the first deploy with a custom domain
   took the old test URL offline mid-session. That is the behaviour we want here, so it is now

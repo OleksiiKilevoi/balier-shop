@@ -356,6 +356,33 @@ export const settings = pgTable('settings', {
   updatedAt,
 });
 
+/* -------------------------------------------------------------------- admin */
+
+/**
+ * Who may open `/admin`. The panel authenticates against this table rather than
+ * against an edge product, so the business owns its own admins: adding one is a
+ * row, not a dashboard, and the panel keeps working when it is lifted into the
+ * next project on a different account.
+ *
+ * `passwordHash` is a self-describing PBKDF2 string from `~/lib/auth/password`
+ * — never a raw password, and never reversible. `email` is stored lower-cased;
+ * `normalizeEmail` there is the only thing that writes or looks it up.
+ *
+ * `isActive` is how an admin is removed: revoking access must not delete the
+ * row, because `lastLoginAt` is the only record that the account was ever used.
+ */
+export const adminUsers = pgTable('admin_users', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  email: text('email').notNull().unique(),
+  /** Shown in the panel header. NULL falls back to the email. */
+  name: text('name'),
+  passwordHash: text('password_hash').notNull(),
+  isActive: boolean('is_active').notNull().default(true),
+  lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
+  createdAt,
+  updatedAt,
+});
+
 /* ---------------------------------------------------------------- relations */
 
 export const categoriesRelations = relations(categories, ({ many }) => ({
@@ -431,6 +458,7 @@ export const pageTranslationsRelations = relations(pageTranslations, ({ one }) =
 
 /* -------------------------------------------------------------------- types */
 
+export type AdminUser = typeof adminUsers.$inferSelect;
 export type Product = typeof products.$inferSelect;
 export type ProductVariant = typeof productVariants.$inferSelect;
 export type ProductImage = typeof productImages.$inferSelect;

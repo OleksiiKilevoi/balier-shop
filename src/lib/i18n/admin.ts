@@ -109,6 +109,25 @@ export const ADMIN_ORDER_MESSAGES = {
 export type AdminOrderMessage = keyof typeof ADMIN_ORDER_MESSAGES;
 
 /**
+ * Sign-in results.
+ *
+ * `invalid_credentials` is one message for two different failures — no such
+ * address, and the wrong password for a real one. Naming which of the two it
+ * was would turn the form into a way to find out who the admins are, and the
+ * operator gains nothing from the distinction: they retype the same two fields
+ * either way.
+ */
+export const ADMIN_AUTH_MESSAGES = {
+  invalid_credentials: 'Невірна пошта або пароль.',
+  too_many_attempts: 'Забагато невдалих спроб входу.',
+  session_expired: 'Сесія завершилася. Увійдіть ще раз.',
+  signed_out: 'Ви вийшли з панелі.',
+  unavailable: 'Вхід тимчасово недоступний. Зверніться до розробника.',
+} as const;
+
+export type AdminAuthMessage = keyof typeof ADMIN_AUTH_MESSAGES;
+
+/**
  * Timestamps are stored with a timezone and the Worker runs in UTC, so they are
  * rendered in Kyiv time explicitly — an operator matching a row against a phone
  * call needs the clock on their own wall, not the server's.

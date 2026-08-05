@@ -56,14 +56,13 @@
   //   DATABASE_URL, MONOBANK_TOKEN, MONOBANK_WEBHOOK_URL,
   //   NOVAPOSHTA_API_KEY, TURNSTILE_SECRET_KEY,
   //   TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID,
-  //   CF_ACCESS_TEAM_DOMAIN, CF_ACCESS_AUD
+  //   ADMIN_SESSION_SECRET
   //
-  // The last two gate `/admin/**` (`src/middleware.ts`). They are not
-  // credentials — the gate rests on the Access JWT signature — but they are
-  // account-specific and no Access application exists yet, so they are set per
-  // environment rather than committed here. While they are unset, every
-  // `/admin` request on a built Worker answers 403, which is the intended
-  // failure direction.
+  // The last one signs the admin session cookie and so gates `/admin/**`
+  // (`src/middleware.ts`). Unlike the Cloudflare Access values it replaced, it
+  // IS a credential: anyone holding it can mint a session for any admin. While
+  // it is unset, every `/admin` request is turned away, which is the intended
+  // failure direction. Rotating it signs everyone out.
   "vars": {
     "PUBLIC_SITE_URL": "https://balier.ua",
     // `from` address for order-confirmation emails. Not `PUBLIC_` — server-only,

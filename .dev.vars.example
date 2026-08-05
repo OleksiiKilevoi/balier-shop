@@ -21,13 +21,16 @@ TURNSTILE_SECRET_KEY=""
 TELEGRAM_BOT_TOKEN=""
 TELEGRAM_CHAT_ID=""
 
-# Cloudflare Access — the /admin gate. Neither value is a credential (the gate
-# rests on the JWT signature), but both are account-specific, so they are set
-# per environment instead of living in wrangler.jsonc. Unset = every /admin
-# request is denied. `pnpm dev` bypasses the gate entirely, so these are only
-# needed for `pnpm preview` and the deployed Worker.
-#   TEAM_DOMAIN: the Zero Trust team, e.g. "balier" or the full
-#                "https://balier.cloudflareaccess.com"
-#   AUD:         the Access application's Application Audience tag
-CF_ACCESS_TEAM_DOMAIN=""
-CF_ACCESS_AUD=""
+# Signs the admin session cookie (src/lib/auth/session.ts) — the /admin gate.
+# Unlike the Cloudflare Access values this replaced, it IS a credential: anyone
+# holding it can mint a session for any admin. At least 32 random bytes,
+# different per environment. Unset = every /admin request is denied.
+# Rotating it signs everyone out, which is also the only way to end a session
+# early — there is no server-side session store.
+#
+# Generate one:
+#   node -e "console.log(require('crypto').randomBytes(48).toString('base64'))"
+#
+# There is NO dev bypass on the gate, so this is required for `pnpm dev` too.
+# Create the account to log in with: pnpm admin:user create you@example.com
+ADMIN_SESSION_SECRET=""

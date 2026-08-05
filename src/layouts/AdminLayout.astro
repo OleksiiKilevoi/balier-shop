@@ -15,7 +15,8 @@ import '~/styles/admin.css';
  * `global.css`; the panel has `admin-container`.
  *
  * Everything under `/admin` is gated by `src/middleware.ts`, so the signed-in
- * identity is always present here; `noindex` is belt-and-braces on top of that.
+ * identity is present on every screen except the login form itself — which is
+ * what `bare` below is for. `noindex` is belt-and-braces on top of that.
  *
  * The theme switch below is the panel's *only* client-side JavaScript, and the
  * reason the old "no script at all" property no longer holds: a chosen theme has
@@ -28,9 +29,16 @@ import '~/styles/admin.css';
 
 interface Props {
   title: string;
+  /**
+   * The login screen. Drops the section nav, the signed-in address and the
+   * sign-out button — none of them mean anything before there is a session, and
+   * a nav that bounces every link back to this page is worse than no nav. The
+   * theme switch stays: it is a browser preference, not an admin one.
+   */
+  bare?: boolean;
 }
 
-const { title } = Astro.props;
+const { title, bare = false } = Astro.props;
 const admin = Astro.locals.admin;
 
 /** The one business-specific string in the panel. Change it, and nothing else. */
@@ -167,38 +175,38 @@ const pathname = Astro.url.pathname;
           {PANEL_NAME}<span class="text-fg-subtle font-normal"> / адмін</span>
         </a>
 
-        <nav aria-label="Розділи">
-          <ul class="flex gap-1">
-            {
-              NAV.map((item) => {
-                const active = pathname.startsWith(item.href);
-                return (
-                  <li>
-                    <a
-                      href={item.href}
-                      aria-current={active ? 'page' : undefined}
-                      class:list={[
-                        'admin-badge min-h-8 px-3 text-sm',
-                        active
-                          ? 'bg-accent text-accent-fg'
-                          : 'text-fg-muted hover:bg-surface-hover hover:text-fg',
-                      ]}
-                    >
-                      {item.label}
-                    </a>
-                  </li>
-                );
-              })
-            }
-          </ul>
-        </nav>
+        {
+          !bare && (
+            <nav aria-label="Розділи">
+              <ul class="flex gap-1">
+                {NAV.map((item) => {
+                  const active = pathname.startsWith(item.href);
+                  return (
+                    <li>
+                      <a
+                        href={item.href}
+                        aria-current={active ? 'page' : undefined}
+                        class:list={[
+                          'admin-badge min-h-8 px-3 text-sm',
+                          active
+                            ? 'bg-accent text-accent-fg'
+                            : 'text-fg-muted hover:bg-surface-hover hover:text-fg',
+                        ]}
+                      >
+                        {item.label}
+                      </a>
+                    </li>
+                  );
+                })}
+              </ul>
+            </nav>
+          )
+        }
 
         <div class="ml-auto flex min-w-0 items-center gap-3">
           {
-            admin && (
-              <span class="text-fg-subtle truncate text-xs">
-                {admin.email ?? 'сервісний токен'}
-              </span>
+            !bare && admin && (
+              <span class="text-fg-subtle truncate text-xs">{admin.email}</span>
             )
           }
 
@@ -243,6 +251,37 @@ const pathname = Astro.url.pathname;
               <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" />
             </svg>
           </button>
+
+          {/* A form, not a link: `GET /admin/logout` would be followed by any
+              prefetcher that saw it, and would sign the operator out at random.
+              As a POST it also picks up Astro's origin check for free. */}
+          {
+            !bare && admin && (
+              <form method="post" action="/admin/logout">
+                <button
+                  type="submit"
+                  class="admin-icon-btn"
+                  aria-label="Вийти з панелі"
+                  title="Вийти"
+                >
+                  <svg
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.6"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3" />
+                    <path d="M10 8l-4 4 4 4M6 12h9" />
+                  </svg>
+                </button>
+              </form>
+            )
+          }
         </div>
       </div>
     </header>

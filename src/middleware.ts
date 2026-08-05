@@ -1,61 +1,81 @@
 import { defineMiddleware, sequence } from 'astro:middleware';
 import { env } from 'cloudflare:workers';
-import { createAccessVerifier, extractAccessToken } from '~/lib/access';
+import { SESSION_COOKIE, verifySession } from '~/lib/auth';
 import { checkRateLimit } from '~/lib/rateLimit';
 
 /* --------------------------------------------------------------- admin gate */
 
 /**
- * The server-side half of the admin gate `docs/CONVENTIONS.md` requires:
- * Cloudflare Access authenticates at the edge, and this verifies the JWT it
- * forwards before any admin page or admin API route runs. Edge configuration
- * alone is not enough — the Worker is also reachable on its `workers.dev` URL,
- * which no Access policy covers.
+ * The admin gate: every `/admin/**` page and `/api/admin/**` route needs a
+ * valid session cookie, minted by `/admin/login` against `admin_users`.
  *
- * Unconfigured means denied. Until an Access application exists (it needs a
- * domain on the Cloudflare account — see `docs/STATE.md`), every request here
- * answers 403, including ours.
+ * This replaced a Cloudflare Access JWT check. The reason is ownership, not
+ * security — Access worked — the panel is meant to be lifted into the next
+ * business, and a gate that lives in one Cloudflare account's Zero Trust
+ * dashboard does not travel with the code. The property that mattered most
+ * about the old gate is kept exactly: **the check is in the application**, so
+ * it holds on the `workers.dev` URL and anywhere else the Worker is reachable,
+ * with no edge configuration to get wrong.
+ *
+ * Unconfigured still means denied. With `ADMIN_SESSION_SECRET` unset, nothing
+ * verifies and every request here is turned away — including ours.
+ *
+ * There is **no development bypass**, unlike the gate this replaced. That one
+ * needed it (nothing authenticates in front of `pnpm dev`); this one does not,
+ * because the form works locally. So the login path that ships is the login
+ * path that gets exercised every day. `scripts/admin-user.ts` creates the
+ * account to log in with.
  */
 const ADMIN_PREFIXES = ['/admin', '/api/admin'] as const;
 
-const adminGate = defineMiddleware(async ({ request, locals }, next) => {
-  const pathname = new URL(request.url).pathname;
+export const ADMIN_LOGIN_PATH = '/admin/login';
+
+/**
+ * The two routes under `/admin` that must answer without a session: the form
+ * itself (or nobody could ever get one) and sign-out (which only clears a
+ * cookie, and has to work even when the session behind it has already lapsed).
+ */
+const PUBLIC_ADMIN_PATHS = new Set<string>([ADMIN_LOGIN_PATH, '/admin/logout']);
+
+const adminGate = defineMiddleware(async ({ url, cookies, locals }, next) => {
+  const pathname = url.pathname;
   const isAdmin = ADMIN_PREFIXES.some(
     (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
   );
-  if (!isAdmin) return next();
+  if (!isAdmin || PUBLIC_ADMIN_PATHS.has(pathname)) return next();
 
-  // `pnpm dev` has no Access in front of it, so the panel would be unopenable
-  // locally. `import.meta.env.DEV` is a build-time constant: it is `false` in
-  // everything `pnpm build` emits, `pnpm preview` and the deployed Worker
-  // included, so this cannot become a production bypass.
-  if (import.meta.env.DEV) {
-    locals.admin = { email: 'dev@localhost', sub: 'dev', expiresAt: 0 };
-    return next();
-  }
+  const session = await verifySession(env.ADMIN_SESSION_SECRET, cookies.get(SESSION_COOKIE)?.value);
+  if (!session) return unauthorized(url);
 
-  const verifier = createAccessVerifier({
-    teamDomain: env.CF_ACCESS_TEAM_DOMAIN,
-    aud: env.CF_ACCESS_AUD,
-  });
-  const identity = await verifier.verify(extractAccessToken(request));
-  if (!identity) return forbidden(pathname);
-
-  locals.admin = identity;
+  locals.admin = session;
   return next();
 });
 
-function forbidden(pathname: string): Response {
-  const isApi = pathname.startsWith('/api/');
+/**
+ * A page and an API route want different things from "you are not signed in":
+ * a person should land on the form, with the address they were trying to reach
+ * carried along so the login finishes the journey; a fetch should get a status
+ * it can branch on rather than an HTML login page it would try to parse.
+ */
+function unauthorized(url: URL): Response {
+  if (url.pathname.startsWith('/api/')) {
+    return new Response(JSON.stringify({ error: 'unauthorized' }), {
+      status: 401,
+      headers: {
+        'content-type': 'application/json; charset=utf-8',
+        'cache-control': 'no-store',
+      },
+    });
+  }
 
-  return new Response(isApi ? JSON.stringify({ error: 'forbidden' }) : 'Доступ заборонено', {
-    status: 403,
-    headers: {
-      'content-type': isApi
-        ? 'application/json; charset=utf-8'
-        : 'text/plain; charset=utf-8',
-      'cache-control': 'no-store',
-    },
+  const target = new URL(ADMIN_LOGIN_PATH, url);
+  // Path and query only. `next` is re-validated on the way out in
+  // `login.astro` — this is a hint, not a trusted instruction.
+  if (url.pathname !== '/admin') target.searchParams.set('next', `${url.pathname}${url.search}`);
+
+  return new Response(null, {
+    status: 303,
+    headers: { location: `${target.pathname}${target.search}`, 'cache-control': 'no-store' },
   });
 }
 
@@ -74,8 +94,12 @@ function forbidden(pathname: string): Response {
  * the two `np-*` search endpoints are debounced keystroke lookups against
  * our own DB and get a generous one.
  *
- * Admin routes are absent on purpose — they are gated by Access above, so an
- * unauthenticated flood never reaches them.
+ * Admin routes are absent on purpose — the gate above turns an unauthenticated
+ * flood away before it reaches a handler. The one exception is the login form,
+ * which is public by necessity and therefore brute-forceable; it carries its
+ * own budget, applied inside `src/pages/admin/login.astro` rather than here, so
+ * that hitting the limit can answer with the form and a message instead of a
+ * bare 429 in front of a person who simply mistyped their password.
  */
 const RULES: readonly { pathname: string; limit: number; windowSeconds: number }[] = [
   { pathname: '/api/checkout', limit: 5, windowSeconds: 300 },
