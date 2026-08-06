@@ -29,8 +29,8 @@
 @import 'tailwindcss' source(none);
 
 @source '../layouts/AdminLayout.astro';
-@source '../components/admin';
-@source '../pages/admin';
+@source '../components';
+@source '../pages';
 
 /*
  * The raw palette. Each token carries both themes at once through

@@ -26,7 +26,7 @@ import type { CatalogField } from '@balier/lib/validation/catalog';
  * twice a year.
  *
  * Every row is its own plain `<form>` answered with a 303 back here, and works
- * with no script at all. `enhanceAdminForms` (`~/lib/admin/forms`) then takes
+ * with no script at all. `enhanceAdminForms` (`~/lib/forms`) then takes
  * the reload out of it, exactly as on the product editor: the POST goes by
  * `fetch`, the response replaces `#categories-editor` in place, and the banner
  * the server rendered is moved into the fixed toast host. Saving the last
@@ -35,7 +35,7 @@ import type { CatalogField } from '@balier/lib/validation/catalog';
  */
 export const prerender = false;
 
-const SELF = '/admin/categories';
+const SELF = '/categories';
 
 const db = createDb(env.DATABASE_URL);
 
@@ -50,7 +50,7 @@ if (Astro.request.method === 'POST') {
   const fields = Object.fromEntries(form) as Record<string, string>;
   body = fields;
 
-  // Same server-side slug fallback as `/admin/products/new`: an empty field is
+  // Same server-side slug fallback as `/products/new`: an empty field is
   // filled from the title, so the suggestion holds with the script blocked.
   const parsed = categoryActionSchema.safeParse({
     ...fields,
@@ -114,7 +114,7 @@ const creating = failedIntent === 'category_create';
 
 <AdminLayout title="Категорії">
   <nav class="text-fg-subtle text-sm">
-    <a href="/admin/products" class="underline-offset-2 hover:underline">← Товари</a>
+    <a href="/products" class="underline-offset-2 hover:underline">← Товари</a>
   </nav>
 
   {/*
@@ -279,7 +279,7 @@ const creating = failedIntent === 'category_create';
                       <>
                         {' · '}
                         <a
-                          href={`/admin/products?category=${category.id}`}
+                          href={`/products?category=${category.id}`}
                           class="underline underline-offset-2"
                         >
                           показати
@@ -395,7 +395,7 @@ const creating = failedIntent === 'category_create';
   <script>
     import { enhanceAdminForms } from '@balier/lib/admin/forms';
     /* Enhancement only — the server fills an empty slug from the title with the
-       same function. See `/admin/products/new` for the reasoning. */
+       same function. See `/products/new` for the reasoning. */
     import { slugify } from '@balier/lib/products/slug';
 
     const editor = document.getElementById('categories-editor');

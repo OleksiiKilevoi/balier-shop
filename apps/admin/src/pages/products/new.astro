@@ -32,13 +32,13 @@ import type { CatalogField } from '@balier/lib/validation/catalog';
  * until somebody noticed.
  *
  * On refusal this re-renders with what was typed instead of redirecting, unlike
- * `/admin/settings` — that screen carries one number a manager can retype in
+ * `/settings` — that screen carries one number a manager can retype in
  * three seconds, and this one carries a title and a price they would have to
  * find again.
  */
 export const prerender = false;
 
-const SELF = '/admin/products/new';
+const SELF = '/products/new';
 
 const db = createDb(env.DATABASE_URL);
 
@@ -97,7 +97,7 @@ if (Astro.request.method === 'POST') {
       });
 
       if (result.ok) {
-        return Astro.redirect(`/admin/products/${result.productId}?m=created`, 303);
+        return Astro.redirect(`/products/${result.productId}?m=created`, 303);
       }
 
       banner = result.reason;
@@ -118,7 +118,7 @@ const suggestedSlug = slugify(values.title);
 
 <AdminLayout title="Новий товар">
   <nav class="text-fg-subtle text-sm">
-    <a href="/admin/products" class="underline-offset-2 hover:underline">← Товари</a>
+    <a href="/products" class="underline-offset-2 hover:underline">← Товари</a>
   </nav>
 
   <h1 class="text-fg mt-3 text-2xl font-semibold sm:text-3xl">Новий товар</h1>
@@ -181,7 +181,7 @@ const suggestedSlug = slugify(values.title);
         <label for="basePrice" class="text-fg-subtle text-xs">Ціна</label>
         <div class="relative mt-1">
           {/* `text` with a numeric keypad rather than `number`, for the reason
-              `/admin/settings` names: `admin-field` sets `appearance: none`, and
+              `/settings` names: `admin-field` sets `appearance: none`, and
               a number input refuses a value pasted as «1 850» outright. */}
           <input
             id="basePrice"
@@ -236,7 +236,7 @@ const suggestedSlug = slugify(values.title);
         {
           categories.length === 0 && (
             <p class="text-fg-subtle mt-1 text-xs">
-              Категорій ще немає — <a href="/admin/categories" class="underline underline-offset-2">створіть першу</a>.
+              Категорій ще немає — <a href="/categories" class="underline underline-offset-2">створіть першу</a>.
             </p>
           )
         }
@@ -275,7 +275,7 @@ const suggestedSlug = slugify(values.title);
 
     <div class="mt-6 flex flex-wrap items-center gap-3">
       <button type="submit" class="admin-btn admin-btn-primary">Створити</button>
-      <a href="/admin/products" class="admin-btn admin-btn-secondary">Скасувати</a>
+      <a href="/products" class="admin-btn admin-btn-secondary">Скасувати</a>
     </div>
   </form>
 </AdminLayout>

@@ -22,7 +22,7 @@ import { peekRateLimit, recordRateLimitHit } from '@balier/lib/rateLimit';
 import { adminLoginSchema, PASSWORD_MAX_LENGTH } from '@balier/lib/validation/admin';
 
 /**
- * The panel's front door — the one route under `/admin` the gate lets through
+ * The panel's front door — one of the two routes the gate lets through
  * unauthenticated (`src/middleware.ts`), because a form nobody can reach cannot
  * hand out the session everything else requires.
  *
@@ -58,13 +58,12 @@ Astro.response.headers.set('cache-control', 'no-store');
  * operator, freshly authenticated, on someone else's.
  */
 function safeNext(value: string | null): string {
-  if (!value) return '/admin';
+  if (!value) return '/';
 
-  // `/admin` exactly, or something *inside* it. `startsWith('/admin')` alone is
-  // not that test — `/adminevil` passes it — and a leading `//` or `/\` is a
-  // protocol-relative URL to another host rather than a local path at all.
-  const insidePanel = value === '/admin' || /^\/admin[/?#]/.test(value);
-  if (!insidePanel || value.startsWith('//') || value.startsWith('/\\')) return '/admin';
+  // Every path on this hostname is inside the panel now, so "a local path" is
+  // the whole test: one leading `/`, not two — `//host` and `/\host` are
+  // protocol-relative URLs to another host rather than local paths at all.
+  if (!value.startsWith('/') || value.startsWith('//') || value.startsWith('/\\')) return '/';
 
   return value;
 }

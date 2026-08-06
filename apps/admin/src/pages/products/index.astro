@@ -1,6 +1,6 @@
 ---
 import { env } from 'cloudflare:workers';
-import ProductStatusBadge from '~/components/admin/ProductStatusBadge.astro';
+import ProductStatusBadge from '~/components/ProductStatusBadge.astro';
 import AdminLayout from '~/layouts/AdminLayout.astro';
 import { createDb } from '@balier/lib/db';
 import { listAdminProducts, listCategoryOptions } from '@balier/lib/db/queries/adminProducts';
@@ -13,7 +13,7 @@ import { formatPrice } from '@balier/lib/money';
 /**
  * The catalog list.
  *
- * Built as a near-copy of `/admin/orders` on purpose — same GET form for filter
+ * Built as a near-copy of `/orders` on purpose — same GET form for filter
  * and search, same page size, same cards-on-phone / table-on-desktop split. The
  * two lists are the same job on different rows, and a manager should not have to
  * learn the second one.
@@ -38,7 +38,7 @@ const status = productStatus.enumValues.find(
 const query = (params.get('q') ?? '').trim().slice(0, MAX_QUERY);
 const page = Math.max(1, Number.parseInt(params.get('page') ?? '1', 10) || 1);
 
-// `?category=` is where «показати» on `/admin/categories` arrives. Checked
+// `?category=` is where «показати» on `/categories` arrives. Checked
 // against the real list rather than passed through: an id that names no row
 // would otherwise render an empty list that looks like a category with no
 // products, and a malformed one would make Postgres throw on the uuid cast.
@@ -79,8 +79,8 @@ const countLabel = `${total} ${pluralUk(total, {
     <div class="flex flex-wrap items-center gap-2">
       {/* Categories live one click away rather than in the header nav: they are
           edited once in a while, and a fourth nav row starts wrapping at 320px. */}
-      <a href="/admin/categories" class="admin-btn admin-btn-secondary">Категорії</a>
-      <a href="/admin/products/new" class="admin-btn admin-btn-primary">Створити товар</a>
+      <a href="/categories" class="admin-btn admin-btn-secondary">Категорії</a>
+      <a href="/products/new" class="admin-btn admin-btn-primary">Створити товар</a>
     </div>
   </header>
 
@@ -88,7 +88,7 @@ const countLabel = `${total} ${pluralUk(total, {
       of squeezing the search field to nothing at the sm breakpoint. */}
   <form
     method="get"
-    action="/admin/products"
+    action="/products"
     class="mt-5 flex max-w-3xl flex-col gap-2 sm:flex-row sm:flex-wrap"
   >
     <label for="products-q" class="sr-only">Назва, адреса або артикул</label>
@@ -168,7 +168,7 @@ const countLabel = `${total} ${pluralUk(total, {
         <ul class="mt-6 space-y-3 md:hidden">
           {rows.map((row) => (
             <li class="admin-card hover:border-border-strong transition-colors">
-              <a href={`/admin/products/${row.id}`} class="flex gap-3 p-4">
+              <a href={`/products/${row.id}`} class="flex gap-3 p-4">
                 {/* Fixed box either way, so a missing photo does not reflow the
                     row — an empty card is itself worth seeing in the list. */}
                 <span class="bg-surface-hover border-border h-16 w-12 shrink-0 overflow-hidden rounded-md border">
@@ -232,7 +232,7 @@ const countLabel = `${total} ${pluralUk(total, {
                       </span>
                       <span class="min-w-0">
                         <a
-                          href={`/admin/products/${row.id}`}
+                          href={`/products/${row.id}`}
                           class="text-fg font-medium underline-offset-2 hover:underline"
                         >
                           {row.title}

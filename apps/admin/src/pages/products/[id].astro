@@ -1,7 +1,7 @@
 ---
 import { env } from 'cloudflare:workers';
-import ColorField from '~/components/admin/ColorField.astro';
-import ProductStatusBadge from '~/components/admin/ProductStatusBadge.astro';
+import ColorField from '~/components/ColorField.astro';
+import ProductStatusBadge from '~/components/ProductStatusBadge.astro';
 import AdminLayout from '~/layouts/AdminLayout.astro';
 import { createDb, createTxDb } from '@balier/lib/db';
 import {
@@ -50,7 +50,7 @@ import type { CatalogField } from '@balier/lib/validation/catalog';
  * settings screen carries one number and can afford to throw it away; this one
  * carries a description somebody wrote.
  *
- * NOTHING BELOW RELOADS THE PAGE. `enhanceAdminForms` from `~/lib/admin/forms`
+ * NOTHING BELOW RELOADS THE PAGE. `enhanceAdminForms` from `~/lib/forms`
  * does that for every panel screen made of plain forms, and it changed not a
  * single server-side line here: every submit becomes a `fetch` of the exact POST
  * the browser would have made, `fetch` follows the 303 itself, and what comes
@@ -63,7 +63,7 @@ import type { CatalogField } from '@balier/lib/validation/catalog';
 export const prerender = false;
 
 const productId = Astro.params.id!;
-const selfUrl = `/admin/products/${encodeURIComponent(productId)}`;
+const selfUrl = `/products/${encodeURIComponent(productId)}`;
 
 const db = createDb(env.DATABASE_URL);
 
@@ -382,7 +382,7 @@ function imageMeta(image: (typeof images)[number]): string {
       !detail ? (
         <>
           <nav class="text-fg-subtle text-sm">
-            <a href="/admin/products" class="underline-offset-2 hover:underline">
+            <a href="/products" class="underline-offset-2 hover:underline">
               ← Товари
             </a>
           </nav>
@@ -392,7 +392,7 @@ function imageMeta(image: (typeof images)[number]): string {
       ) : (
         <>
           <nav class="text-fg-subtle text-sm">
-            <a href="/admin/products" class="underline-offset-2 hover:underline">
+            <a href="/products" class="underline-offset-2 hover:underline">
               ← Товари
             </a>
           </nav>
@@ -1297,8 +1297,8 @@ function imageMeta(image: (typeof images)[number]): string {
   <div id="product-toast" class="admin-toast-host" aria-live="polite" aria-atomic="true"></div>
 
   {/*
-    The enhancement layer lives in `~/lib/admin/forms` and is shared with
-    `/admin/categories` — every panel screen made of plain forms gets the same
+    The enhancement layer lives in `~/lib/forms` and is shared with
+    `/categories` — every panel screen made of plain forms gets the same
     swap-in-place and the same toast from it. What stays here is the one thing
     that is only about *this* page: the colour swatches.
   */}

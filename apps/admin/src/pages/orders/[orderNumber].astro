@@ -1,6 +1,6 @@
 ---
 import { env } from 'cloudflare:workers';
-import OrderStatusBadge from '~/components/admin/OrderStatusBadge.astro';
+import OrderStatusBadge from '~/components/OrderStatusBadge.astro';
 import AdminLayout from '~/layouts/AdminLayout.astro';
 import { createDb, createTxDb } from '@balier/lib/db';
 import { findAdminOrder } from '@balier/lib/db/queries/orders';
@@ -41,7 +41,7 @@ import { TRACKING_NUMBER_LENGTH, adminOrderActionSchema } from '@balier/lib/vali
 export const prerender = false;
 
 const orderNumber = Astro.params.orderNumber!;
-const selfUrl = `/admin/orders/${encodeURIComponent(orderNumber)}`;
+const selfUrl = `/orders/${encodeURIComponent(orderNumber)}`;
 
 function done(message: AdminOrderMessage): Response {
   return Astro.redirect(`${selfUrl}?m=${message}`, 303);
@@ -165,7 +165,7 @@ const leavingTerminal = order?.status === 'cancelled' || order?.status === 'refu
 ---
 
 <AdminLayout title={order ? `Замовлення ${order.orderNumber}` : 'Замовлення не знайдено'}>
-  <a href="/admin/orders" class="text-fg-muted hover:text-fg text-sm">← До списку</a>
+  <a href="/orders" class="text-fg-muted hover:text-fg text-sm">← До списку</a>
 
   {
     !order ? (

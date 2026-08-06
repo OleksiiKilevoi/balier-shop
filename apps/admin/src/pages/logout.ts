@@ -4,7 +4,7 @@ import { SESSION_COOKIE, sessionCookieOptions } from '@balier/lib/auth';
 /**
  * Sign out: clear the session cookie and go back to the form.
  *
- * POST only, and that is not ceremony — a `GET /admin/logout` would be followed
+ * POST only, and that is not ceremony — a `GET /logout` would be followed
  * by any link prefetcher, crawler or over-eager browser optimisation that saw
  * the URL, and would sign the operator out at random. As a form POST it also
  * inherits Astro's origin check, so another site cannot log them out either.
@@ -24,8 +24,8 @@ export const POST: APIRoute = ({ cookies, redirect }) => {
   const { path, httpOnly, secure, sameSite } = sessionCookieOptions();
   cookies.delete(SESSION_COOKIE, { path, httpOnly, secure, sameSite });
 
-  return redirect('/admin/login?message=signed_out', 303);
+  return redirect('/login?message=signed_out', 303);
 };
 
 /** Nothing to do here; the panel's own control is a form. */
-export const GET: APIRoute = ({ redirect }) => redirect('/admin', 303);
+export const GET: APIRoute = ({ redirect }) => redirect('/', 303);

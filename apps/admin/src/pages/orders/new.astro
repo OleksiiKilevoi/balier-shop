@@ -89,7 +89,7 @@ import { parseSearchQuery, searchTokens } from '@balier/lib/validation/search';
  */
 export const prerender = false;
 
-const SELF = '/admin/orders/new';
+const SELF = '/orders/new';
 const PRODUCT_RESULT_LIMIT = 12;
 const SETTLEMENT_RESULT_LIMIT = 8;
 const WAREHOUSE_RESULT_LIMIT = 12;
@@ -202,14 +202,17 @@ if (form && isCreateSubmit(form)) {
   if (!parsed.success) {
     invalid = adminOrderFieldErrors(parsed.error);
   } else {
-    const origin = new URL(Astro.request.url).origin;
+    // The *site* origin, not this request's: the Monobank webhook route and the
+    // customer's success/failure pages live on the storefront Worker, so a card
+    // invoice minted here must point at that hostname, never the admin one.
+    const origin = env.SITE_ORIGIN;
     const { db: txDb, close } = createTxDb(env.DATABASE_URL);
 
     try {
       const result = await createOrderFromPanel(txDb, parsed.data, origin);
 
       if (result.ok) {
-        return Astro.redirect(`/admin/orders/${result.orderNumber}?m=created`, 303);
+        return Astro.redirect(`/orders/${result.orderNumber}?m=created`, 303);
       }
 
       switch (result.reason) {
@@ -313,7 +316,7 @@ function createOrderFromPanel(txDb: TxDb, input: AdminNewOrder, origin: string) 
     {
       payment: createMonobankPayment(env.MONOBANK_TOKEN),
       // The manager is the notification — they are already in the conversation
-      // this order came out of. See `~/lib/notify/noop.ts`.
+      // this order came out of. See `@balier/lib/notify/noop`.
       notifier: createNoopNotifier(),
       email: createEmailNotifier(env.EMAIL, env.ORDER_EMAIL_FROM),
       redirectBaseUrl: origin,
@@ -332,7 +335,7 @@ const DELIVERY_CHOICES = [
 ---
 
 <AdminLayout title="Нове замовлення">
-  <a href="/admin/orders" class="text-fg-muted hover:text-fg text-sm">← До списку</a>
+  <a href="/orders" class="text-fg-muted hover:text-fg text-sm">← До списку</a>
 
   <header class="mt-4">
     <h1 class="text-fg text-2xl font-semibold sm:text-3xl">Нове замовлення</h1>

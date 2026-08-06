@@ -1,12 +1,12 @@
 ---
 import { Font } from 'astro:assets';
 
-import ThemeToggle from '~/components/admin/ThemeToggle.astro';
+import ThemeToggle from '~/components/ThemeToggle.astro';
 
 import '~/styles/admin.css';
 
 /**
- * Shell for `/admin/**`. Deliberately not `BaseLayout` — the storefront header,
+ * Shell for `/**`. Deliberately not `BaseLayout` — the storefront header,
  * footer and cart popup have no place in the panel, and the admin pages must not
  * inherit the shop chrome as it changes.
  *
@@ -16,7 +16,7 @@ import '~/styles/admin.css';
  * is not imported for the same reason — its `container-page` utility lives in
  * `global.css`; the panel has `admin-container`.
  *
- * Everything under `/admin` is gated by `src/middleware.ts`, so the signed-in
+ * Every route on this Worker is gated by `src/middleware.ts`, so the signed-in
  * identity is present on every screen except the login form itself — which is
  * what `bare` below is for. `noindex` is belt-and-braces on top of that.
  *
@@ -49,16 +49,16 @@ const admin = Astro.locals.admin;
 const PANEL_NAME = 'Balier';
 
 /**
- * Three rows, and deliberately not four: `/admin/categories` is reached from
+ * Three rows, and deliberately not four: `/categories` is reached from
  * the product list instead, because a fourth item starts wrapping this header
  * onto a second line on a narrow laptop, and categories are opened far less
  * often than anything here. The burger below takes the phone off that budget —
  * the nav is a stacked list there — but the wide header still has to fit.
  */
 const NAV = [
-  { href: '/admin/orders', label: 'Замовлення' },
-  { href: '/admin/products', label: 'Товари' },
-  { href: '/admin/settings', label: 'Налаштування' },
+  { href: '/orders', label: 'Замовлення' },
+  { href: '/products', label: 'Товари' },
+  { href: '/settings', label: 'Налаштування' },
 ];
 
 const pathname = Astro.url.pathname;
@@ -207,7 +207,7 @@ const pathname = Astro.url.pathname;
         require scrolling back to the top of a 40-row order list. */}
     <header class="border-border bg-canvas/85 sticky top-0 z-10 border-b backdrop-blur">
       <div class="admin-container flex min-h-touch flex-wrap items-center gap-x-6 gap-y-2 py-3">
-        <a href="/admin" class="text-fg text-[0.9375rem] font-semibold tracking-tight">
+        <a href="/" class="text-fg text-[0.9375rem] font-semibold tracking-tight">
           {PANEL_NAME}<span class="text-fg-subtle font-normal"> / адмін</span>
         </a>
 
@@ -259,12 +259,12 @@ const pathname = Astro.url.pathname;
 
                   <ThemeToggle />
 
-                  {/* A form, not a link: `GET /admin/logout` would be followed by
+                  {/* A form, not a link: `GET /logout` would be followed by
                       any prefetcher that saw it, and would sign the operator out
                       at random. As a POST it also picks up Astro's origin check
                       for free. */}
                   {admin && (
-                    <form method="post" action="/admin/logout">
+                    <form method="post" action="/logout">
                       <button
                         type="submit"
                         class="admin-icon-btn"
@@ -354,7 +354,7 @@ const pathname = Astro.url.pathname;
                         <ThemeToggle />
 
                         {admin && (
-                          <form method="post" action="/admin/logout" class="flex-1">
+                          <form method="post" action="/logout" class="flex-1">
                             <button
                               type="submit"
                               class="admin-btn admin-btn-secondary w-full px-4"

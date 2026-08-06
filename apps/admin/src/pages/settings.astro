@@ -22,7 +22,7 @@ import {
  * in the product able to write it. `scripts/seed.ts` was the only writer.
  *
  * A plain form POST answered with a 303 back here, like the order detail page:
- * one field and one button do not need the fetch layer `/admin/orders/new`
+ * one field and one button do not need the fetch layer `/orders/new`
  * carries, and post/redirect/get means a refresh after saving re-reads the row
  * instead of re-writing it.
  *
@@ -31,7 +31,7 @@ import {
  */
 export const prerender = false;
 
-const SELF_URL = '/admin/settings';
+const SELF_URL = '/settings';
 
 const db = createDb(env.DATABASE_URL);
 

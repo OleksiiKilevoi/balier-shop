@@ -1,0 +1,11 @@
+{
+  "extends": ["../../tsconfig.base.json", "astro/tsconfigs/strict"],
+  "include": [".astro/types.d.ts", "src/**/*.ts", "src/**/*.astro", "worker-configuration.d.ts"],
+  "exclude": ["dist", ".astro", "node_modules"],
+  "compilerOptions": {
+    "types": ["@astrojs/cloudflare"],
+    "paths": {
+      "~/*": ["./src/*"]
+    }
+  }
+}

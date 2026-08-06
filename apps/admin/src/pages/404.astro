@@ -1,0 +1,20 @@
+---
+import AdminLayout from '~/layouts/AdminLayout.astro';
+
+/**
+ * Panel-styled 404. Only a signed-in operator ever sees it: an unauthenticated
+ * request to an unknown path hits the gate first and lands on `/login`, so this
+ * page leaks nothing about which routes exist.
+ */
+export const prerender = false;
+
+Astro.response.status = 404;
+---
+
+<AdminLayout title="Сторінку не знайдено">
+  <h1 class="text-fg text-2xl font-semibold sm:text-3xl">Сторінку не знайдено</h1>
+
+  <p class="text-fg-muted mt-2 text-sm">Такої адреси в панелі немає.</p>
+
+  <a href="/" class="admin-btn admin-btn-secondary mt-8 inline-flex">На головну панелі</a>
+</AdminLayout>

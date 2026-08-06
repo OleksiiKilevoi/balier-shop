@@ -1,6 +1,6 @@
 ---
 import { env } from 'cloudflare:workers';
-import OrderStatusBadge from '~/components/admin/OrderStatusBadge.astro';
+import OrderStatusBadge from '~/components/OrderStatusBadge.astro';
 import AdminLayout from '~/layouts/AdminLayout.astro';
 import { createDb } from '@balier/lib/db';
 import { listOrders } from '@balier/lib/db/queries/orders';
@@ -60,7 +60,7 @@ const countLabel = `${total} ${pluralUk(total, {
       <p class="text-fg-muted text-sm">{countLabel}</p>
     </div>
     {/* For an order that arrived in a chat rather than through the shop. */}
-    <a href="/admin/orders/new" class="admin-btn admin-btn-primary">Створити замовлення</a>
+    <a href="/orders/new" class="admin-btn admin-btn-primary">Створити замовлення</a>
   </header>
 
   {/*
@@ -72,7 +72,7 @@ const countLabel = `${total} ${pluralUk(total, {
     own — a new filter is a new result set, and page 2 of the old one means
     nothing in it.
   */}
-  <form method="get" action="/admin/orders" class="mt-5 flex max-w-3xl flex-col gap-2 sm:flex-row">
+  <form method="get" action="/orders" class="mt-5 flex max-w-3xl flex-col gap-2 sm:flex-row">
     <label for="orders-q" class="sr-only">Номер, ім’я або телефон</label>
     <input
       id="orders-q"
@@ -130,7 +130,7 @@ const countLabel = `${total} ${pluralUk(total, {
         <ul class="mt-6 space-y-3 md:hidden">
           {rows.map((row) => (
             <li class="admin-card hover:border-border-strong transition-colors">
-              <a href={`/admin/orders/${row.orderNumber}`} class="block p-4">
+              <a href={`/orders/${row.orderNumber}`} class="block p-4">
                 <div class="flex items-start justify-between gap-3">
                   <span class="text-fg font-mono text-sm font-medium whitespace-nowrap">
                     {row.orderNumber}
@@ -168,7 +168,7 @@ const countLabel = `${total} ${pluralUk(total, {
                 <tr class="border-border hover:bg-surface-hover border-b transition-colors last:border-b-0">
                   <td class="px-4 py-3 whitespace-nowrap">
                     <a
-                      href={`/admin/orders/${row.orderNumber}`}
+                      href={`/orders/${row.orderNumber}`}
                       class="text-fg font-mono font-medium underline-offset-2 hover:underline"
                     >
                       {row.orderNumber}
