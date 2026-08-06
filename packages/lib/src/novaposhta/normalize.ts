@@ -70,13 +70,10 @@ export function fold(value: string): string {
   return out.replace(/\s+/g, ' ').trim();
 }
 
-/**
- * Builds the indexed blob from every spelling Nova Poshta gives us for one
- * row. Duplicates are dropped because most villages have `Description ===
- * DescriptionRu`, and storing that twice across 26 791 rows only inflates the
- * trigram index.
- */
-export function searchText(...values: (string | null | undefined)[]): string {
+function foldAll(
+  values: (string | null | undefined)[],
+  { separatorFreeVariant }: { separatorFreeVariant: boolean },
+): string {
   const parts = new Set<string>();
 
   for (const value of values) {
@@ -86,12 +83,38 @@ export function searchText(...values: (string | null | undefined)[]): string {
     if (!folded) continue;
     parts.add(folded);
 
-    // «івано франківськ» typed without the hyphen is still «Івано-Франківськ».
-    const collapsed = folded.replaceAll(' ', '');
-    if (collapsed !== folded) parts.add(collapsed);
+    if (separatorFreeVariant) {
+      // «івано франківськ» typed without the hyphen is still «Івано-Франківськ».
+      const collapsed = folded.replaceAll(' ', '');
+      if (collapsed !== folded) parts.add(collapsed);
+    }
   }
 
   return [...parts].join(' ');
+}
+
+/**
+ * Builds the indexed blob from every spelling Nova Poshta gives us for one
+ * settlement. Duplicates are dropped because most villages have `Description ===
+ * DescriptionRu`, and storing that twice across 26 791 rows only inflates the
+ * trigram index.
+ */
+export function searchText(...values: (string | null | undefined)[]): string {
+  return foldAll(values, { separatorFreeVariant: true });
+}
+
+/**
+ * The same, for a branch's *address* — which is what a warehouse description
+ * is: «Відділення №12: вул. Соборна, 4».
+ *
+ * The difference is the separator-free variant above, which is dropped here.
+ * It exists so «іванофранківськ» finds a hyphenated city name; nobody types a
+ * street address run together, so on 53 556 warehouse rows it was ~200 bytes
+ * each of stored text that no query could ever match — the widest column in the
+ * database, rewritten nightly.
+ */
+export function addressSearchText(...values: (string | null | undefined)[]): string {
+  return foldAll(values, { separatorFreeVariant: false });
 }
 
 /**

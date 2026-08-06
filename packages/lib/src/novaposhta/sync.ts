@@ -1,8 +1,9 @@
-import { and, eq, lt, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import type { Db } from '../db';
-import { npSettlements, npWarehouses } from '../db/schema';
+import { npSettlements, npSyncSeen, npWarehouses } from '../db/schema';
+import { differsFromExcluded, setFromExcluded } from '../db/upsert';
 import type { NovaPoshtaClient } from './client';
-import { searchText } from './normalize';
+import { addressSearchText, searchText } from './normalize';
 
 /**
  * Full-country settlement + warehouse sync, run by the daily cron
@@ -17,6 +18,12 @@ import { searchText } from './normalize';
  * still leaves the earlier pages refreshed. Nothing here writes stock or
  * order status, so the "same transaction" rule in `docs/CONVENTIONS.md`
  * doesn't apply — this is reference data, not money.
+ *
+ * What it does *not* do any more is write rows that haven't changed. NP's
+ * country-wide feed is near-static day to day, but re-upserting all ~80 000
+ * rows regardless left a fresh tuple for every one of them nightly — by a wide
+ * margin the dominant cost in the database (see `db/upsert.ts`). Every write
+ * below is now conditional on the incoming row actually differing.
  */
 
 interface RawSettlement {
@@ -123,6 +130,22 @@ async function paginateAndUpsert<T>(
   return total;
 }
 
+/**
+ * Every column the feed owns — `warehouse_count` is ours, derived below, and
+ * must survive an upsert untouched. One list, so the `set` and the "did
+ * anything change" test can never disagree.
+ */
+const SETTLEMENT_SYNCED = [
+  'name',
+  'nameRu',
+  'nameTranslit',
+  'searchText',
+  'area',
+  'region',
+  'type',
+  'deliveryCityRef',
+] as const;
+
 async function upsertSettlements(db: Db, rows: RawSettlement[]): Promise<void> {
   await db
     .insert(npSettlements)
@@ -141,17 +164,8 @@ async function upsertSettlements(db: Db, rows: RawSettlement[]): Promise<void> {
     )
     .onConflictDoUpdate({
       target: npSettlements.ref,
-      set: {
-        name: sql`excluded.name`,
-        nameRu: sql`excluded.name_ru`,
-        nameTranslit: sql`excluded.name_translit`,
-        searchText: sql`excluded.search_text`,
-        area: sql`excluded.area`,
-        region: sql`excluded.region`,
-        type: sql`excluded.type`,
-        deliveryCityRef: sql`excluded.delivery_city_ref`,
-        updatedAt: sql`now()`,
-      },
+      set: { ...setFromExcluded(npSettlements, SETTLEMENT_SYNCED), updatedAt: sql`now()` },
+      setWhere: differsFromExcluded(npSettlements, SETTLEMENT_SYNCED),
     });
 }
 
@@ -192,6 +206,24 @@ function branchNumberSort(number: string | undefined): number | null {
   return number && /^\d{1,9}$/.test(number) ? Number(number) : null;
 }
 
+/** As `SETTLEMENT_SYNCED` — every warehouse column the feed owns. */
+const WAREHOUSE_SYNCED = [
+  'settlementRef',
+  'number',
+  'numberSort',
+  'description',
+  'descriptionRu',
+  'searchText',
+  'typeRef',
+  'isPostomat',
+  'maxWeightKg',
+  'latitude',
+  'longitude',
+  // Retirement below writes this column too; a branch back in the feed gets its
+  // own status back here, which is why a retired row is never a dead end.
+  'isActive',
+] as const;
+
 /**
  * `TypeOfWarehouse` on a warehouse row is a reference-book GUID; resolving it
  * to its Ukrainian description here (via NP's own `getWarehouseTypes`, live-
@@ -210,8 +242,14 @@ async function syncWarehouses(client: NovaPoshtaClient, db: Db): Promise<number>
   });
   const typeNameByRef = new Map(warehouseTypes.map((t) => [t.Ref, t.Description]));
 
-  const upsertWarehouses = (rows: RawWarehouse[]) =>
-    db
+  const upsertWarehouses = async (rows: RawWarehouse[]) => {
+    // Marked seen before the upsert and from the *unfiltered* page: a branch NP
+    // returned is a branch NP still has, even if we skip storing it for want of
+    // a settlement ref. Retiring it because of a missing field would take it
+    // out of checkout on the strength of one absent attribute.
+    await db.insert(npSyncSeen).values(rows.map((w) => ({ ref: w.Ref })));
+
+    await db
       .insert(npWarehouses)
       .values(
         rows
@@ -228,7 +266,7 @@ async function syncWarehouses(client: NovaPoshtaClient, db: Db): Promise<number>
               numberSort: branchNumberSort(w.Number),
               description: w.Description,
               descriptionRu: w.DescriptionRu ?? null,
-              searchText: searchText(w.Description, w.DescriptionRu),
+              searchText: addressSearchText(w.Description, w.DescriptionRu),
               typeRef: typeName,
               // Decided once here instead of by `ilike '%поштомат%'` on every
               // request, so the pickers can index the column.
@@ -244,23 +282,10 @@ async function syncWarehouses(client: NovaPoshtaClient, db: Db): Promise<number>
       )
       .onConflictDoUpdate({
         target: npWarehouses.ref,
-        set: {
-          settlementRef: sql`excluded.settlement_ref`,
-          number: sql`excluded.number`,
-          numberSort: sql`excluded.number_sort`,
-          description: sql`excluded.description`,
-          descriptionRu: sql`excluded.description_ru`,
-          searchText: sql`excluded.search_text`,
-          typeRef: sql`excluded.type_ref`,
-          isPostomat: sql`excluded.is_postomat`,
-          maxWeightKg: sql`excluded.max_weight_kg`,
-          latitude: sql`excluded.latitude`,
-          longitude: sql`excluded.longitude`,
-          isActive: sql`excluded.is_active`,
-          updatedAt: sql`now()`,
-        },
-      })
-      .then(() => undefined);
+        set: { ...setFromExcluded(npWarehouses, WAREHOUSE_SYNCED), updatedAt: sql`now()` },
+        setWhere: differsFromExcluded(npWarehouses, WAREHOUSE_SYNCED),
+      });
+  };
 
   return paginateAndUpsert<RawWarehouse>(
     (page) =>
@@ -277,17 +302,35 @@ async function syncWarehouses(client: NovaPoshtaClient, db: Db): Promise<number>
 /**
  * `np_settlements.warehouse_count` has no independent source data — it's
  * derived from `np_warehouses` itself, so it can only be correct once that
- * table's sync has finished. A single correlated UPDATE over ~27k rows is
- * cheap next to the minutes-long paginated sync it follows.
+ * table's sync has finished.
+ *
+ * Two statements rather than one correlated UPDATE over every settlement,
+ * because that form rewrote all ~27k rows nightly to store the number they
+ * already held: one aggregate pass joined back to the settlements whose count
+ * moved, and one for the settlements that lost their last active branch and so
+ * appear in no group at all.
  */
 async function refreshSettlementWarehouseCounts(db: Db): Promise<void> {
   await db.execute(sql`
-    update ${npSettlements}
-    set warehouse_count = coalesce(
-      (select count(*) from ${npWarehouses}
-       where ${npWarehouses.settlementRef} = ${npSettlements.ref} and ${npWarehouses.isActive}),
-      0
-    )
+    update ${npSettlements} as s
+    set warehouse_count = counted.n, updated_at = now()
+    from (
+      select ${npWarehouses.settlementRef} as ref, count(*)::int as n
+      from ${npWarehouses}
+      where ${npWarehouses.isActive}
+      group by ${npWarehouses.settlementRef}
+    ) as counted
+    where counted.ref = s.ref and s.warehouse_count <> counted.n
+  `);
+
+  await db.execute(sql`
+    update ${npSettlements} as s
+    set warehouse_count = 0, updated_at = now()
+    where s.warehouse_count <> 0
+      and not exists (
+        select 1 from ${npWarehouses}
+        where ${npWarehouses.settlementRef} = s.ref and ${npWarehouses.isActive}
+      )
   `);
 }
 
@@ -304,14 +347,14 @@ async function refreshSettlementWarehouseCounts(db: Db): Promise<void> {
  *  - Even then, a run that saw implausibly few rows is treated as a truncated
  *    feed rather than as 40 000 closures, and retires nothing.
  *
- * The cutoff is deliberately slack: rows are refreshed daily, so the mark only
- * has to separate "touched minutes ago" from "touched yesterday", and backing
- * it off five minutes puts it far outside any Worker-vs-Postgres clock skew.
+ * "Did not touch" used to mean "whose `updated_at` is older than this run",
+ * which needed a clock-skew allowance and, worse, only worked while the sync
+ * rewrote every row every night. It now means "whose ref is not in
+ * `np_sync_seen`" — an exact set, recorded per page, with no clock in it.
  */
 const RETIRE_MIN_SEEN_RATIO = 0.5;
-const RETIRE_CLOCK_SKEW_MS = 5 * 60 * 1000;
 
-async function retireUnseenWarehouses(db: Db, startedAt: Date, seen: number): Promise<number> {
+async function retireUnseenWarehouses(db: Db, seen: number): Promise<number> {
   const [row] = await db
     .select({ total: sql<number>`count(*)::int` })
     .from(npWarehouses)
@@ -333,7 +376,10 @@ async function retireUnseenWarehouses(db: Db, startedAt: Date, seen: number): Pr
     .where(
       and(
         eq(npWarehouses.isActive, true),
-        lt(npWarehouses.updatedAt, new Date(startedAt.getTime() - RETIRE_CLOCK_SKEW_MS)),
+        sql`not exists (
+          select 1 from ${npSyncSeen}
+          where ${npSyncSeen.ref} = ${npWarehouses.ref}
+        )`,
       ),
     )
     .returning({ ref: npWarehouses.ref });
@@ -347,9 +393,15 @@ export async function syncNovaPoshtaReferenceData(
 ): Promise<{ settlements: number; warehouses: number; retired: number }> {
   const settlements = await syncSettlements(client, db);
 
-  const warehousesStartedAt = new Date();
+  // Truncate rather than delete: this table is rewritten whole every run, and
+  // 53k dead tuples a night is the exact cost the rest of this change removes.
+  // A run that dies partway leaves a partial set behind, which is harmless —
+  // retirement is unreachable unless the pagination below completes, and the
+  // next run clears it here.
+  await db.execute(sql`truncate ${npSyncSeen}`);
+
   const warehouses = await syncWarehouses(client, db);
-  const retired = await retireUnseenWarehouses(db, warehousesStartedAt, warehouses);
+  const retired = await retireUnseenWarehouses(db, warehouses);
 
   await refreshSettlementWarehouseCounts(db);
   return { settlements, warehouses, retired };

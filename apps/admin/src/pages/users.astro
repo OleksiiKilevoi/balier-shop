@@ -1,0 +1,772 @@
+---
+import { env } from 'cloudflare:workers';
+import AdminLayout from '~/layouts/AdminLayout.astro';
+import { hashPassword } from '@balier/lib/auth';
+import { createDb, createTxDb } from '@balier/lib/db';
+import {
+  archiveAdminUser,
+  createAdminUser,
+  listAdminUsers,
+  purgeAdminUser,
+  restoreAdminUser,
+  setAdminUserPassword,
+  updateAdminUser,
+} from '@balier/lib/db/queries/adminUsers';
+import {
+  ADMIN_ARCHIVE_HINT,
+  ADMIN_ROLE_HINT,
+  ADMIN_ROLE_LABELS,
+  ADMIN_USERS_FAILURES,
+  ADMIN_USERS_HINT,
+  ADMIN_USERS_MESSAGES,
+  ADMIN_USER_DISABLE_HINT,
+  formatAdminDateTime,
+} from '@balier/lib/i18n/admin';
+import type { AdminUsersMessage } from '@balier/lib/i18n/admin';
+import {
+  PASSWORD_MAX_LENGTH,
+  PASSWORD_MIN_LENGTH,
+  adminIssueKey,
+  adminUserActionSchema,
+} from '@balier/lib/validation/admin';
+import { adminRole } from '@balier/lib/db/schema';
+
+/**
+ * The panel's accounts — admin-only, and its own screen since it stopped being
+ * a section of `/settings`. That page is one operator's own preferences (the
+ * shop's cash-on-delivery limit, their own password) and this one is about
+ * other people; they were only ever together because there were two of them.
+ *
+ * WHY THE ROLE COMES FROM THE ROW AND NOT FROM THE COOKIE
+ * The session is a signed token, so anything carried in it is true as of the
+ * moment somebody signed in. A role in the token would mean a demoted admin
+ * keeps the right to create accounts for the rest of the day, which is the one
+ * thing this screen exists to control. The live row comes from
+ * `locals.adminUser` — the gate in `src/middleware.ts` reads it on every
+ * request — so this page gets the fresh role for no query of its own.
+ *
+ * TAKING AN ACCOUNT AWAY IS THREE STEPS, ON PURPOSE
+ * «Активний» off is the pause: the row stays in the list and comes back with
+ * one click. «Видалити» archives: the row moves to the other tab, its sessions
+ * end, and `lastLoginAt` — the only record the account was ever used — survives.
+ * Only from that tab, behind a typed-back address, can the row actually be
+ * dropped. So no single click in the panel destroys an account, and the
+ * irreversible one is never next to the reversible ones.
+ *
+ * Every section is a plain `<form method="post">` answered with a 303, and
+ * works with script off. `enhanceAdminForms` then takes the reload out of it.
+ */
+export const prerender = false;
+
+/** Nothing here may sit in a cache: it renders account state. */
+Astro.response.headers.set('cache-control', 'no-store');
+
+/* Set by the gate for every route it lets through, and this is one of them —
+   the guard is for the type, not for a case that can happen. */
+const me = Astro.locals.adminUser;
+if (!me) return Astro.redirect('/login', 303);
+
+const isAdmin = me.role === 'admin';
+
+/**
+ * The tab is part of the URL rather than page state, so a save lands the
+ * operator back where they were working — every form below posts to this exact
+ * href, and every redirect keeps it.
+ */
+const archived = Astro.url.searchParams.get('tab') === 'archived';
+const SELF_URL = archived ? '/users?tab=archived' : '/users';
+const back = (message: AdminUsersMessage) =>
+  `${SELF_URL}${archived ? '&' : '?'}m=${message}`;
+
+/** Set when a POST is answered in place rather than by a redirect. */
+let banner: AdminUsersMessage | null = null;
+/** Which form failed, so only that one is marked and redrawn. */
+let failedIntent: string | null = null;
+let failedUserId: string | null = null;
+/** What was typed, to put back on a refusal. Never holds a password field. */
+let body: Record<string, string> = {};
+
+const db = createDb(env.DATABASE_URL);
+
+if (Astro.request.method === 'POST') {
+  /*
+   * The gate for the whole screen, checked against the row rather than the
+   * cookie. A manager only gets here from a tab that was open before a
+   * demotion, or from a request made by hand — neither is a reason to trust
+   * what it says.
+   */
+  if (!isAdmin) {
+    banner = 'forbidden';
+  } else {
+    const form = await Astro.request.formData();
+    const fields = Object.fromEntries(form) as Record<string, string>;
+    failedIntent = fields.intent ?? null;
+
+    const parsed = adminUserActionSchema.safeParse(fields);
+
+    if (!parsed.success) {
+      const key = adminIssueKey(parsed.error);
+      banner = key in ADMIN_USERS_MESSAGES ? (key as AdminUsersMessage) : 'bad_request';
+      failedUserId = fields.userId ?? null;
+      // Only the create form is redrawn, and only its non-secret fields.
+      if (fields.intent === 'user_create') {
+        body = { email: fields.email ?? '', name: fields.name ?? '', role: fields.role ?? '' };
+      }
+    } else {
+      const action = parsed.data;
+
+      if (action.intent === 'user_create') {
+        const result = await createAdminUser(db, {
+          email: action.email,
+          name: action.name,
+          role: action.role,
+          passwordHash: await hashPassword(action.password),
+        });
+
+        if (result.ok) return Astro.redirect(back('user_created'), 303);
+
+        banner = result.reason;
+        body = { email: action.email, name: action.name ?? '', role: action.role };
+      } else if (action.intent === 'user_save') {
+        failedUserId = action.userId;
+
+        /*
+         * You cannot demote or switch off yourself. The screen renders no
+         * control for it, so reaching this means a hand-made body or a tab
+         * open from before a role change. `updateAdminUser`'s last-admin guard
+         * would catch the case that actually breaks the shop, but not this
+         * one: with two admins, demoting yourself passes that guard and
+         * silently takes away the screen you are standing on.
+         */
+        if (action.userId === me.id && !(action.role === 'admin' && action.isActive)) {
+          banner = 'self_demote';
+        } else {
+          const { db: txDb, close } = createTxDb(env.DATABASE_URL);
+          try {
+            const result = await updateAdminUser(txDb, action.userId, {
+              role: action.role,
+              isActive: action.isActive,
+            });
+
+            if (result.ok) return Astro.redirect(back('user_saved'), 303);
+            banner = result.reason;
+          } finally {
+            Astro.locals.cfContext?.waitUntil?.(close());
+          }
+        }
+      } else if (action.intent === 'user_password') {
+        failedUserId = action.userId;
+
+        /*
+         * Resetting somebody else's password needs no old password; resetting
+         * your own does, and that check lives on `/settings`. Allowing it here
+         * would hand anyone holding a stolen cookie a way to change the
+         * password without knowing it — the one thing «Зміна пароля» exists to
+         * prevent.
+         */
+        if (action.userId === me.id) {
+          banner = 'self_password';
+        } else {
+          const result = await setAdminUserPassword(
+            db,
+            action.userId,
+            await hashPassword(action.password),
+          );
+
+          if (result.ok) return Astro.redirect(back('user_password_set'), 303);
+          banner = result.reason;
+        }
+      } else if (action.intent === 'user_archive') {
+        failedUserId = action.userId;
+
+        /* Same reasoning as `self_demote`, and the more literal version of it:
+           archiving yourself is signing yourself out of a screen only you can
+           reach. */
+        if (action.userId === me.id) {
+          banner = 'self_archive';
+        } else {
+          const { db: txDb, close } = createTxDb(env.DATABASE_URL);
+          try {
+            const result = await archiveAdminUser(txDb, action.userId);
+            if (result.ok) return Astro.redirect(back('user_archived'), 303);
+            banner = result.reason;
+          } finally {
+            Astro.locals.cfContext?.waitUntil?.(close());
+          }
+        }
+      } else if (action.intent === 'user_restore') {
+        failedUserId = action.userId;
+
+        const result = await restoreAdminUser(db, action.userId);
+        if (result.ok) return Astro.redirect(back('user_restored'), 303);
+        banner = result.reason;
+      } else {
+        failedUserId = action.userId;
+
+        /* Your own row can never be in the archive — `user_archive` refuses it
+           — so there is no self-guard to write here. The query layer refuses
+           anything that is not archived, whatever this body claims. */
+        const result = await purgeAdminUser(db, action.userId, action.email);
+        if (result.ok) return Astro.redirect(back('user_purged'), 303);
+        banner = result.reason;
+      }
+    }
+  }
+}
+
+/* A manager who navigates here sees the refusal and nothing else — no list, no
+   query, no count of accounts they may not manage. */
+if (!isAdmin) Astro.response.status = 403;
+
+const users = isAdmin ? await listAdminUsers(db) : [];
+const activeUsers = users.filter((user) => user.archivedAt === null);
+const archivedUsers = users.filter((user) => user.archivedAt !== null);
+const rows = archived ? archivedUsers : activeUsers;
+
+const messageParam = Astro.url.searchParams.get('m');
+const redirectMessage =
+  messageParam && messageParam in ADMIN_USERS_MESSAGES
+    ? (messageParam as AdminUsersMessage)
+    : null;
+
+const message = banner ?? redirectMessage;
+const failed = message !== null && ADMIN_USERS_FAILURES.has(message);
+
+/** Marks the one form a refusal is about, so the others are left alone. */
+const formFailed = (intent: string, userId?: string) =>
+  banner !== null && failedIntent === intent && (userId === undefined || failedUserId === userId);
+
+const creating = formFailed('user_create');
+const ROLES = adminRole.enumValues;
+
+const TABS = [
+  { href: '/users', label: 'Активні', count: activeUsers.length, on: !archived },
+  { href: '/users?tab=archived', label: 'Архів', count: archivedUsers.length, on: archived },
+];
+---
+
+<AdminLayout title="Користувачі">
+  {
+    !isAdmin ? (
+      <>
+        <h1 class="text-fg text-2xl font-semibold sm:text-3xl">Користувачі</h1>
+        <p class="text-fg-muted mt-2 text-sm">{ADMIN_USERS_MESSAGES.forbidden}</p>
+        <a href="/orders" class="admin-btn admin-btn-secondary mt-8 inline-flex">
+          До замовлень
+        </a>
+      </>
+    ) : (
+      <>
+        {/*
+          Everything a save can change lives inside this element, and it is what
+          the enhancement layer swaps. `id` is how the same element is found
+          again in the response.
+        */}
+        <div
+          id="users-editor"
+          class="aria-busy:pointer-events-none aria-busy:opacity-60 transition-opacity"
+        >
+          <h1 class="text-fg text-2xl font-semibold sm:text-3xl">Користувачі</h1>
+          <p class="text-fg-muted mt-1 max-w-2xl text-sm">
+            {archived ? ADMIN_ARCHIVE_HINT : ADMIN_USERS_HINT}
+          </p>
+
+          {/* Same rule as everywhere in the panel: a refusal earns colour, a
+              success does not. The id is what the script moves into the toast
+              host; `data-tone` tells it whether the sentence may expire. Both
+              are inert without script, and this stays a banner at the top. */}
+          {message && (
+            <p
+              id="users-message"
+              data-tone={failed ? 'bad' : 'ok'}
+              role={failed ? 'alert' : 'status'}
+              class:list={[
+                'rounded-card mt-5 p-3 text-sm',
+                failed ? 'admin-tone-negative' : 'admin-card text-fg-muted',
+              ]}
+            >
+              {ADMIN_USERS_MESSAGES[message]}
+            </p>
+          )}
+
+          {/* Links rather than a filter form: each tab is an address worth
+              keeping, and the archive is where a save on it has to return. */}
+          <nav aria-label="Списки" class="mt-6">
+            <ul class="flex flex-wrap gap-2">
+              {TABS.map((tab) => (
+                <li>
+                  <a
+                    href={tab.href}
+                    aria-current={tab.on ? 'page' : undefined}
+                    class:list={[
+                      'admin-badge min-h-9 w-auto max-w-none px-4 text-sm',
+                      tab.on
+                        ? 'bg-accent text-accent-fg'
+                        : 'border-border-strong text-fg-muted hover:bg-surface-hover hover:text-fg border',
+                    ]}
+                  >
+                    {tab.label}
+                    <span class="ms-1.5 tabular-nums opacity-60">{tab.count}</span>
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </nav>
+
+          {rows.length === 0 ? (
+            <p class="text-fg-muted mt-6 text-sm">
+              {archived ? 'В архіві порожньо.' : 'Жодного облікового запису.'}
+            </p>
+          ) : (
+            <ul class="mt-4 space-y-3">
+              {rows.map((user) => {
+                const self = user.id === me.id;
+                const rowFailed =
+                  formFailed('user_save', user.id) ||
+                  formFailed('user_password', user.id) ||
+                  formFailed('user_archive', user.id) ||
+                  formFailed('user_restore', user.id) ||
+                  formFailed('user_purge', user.id);
+
+                return (
+                  <li
+                    class:list={[
+                      'admin-card p-5',
+                      (!user.isActive || user.archivedAt) && 'opacity-70',
+                      rowFailed && 'border-danger',
+                    ]}
+                  >
+                    <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                      <p class="text-fg text-sm font-medium">{user.email}</p>
+                      {user.name && <p class="text-fg-muted text-sm">{user.name}</p>}
+                      <span class="admin-badge text-xs">{ADMIN_ROLE_LABELS[user.role]}</span>
+                      {user.archivedAt ? (
+                        <span class="admin-badge admin-tone-neutral text-xs">В архіві</span>
+                      ) : (
+                        !user.isActive && (
+                          <span class="admin-badge admin-tone-negative text-xs">Вимкнено</span>
+                        )
+                      )}
+                      {self && <span class="text-fg-subtle text-xs">це ви</span>}
+                    </div>
+
+                    <p class="text-fg-subtle mt-1 text-xs">
+                      {user.archivedAt &&
+                        `Архівовано ${formatAdminDateTime(user.archivedAt)}. `}
+                      {user.lastLoginAt
+                        ? `Останній вхід ${formatAdminDateTime(user.lastLoginAt)}.`
+                        : 'Ще жодного входу.'}
+                      {` Створено ${formatAdminDateTime(user.createdAt)}.`}
+                    </p>
+
+                    {user.archivedAt ? (
+                      <>
+                        <form
+                          method="post"
+                          action={SELF_URL}
+                          data-form={`user-restore:${user.id}`}
+                          class="mt-4"
+                        >
+                          <input type="hidden" name="intent" value="user_restore" />
+                          <input type="hidden" name="userId" value={user.id} />
+                          <button type="submit" class="admin-btn admin-btn-secondary">
+                            Відновити
+                          </button>
+                        </form>
+
+                        {/* The one irreversible action in the panel, and the
+                            only thing that frees the address. Behind a
+                            disclosure, and behind the address typed back
+                            inside it — two deliberate acts, neither of which
+                            a misplaced click can supply. */}
+                        <details
+                          id={`purge-${user.id}`}
+                          class="admin-disclosure admin-disclosure-danger mt-2"
+                          open={formFailed('user_purge', user.id)}
+                        >
+                          <summary>
+                            Видалити назавжди
+                            <svg
+                              class="h-4 w-4 shrink-0"
+                              viewBox="0 0 16 16"
+                              fill="none"
+                              stroke="currentColor"
+                              stroke-width="1.5"
+                              stroke-linecap="round"
+                              stroke-linejoin="round"
+                              aria-hidden="true"
+                            >
+                              <path d="m4 6 4 4 4-4" />
+                            </svg>
+                          </summary>
+
+                          <form
+                            method="post"
+                            action={SELF_URL}
+                            data-form={`user-purge:${user.id}`}
+                            class="mt-3"
+                            autocomplete="off"
+                          >
+                            <input type="hidden" name="intent" value="user_purge" />
+                            <input type="hidden" name="userId" value={user.id} />
+
+                            <p class="text-fg-muted max-w-xl text-sm">
+                              Рядок буде видалено з бази разом із записом про входи. Відновити
+                              його буде неможливо. Для підтвердження введіть
+                              <span class="text-fg font-medium"> {user.email}</span>.
+                            </p>
+
+                            <div class="mt-3 flex flex-wrap items-end gap-3">
+                              <div class="w-full sm:w-72">
+                                <label
+                                  for={`purge-email-${user.id}`}
+                                  class="text-fg-subtle text-xs"
+                                >
+                                  Пошта користувача
+                                </label>
+                                <input
+                                  id={`purge-email-${user.id}`}
+                                  name="email"
+                                  type="text"
+                                  autocapitalize="none"
+                                  spellcheck="false"
+                                  maxlength={320}
+                                  required
+                                  class:list={[
+                                    'admin-field mt-1',
+                                    formFailed('user_purge', user.id) && 'border-danger',
+                                  ]}
+                                />
+                              </div>
+
+                              <button type="submit" class="admin-btn admin-btn-danger">
+                                Видалити назавжди
+                              </button>
+                            </div>
+                          </form>
+                        </details>
+                      </>
+                    ) : self ? (
+                      /* Your own row carries no controls at all. Seeing your
+                         role is the point of being listed; changing it is
+                         somebody else's job, and a disabled select with no
+                         button next to it is a control that has to explain
+                         itself. The password link goes where the current
+                         password is asked for, which is the only place your
+                         own password may be changed. */
+                      <p class="text-fg-subtle mt-4 text-xs">
+                        <a href="/settings" class="text-fg-muted hover:text-fg underline underline-offset-2">
+                          Змінити власний пароль
+                        </a>
+                      </p>
+                    ) : (
+                      <>
+                        <form
+                          method="post"
+                          action={SELF_URL}
+                          data-form={`user:${user.id}`}
+                          class="mt-4 flex flex-wrap items-end gap-4"
+                        >
+                          <input type="hidden" name="intent" value="user_save" />
+                          <input type="hidden" name="userId" value={user.id} />
+
+                          <div class="w-full sm:w-56">
+                            <label for={`role-${user.id}`} class="text-fg-subtle text-xs">
+                              Роль
+                            </label>
+                            <div class="relative">
+                              <select
+                                id={`role-${user.id}`}
+                                name="role"
+                                class="admin-field admin-select mt-1"
+                              >
+                                {ROLES.map((value) => (
+                                  <option value={value} selected={value === user.role}>
+                                    {ADMIN_ROLE_LABELS[value]}
+                                  </option>
+                                ))}
+                              </select>
+                              <svg
+                                class="text-fg-subtle pointer-events-none absolute top-1/2 right-4 h-4 w-4 -translate-y-1/2"
+                                viewBox="0 0 16 16"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="1.5"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                aria-hidden="true"
+                              >
+                                <path d="m4 6 4 4 4-4" />
+                              </svg>
+                            </div>
+                          </div>
+
+                          <label class="min-h-touch flex items-center gap-2.5 text-sm">
+                            <input
+                              type="checkbox"
+                              name="isActive"
+                              checked={user.isActive}
+                              class="size-4"
+                            />
+                            <span class="text-fg-muted">Активний</span>
+                          </label>
+
+                          <button type="submit" class="admin-btn admin-btn-secondary">
+                            Зберегти
+                          </button>
+                        </form>
+
+                        {/* Folded away: it is the rare action on this screen,
+                            and an open password field on every row invites the
+                            wrong one to be typed into. `id` is what the
+                            enhancement layer uses to leave it open across a
+                            save. */}
+                        <details
+                          id={`reset-${user.id}`}
+                          class="admin-disclosure mt-3"
+                          open={formFailed('user_password', user.id)}
+                        >
+                          <summary>
+                            Змінити пароль користувача
+                            <svg
+                              class="h-4 w-4 shrink-0"
+                              viewBox="0 0 16 16"
+                              fill="none"
+                              stroke="currentColor"
+                              stroke-width="1.5"
+                              stroke-linecap="round"
+                              stroke-linejoin="round"
+                              aria-hidden="true"
+                            >
+                              <path d="m4 6 4 4 4-4" />
+                            </svg>
+                          </summary>
+
+                          <form
+                            method="post"
+                            action={SELF_URL}
+                            data-form={`user-password:${user.id}`}
+                            class="mt-3 flex flex-wrap items-end gap-3"
+                            autocomplete="off"
+                          >
+                            <input type="hidden" name="intent" value="user_password" />
+                            <input type="hidden" name="userId" value={user.id} />
+
+                            <div class="w-full sm:w-64">
+                              <label for={`password-${user.id}`} class="text-fg-subtle text-xs">
+                                Новий пароль
+                              </label>
+                              <input
+                                id={`password-${user.id}`}
+                                name="password"
+                                type="password"
+                                autocomplete="new-password"
+                                minlength={PASSWORD_MIN_LENGTH}
+                                maxlength={PASSWORD_MAX_LENGTH}
+                                required
+                                class:list={[
+                                  'admin-field mt-1',
+                                  formFailed('user_password', user.id) && 'border-danger',
+                                ]}
+                              />
+                            </div>
+
+                            <button type="submit" class="admin-btn admin-btn-secondary">
+                              Встановити
+                            </button>
+
+                            <p class="text-fg-subtle w-full text-xs">
+                              Користувач не отримає сповіщення — передайте пароль йому особисто.
+                              Його поточні сеанси завершаться одразу.
+                            </p>
+                          </form>
+                        </details>
+
+                        <details
+                          id={`archive-${user.id}`}
+                          class="admin-disclosure admin-disclosure-danger mt-1"
+                          open={formFailed('user_archive', user.id)}
+                        >
+                          <summary>
+                            Видалити
+                            <svg
+                              class="h-4 w-4 shrink-0"
+                              viewBox="0 0 16 16"
+                              fill="none"
+                              stroke="currentColor"
+                              stroke-width="1.5"
+                              stroke-linecap="round"
+                              stroke-linejoin="round"
+                              aria-hidden="true"
+                            >
+                              <path d="m4 6 4 4 4-4" />
+                            </svg>
+                          </summary>
+
+                          <form
+                            method="post"
+                            action={SELF_URL}
+                            data-form={`user-archive:${user.id}`}
+                            class="mt-3"
+                          >
+                            <input type="hidden" name="intent" value="user_archive" />
+                            <input type="hidden" name="userId" value={user.id} />
+
+                            <p class="text-fg-muted mb-3 max-w-xl text-sm">
+                              Обліковий запис зникне зі списку й перейде в архів, а його сеанси
+                              завершаться одразу. Відновити можна будь-коли — рядок і запис про
+                              входи зберігаються.
+                            </p>
+
+                            <button type="submit" class="admin-btn admin-btn-danger">
+                              Перенести в архів
+                            </button>
+                          </form>
+                        </details>
+                      </>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+
+          {/* Creating belongs to the live list. On the archive tab it would be
+              a form whose result appears on the other one. */}
+          {!archived && (
+            <div class="admin-card mt-6 p-5">
+              <h2 class="text-fg text-base font-semibold">Новий користувач</h2>
+              <p class="text-fg-muted mt-1 text-sm">{ADMIN_ROLE_HINT}</p>
+
+              <form
+                method="post"
+                action={SELF_URL}
+                id="new-user-form"
+                data-form="user-new"
+                class="mt-4"
+                autocomplete="off"
+              >
+                <input type="hidden" name="intent" value="user_create" />
+
+                <div class="flex flex-wrap gap-3">
+                  <div class="w-full sm:w-64">
+                    <label for="new-email" class="text-fg-subtle text-xs">
+                      Пошта
+                    </label>
+                    <input
+                      id="new-email"
+                      name="email"
+                      type="email"
+                      value={creating ? (body.email ?? '') : ''}
+                      maxlength={320}
+                      autocapitalize="none"
+                      spellcheck="false"
+                      required
+                      class:list={[
+                        'admin-field mt-1',
+                        creating &&
+                          (banner === 'invalid_email' || banner === 'email_taken') &&
+                          'border-danger',
+                      ]}
+                    />
+                  </div>
+
+                  <div class="w-full sm:w-56">
+                    <label for="new-name" class="text-fg-subtle text-xs">
+                      Ім'я
+                    </label>
+                    <input
+                      id="new-name"
+                      name="name"
+                      type="text"
+                      value={creating ? (body.name ?? '') : ''}
+                      maxlength={120}
+                      class="admin-field mt-1"
+                    />
+                  </div>
+
+                  <div class="w-full sm:w-56">
+                    <label for="new-role" class="text-fg-subtle text-xs">
+                      Роль
+                    </label>
+                    <div class="relative">
+                      <select id="new-role" name="role" class="admin-field admin-select mt-1">
+                        {ROLES.map((value) => (
+                          <option value={value} selected={creating && body.role === value}>
+                            {ADMIN_ROLE_LABELS[value]}
+                          </option>
+                        ))}
+                      </select>
+                      <svg
+                        class="text-fg-subtle pointer-events-none absolute top-1/2 right-4 h-4 w-4 -translate-y-1/2"
+                        viewBox="0 0 16 16"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.5"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        aria-hidden="true"
+                      >
+                        <path d="m4 6 4 4 4-4" />
+                      </svg>
+                    </div>
+                  </div>
+
+                  <div class="w-full sm:w-64">
+                    <label for="new-user-password" class="text-fg-subtle text-xs">
+                      Пароль
+                    </label>
+                    <input
+                      id="new-user-password"
+                      name="password"
+                      type="password"
+                      autocomplete="new-password"
+                      minlength={PASSWORD_MIN_LENGTH}
+                      maxlength={PASSWORD_MAX_LENGTH}
+                      required
+                      class:list={[
+                        'admin-field mt-1',
+                        creating &&
+                          (banner === 'password_too_short' || banner === 'password_too_long') &&
+                          'border-danger',
+                      ]}
+                    />
+                  </div>
+                </div>
+
+                <p class="text-fg-subtle mt-2 text-xs">
+                  Ім'я не обов'язкове — у шапці панелі замість нього буде пошта. Пароль:
+                  щонайменше {PASSWORD_MIN_LENGTH} символів. {ADMIN_USER_DISABLE_HINT}
+                </p>
+
+                <button type="submit" class="admin-btn admin-btn-primary mt-4">Створити</button>
+              </form>
+            </div>
+          )}
+        </div>
+
+        {/*
+          Empty until script has something to put in it, and hidden the rest of
+          the time by having nothing to lay out. The message it receives is the
+          one rendered above, moved rather than rebuilt.
+        */}
+        <div id="users-toast" class="admin-toast-host" aria-live="polite" aria-atomic="true"></div>
+      </>
+    )
+  }
+
+  {/* Outside the branch above on purpose: Astro only hoists and bundles a
+      `<script>` that sits in the template proper, not one inside an expression.
+      It finds nothing to enhance on the manager's refusal page and does
+      nothing, which is the same bargain every screen here takes. */}
+  <script>
+    import { enhanceAdminForms } from '@balier/lib/admin/forms';
+
+    const editor = document.getElementById('users-editor');
+    const toastHost = document.getElementById('users-toast');
+
+    if (editor && toastHost) {
+      enhanceAdminForms({ root: editor, toastHost, messageId: 'users-message' });
+    }
+  </script>
+</AdminLayout>

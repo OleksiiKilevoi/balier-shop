@@ -49,15 +49,28 @@ const admin = Astro.locals.admin;
 const PANEL_NAME = 'Balier';
 
 /**
- * Three rows, and deliberately not four: `/categories` is reached from
- * the product list instead, because a fourth item starts wrapping this header
- * onto a second line on a narrow laptop, and categories are opened far less
- * often than anything here. The burger below takes the phone off that budget —
- * the nav is a stacked list there — but the wide header still has to fit.
+ * Three rows for a manager, four for an admin.
+ *
+ * `/categories` is deliberately not one of them and is reached from the product
+ * list instead: a fourth item starts wrapping this header onto a second line on
+ * a narrow laptop, and categories are opened far less often than anything here.
+ * «Користувачі» takes that fourth slot for admins only, which is what keeps the
+ * budget: the role that sees four items is the smaller one, the manager's
+ * header is unchanged, and the screen refuses a manager anyway — a nav item
+ * everyone can see and only some can use is worse than one that is not there.
+ * The burger below takes the phone off this budget entirely, since the nav is a
+ * stacked list there.
+ *
+ * The role comes from the live row the gate read, never from the cookie, for
+ * the same reason `/users` re-reads it: a demotion has to take the link away on
+ * the next request, not at the end of the day.
  */
 const NAV = [
   { href: '/orders', label: 'Замовлення' },
   { href: '/products', label: 'Товари' },
+  ...(Astro.locals.adminUser?.role === 'admin'
+    ? [{ href: '/users', label: 'Користувачі' }]
+    : []),
   { href: '/settings', label: 'Налаштування' },
 ];
 
@@ -212,8 +225,8 @@ const pathname = Astro.url.pathname;
         </a>
 
         {/* Hidden on a phone, where the same links are stacked inside the menu
-            below. Two navs would be two tab stops over the same three
-            destinations, so exactly one of them is ever in the layout. */}
+            below. Two navs would be two tab stops over the same destinations,
+            so exactly one of them is ever in the layout. */}
         {
           !bare && (
             <nav aria-label="Розділи" class="hidden sm:block">

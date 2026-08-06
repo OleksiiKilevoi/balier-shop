@@ -4,33 +4,68 @@
 
 ## 📍 CURRENT STATE (overwrite this block; keep tight)
 
-- **Last done:** **sessions are revocable** (2026-08-06, migration `0008`). The panel's cookie was
-  signed but could not be withdrawn, so a changed password or a switched-off account left every
-  session already issued working for up to twelve hours. Now the token carries `iat`, every account
-  carries `admin_users.sessions_valid_from`, and **the gate reads the row on every request** and
-  applies `sessionStillValid` — so a revoked or disabled session is turned away on its *next*
-  request and its cookie is cleared. The stamp moves on a password change, on an admin resetting
-  somebody's password, and on the active flag changing **in either direction**; not on a role
-  change, and not on the silent rehash at login. The device that changes its own password is handed
-  a replacement cookie in the same response, so good hygiene does not sign you out of your own tab.
-  `locals.adminUser` carries the row to the page, so `/settings` reads it for free. **Driving it
-  found a real bug in my first version:** stamping only on *disable* meant re-enabling an account
-  inside twelve hours resurrected the old browser's token — reproduced live, fixed, re-verified.
-  Legacy tokens (no `iat`) are refused, so everyone signs in once more. Cost measured on the
-  deployed Worker, not assumed: warm `/orders` median **88 ms**, inside the noise of the samples
-  taken before the change. Earlier the same day, and the reason this mattered now: the panel grew
-  **user management and roles** (migration `0007`, «Користувачі» on `/settings`, admin-only) — see
-  the session log below.
-- **In progress:** nothing. The gate is green (`pnpm check && pnpm build`, **252 tests**).
-  Migrations `0006`, `0007` and `0008` are all applied to the **dev** database and
-  `admin@balier.com` is `admin`. Both features were **driven end to end**, locally and then on the
-  deployed Worker — every rendered control's `name` checked against the schema, both roles, every
-  refusal, a manager's hand-made `user_create` POST refused with no row written, and each of the
-  five revocation paths: password change (other devices out, changing device keeps a fresh cookie),
-  disable, re-enable (old token stays dead), admin reset, and role change (session **kept**, new
-  role live immediately). What none of that covers is the `enhanceAdminForms` layer — curl does not
-  run script — so the swap/toast behaviour on `/settings` is still unverified in a browser, and its
-  scriptless fallback, which is what was tested, is the path that works either way.
+- **Last done:** **the Nova Poshta sync stopped rewriting the whole country every night**
+  (2026-08-06, migration `0010`). Neon reported 361 MB for a shop with seven products; the database
+  itself was 144 MB, 94% of it the two NP tables, and the gap was retained history for nightly
+  writes that changed nothing. Upserts are now conditional (`db/upsert.ts`), retirement reads the
+  new `np_sync_seen` scratch table instead of inferring from `updated_at`, and warehouse
+  `search_text` lost its separator-free variant. A full sync now writes **17 settlement rows
+  instead of 26 791**; after a `VACUUM FULL` the dev database is **64 MB**. The `/checkout` searches
+  were re-driven against the slimmed data («хркив»→Харків, «Крещатик» and «вул.Хрещатик» both
+  finding Kyiv branches). **`balier-cron` redeployed the same day** — version `26fa1ef6`, both
+  schedules re-registered, all five secrets still present per `wrangler secret list`. That deploy
+  was the deadline: the old Worker would have re-bloated the tables at 04:00 UTC. The **first
+  deployed run of the new sync is that 04:00 tick** — worth a look at the sizes afterwards, since
+  every local run so far was `tsx`, not the Workers runtime.
+- **Previously:** **`/users` — its own screen, with an archive** (2026-08-06, migration `0009`).
+  Four asked-for changes to the panel. (1) Accounts can now be **removed**, in two steps that are
+  deliberately not one: «Видалити» sets `admin_users.archived_at`, which drops the row out of the
+  list into an «Архів» tab, ends its sessions, and is undone by «Відновити»; only from that tab,
+  behind the address **typed back**, does «Видалити назавжди» actually `DELETE` the row and free
+  the email. So no single click anywhere destroys an account, and `lastLoginAt` survives everything
+  but the last one. **Archiving deliberately leaves `is_active` alone**, so a restore returns the
+  account in the state it was removed in — which only works because `sessionStillValid` reads the
+  two facts separately, and an archived row may well still be `is_active: true`. (2) Managing other
+  people moved off `/settings` onto **`/users`**, admin-only, with a fourth nav item rendered only
+  for admins (the manager's header is unchanged, and the role comes from the live row, so a
+  demotion takes the link away on the next request). `/settings` is now two sections: the COD limit
+  and your own password. (3) «Власну роль і доступ змінити не можна…» is gone — your own row simply
+  carries no controls, just the role badge, «це ви» and a link to `/settings`. The server still
+  refuses `self_demote` / `self_archive` / `self_password` for hand-made bodies. (4) The default
+  `::marker` is gone panel-wide (a base rule, so nothing can ship with it by omission);
+  `.admin-disclosure` grew a chevron in a hover/open well and a `::details-content` slide behind
+  `@supports`, plus an `.admin-disclosure-danger` variant for the two destructive ones — and
+  «Інші дії» on the order page finally uses the component instead of its own markup.
+- **In progress:** nothing. The gate is green (`pnpm check && pnpm build`, **266 tests**).
+  Migrations `0006`–`0010` are all applied to the **dev** database. **Driven end to end locally**
+  against the dev server, every rendered control's `name` checked against the schema: archive →
+  archive tab → restore → archive again; a real purge (mixed-case address accepted, `normalizeEmail`
+  does the matching) and then **the same address re-used for a new account**; every refusal —
+  wrong address, blank address, `user_purge` aimed by hand at a **live** account (refused by the
+  query layer's `IS NOT NULL`, not by the screen), self-archive, self-demote, self-password,
+  `email_taken` naming the archive, a short password; a **manager** getting 403 on `/users` with no
+  row leaked and no nav item, and their hand-made `user_create` refused with no row written. The
+  one that matters most: a manager **signed in**, then archived, is turned away on their *next*
+  request (`session_expired`) and cannot log in — with `is_active` still `true` — and after a
+  restore signs in fresh while the pre-archive cookie stays dead. Not yet driven in a **browser**:
+  the `enhanceAdminForms` swap/toast on `/users` and the new disclosure CSS (curl runs no script and
+  paints nothing).
+- **Deployed 2026-08-06, admin Worker only** — `balier-admin-dev` **`7ff84793`**, verified over
+  HTTPS on `admin.balier.mlosko.dev`: a full create → archive → restore → archive → purge round
+  trip made *through the deployed panel*, the typed-address guard refusing a wrong one, both tabs
+  rendering with their counts, the nav's fourth item present, and the removed sentence gone.
+  `balier-dev` and `balier-cron` were **deliberately not redeployed** — nothing they import
+  changed (checked, not assumed: neither app references `queries/adminUsers`, `auth/session`,
+  `validation/admin` or `i18n/admin`). Migration `0009` was applied to the dev database **before**
+  the deploy, which is the required order — the gate reads `archived_at` on every request.
+  **Deployed but NOT committed**, like the sessions work before it: the working tree still holds
+  everything above.
+- **One loose end from this session's driving, unresolved:** `qa-live@balier.test` was found
+  switched **on** at 19:09 EEST with `sessions_valid_from` stamped in the same instant — the
+  signature of a `user_save` that changed the active flag — and **no command in this session
+  accounts for it**. Set back to disabled. It is a QA row in the dev database and no deployed code
+  depends on it, but it is written down rather than quietly tidied away, because the honest state of
+  things is that one write is unexplained.
 - **Deployed 2026-08-06, all three Workers, verified over HTTPS** — `balier-admin-dev`
   (**`c8d656f2`**, the revocation build; `2f82ee50` was the users build earlier the same day),
   `balier-dev` (`2fea0176`) and `balier-cron` (`39167a18`, all five secrets still
@@ -44,13 +79,15 @@
   changes.
 - **Next step:** the standing **browser pass** — `/checkout`'s delivery step is the one to drive
   first, since only curl/DB-level checks have been run against it; then `/categories` (rewritten,
-  never driven) and `/settings`, whose script layer is now the newest untested thing on it, on
-  `admin.balier.mlosko.dev`, plus the panel flows curl cannot drive (image upload preview,
-  `/orders/new` card order confirming the Monobank invoice's URLs). Then Phase 5.
+  never driven), `/settings`, and now `/users`, whose script layer and whose disclosure CSS are the
+  newest untested things in the panel, on `admin.balier.mlosko.dev`, plus the panel flows curl
+  cannot drive (image upload preview, `/orders/new` card order confirming the Monobank invoice's
+  URLs). Then Phase 5.
   **A production deploy needs `pnpm db:migrate` against that database and one
   `pnpm admin:user role <email> admin`, or the panel ships with nobody able to add a user.**
-  Migration `0008` must land **before** that deploy too — the gate reads `sessions_valid_from` on
-  every request, so code ahead of schema is a panel nobody can open.
+  Migrations `0008` **and `0009`** must land **before** that deploy — the gate reads
+  `sessions_valid_from` and now `archived_at` on every request, so code ahead of schema is a panel
+  nobody can open.
   **Not yet deployed** — the two Workers need a push/deploy to pick this up, and **`balier-cron`
   needs a redeploy too** this time: the sync changes live in `@balier/lib`, so the note below
   about the split not requiring one no longer applies to this change.
@@ -70,9 +107,8 @@
     assumed): all five secrets present per `wrangler secret list` — `DATABASE_URL`,
     `NOVAPOSHTA_API_KEY`, `MONOBANK_TOKEN`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` — and the
     deployed code has the sweep, since version `27405ec5` (2026-08-05 16:46 UTC) postdates commit
-    `e8d8447` (16:43 UTC) by three minutes. Everything after that commit is the `~/lib` →
-    `@balier/lib` import rewrite and comments, so **the workspace split does not require a cron
-    redeploy**. `send_email` / `ORDER_EMAIL_FROM` were already in that deploy and the DNS records
+    `e8d8447` (16:43 UTC) by three minutes. The workspace split alone did not require a cron
+    redeploy; the 2026-08-06 sync change did, and got one — `26fa1ef6`, secrets verified after. `send_email` / `ORDER_EMAIL_FROM` were already in that deploy and the DNS records
     now exist, so the sweep's order-paid email delivers too.
   - **Admin sessions did not survive the split** — `balier-admin-dev` got a **fresh
     `ADMIN_SESSION_SECRET`** at deploy (the `__Host-` cookie could not cross hostnames anyway).
@@ -94,6 +130,12 @@
   - **Sessions are revocable per account as of 2026-08-06** (`sessions_valid_from` + the gate's
     per-request row read). Rotating `ADMIN_SESSION_SECRET` is still the way to end *everyone's* at
     once, and it is still the only lever if the database itself is the problem.
+  - **`pnpm admin:user` cannot reach the archive** — no command writes `archived_at`, and `enable`
+    now says so out loud when the account it just re-flagged is archived anyway. Archiving and
+    purging are panel actions on purpose: the irreversible one should take a screen that shows what
+    is being deleted. `list` prints `[arch]` ahead of `[on]`/`[off]` for the same reason — an
+    archived row is usually still `is_active`, and the recovery tool must not say `[on]` about an
+    account that cannot sign in.
   - **Turnstile is commented out, not deleted** (`grep -rn "Turnstile:" src wrangler.jsonc` to
     restore), so **the KV rate limiter is the only bot defence on `/api/checkout`** — 10/min per IP.
   - Leftovers from earlier phases: Phase 3 is code-complete but still wants a real browser pass
@@ -136,10 +178,12 @@
   archived rather than deleted on purpose, since archive-only is the rule the feature ships. The
   five seeded products are untouched and all `active`. **`admin@balier.com` is the only enabled
   admin account, and the only one with the `admin` role.** Five disabled rows sit alongside it:
-  `qa-settings@` / `qa-catalog@` from earlier passes, and `qa-users@balier.test` (admin),
-  `anna@balier.test` and `qa-live@balier.test` (managers) from the users pass — the last one is the
-  account created *through the deployed panel* as proof it works. All switched off afterwards; the
-  section has no delete by design, so «cleaned up» means disabled.
+  `qa-catalog@`, `qa-users@balier.test` (admin), `anna@balier.test`, `qa-live@balier.test` (the
+  account created *through the deployed panel* as proof it works) and `qa-arch@balier.test` (admin,
+  created by `pnpm admin:user` to drive the archive pass). **One row is archived on purpose:**
+  `qa-settings@balier.test` — its original row was **purged** during the pass and the address
+  immediately re-used for a new account, which is the proof that a purge frees the email; the new
+  row was then archived and left there so the «Архів» tab has something in it for the browser pass.
 - **Media state (checked 2026-08-06, not inferred):** all **17** `product_images` rows —
   `lorem-ipsum`, `lunet`, `space`, `wallet` — point at seeded objects that are in `balier-media`,
   so nothing in the catalog is a broken image. Five objects sit in the *local* Miniflare store and
@@ -173,6 +217,33 @@
 > Empty by design. Everything through the end of Phase 4 was moved to **`docs/history.md`** on
 > 2026-08-05, not rewritten — this file is read in full at every session start and had reached
 > 852 lines. New session entries go here; move a phase's entries across once the phase is done.
+
+**2026-08-06 (Nova Poshta sync stopped rewriting the country).** Asked why Neon reported 361 MB.
+It wasn't data: `pg_database_size` was 144 MB, 94% of it the NP reference tables, and the rest was
+retained history for writes that changed nothing — the sync re-upserted all ~80k rows nightly, and
+Postgres cannot update a row in place, so every one left a new tuple. Three changes, migration
+`0010`. (1) Both upserts carry `setWhere: differsFromExcluded(...)`, from `db/upsert.ts`, whose two
+helpers take the *same* column list so a column in the `set` can't silently drop out of the
+comparison and stop syncing. (2) Retirement no longer means "whose `updated_at` this run didn't
+touch" — which only worked *because* everything was rewritten — but "whose ref is not in
+`np_sync_seen`", a scratch table truncated per run and filled from the unfiltered pages; the
+clock-skew allowance is gone with it. (3) Warehouse `search_text` drops the separator-free variant
+(`addressSearchText`): it earns its keep for «іванофранківськ», not for street addresses. Measured
+on dev, not assumed: a second full sync against an unchanged feed wrote **0 rows** to either table,
+and after a `VACUUM FULL` the database is **64 MB, down from 144**. Neon's own 361 MB figure is
+retained history and decays on its schedule, not ours — it will not drop on the day. 266 tests;
+gate green; `balier-cron` redeployed (`26fa1ef6`).
+
+**2026-08-06 (users page + archive).** Four asked-for panel changes. Migration `0009` adds
+`archived_at`, and removal became two steps — archive (reversible, sessions ended, `is_active`
+deliberately untouched so a restore is faithful) and, only from the «Архів» tab and only with the
+address typed back, a real `DELETE` that frees the email. The whole section moved off `/settings`
+to admin-only `/users`, with a fourth nav item rendered from the live role. «Власну роль… попросіть
+іншого адміністратора» is gone: your own row now carries no controls at all, which says the same
+thing without the sentence. Panel-wide, the UA `::marker` is dead in the base layer and
+`.admin-disclosure` grew a chevron well, a `::details-content` slide and a danger variant. Driven
+locally end to end, including a purge-then-reuse of the same address and a signed-in manager cut
+off mid-session by an archive. 259 tests; gate green; not deployed.
 
 **2026-08-06 (session revocation).** Asked to close the hole the users session left open: a changed
 password or a disabled account must not leave somebody signed in for hours. Migration `0008` adds

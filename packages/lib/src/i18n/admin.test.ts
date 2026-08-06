@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest';
+import type { AdminUserResult } from '../db/queries/adminUsers';
 import { MEDIA_FORMATS, MEDIA_FORMAT_LABELS } from '../media';
 import { MAX_UPLOAD_BYTES } from '../media/upload';
-import { ADMIN_UPLOAD_ERRORS, ADMIN_UPLOAD_HINT, formatFileSize } from './admin';
+import {
+  ADMIN_UPLOAD_ERRORS,
+  ADMIN_UPLOAD_HINT,
+  ADMIN_USERS_FAILURES,
+  ADMIN_USERS_MESSAGES,
+  formatFileSize,
+} from './admin';
 
 /**
  * The upload copy is generated from `MEDIA_FORMATS`, not typed out, so that the
@@ -26,6 +33,46 @@ describe('upload copy', () => {
     const megabytes = `${Math.round(MAX_UPLOAD_BYTES / 1024 / 1024)} МБ`;
     expect(ADMIN_UPLOAD_HINT).toContain(megabytes);
     expect(ADMIN_UPLOAD_ERRORS.too_large).toContain(megabytes);
+  });
+});
+
+/**
+ * `/users` renders `ADMIN_USERS_MESSAGES[reason]` for whatever the query layer
+ * hands back, so a refusal with no entry there renders as `undefined` — an
+ * empty banner over an action that silently did nothing, which is the worst
+ * possible way to find out an account was not archived.
+ *
+ * The `Record` is the guard, not the loop: adding a reason to `AdminUserResult`
+ * without listing it here stops the build, and listing one without a sentence
+ * fails the assertion below.
+ */
+describe('the users screen’s refusals', () => {
+  const REASONS: Record<Extract<AdminUserResult, { ok: false }>['reason'], true> = {
+    email_taken: true,
+    last_admin: true,
+    not_found: true,
+    not_archived: true,
+    confirm_email: true,
+  };
+
+  it('has a sentence for every refusal the query layer can return', () => {
+    for (const reason of Object.keys(REASONS)) {
+      expect(ADMIN_USERS_MESSAGES, reason).toHaveProperty(reason);
+    }
+  });
+
+  it('shows every one of them in red, and no confirmation', () => {
+    for (const reason of Object.keys(REASONS)) {
+      expect(ADMIN_USERS_FAILURES.has(reason as keyof typeof ADMIN_USERS_MESSAGES), reason).toBe(
+        true,
+      );
+    }
+
+    // The other half of the same rule: the six things that went right are the
+    // only keys that may expire on their own (`forms.ts` reads `data-tone`).
+    for (const key of ['user_created', 'user_saved', 'user_password_set', 'user_archived', 'user_restored', 'user_purged'] as const) {
+      expect(ADMIN_USERS_FAILURES.has(key), key).toBe(false);
+    }
   });
 });
 

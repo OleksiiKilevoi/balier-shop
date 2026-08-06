@@ -223,7 +223,55 @@ describe('adminUserActionSchema', () => {
 
   it('refuses an intent the page does not render', () => {
     expect(
-      adminUserActionSchema.safeParse(body({ intent: 'user_delete', userId: 'x' })).success,
+      adminUserActionSchema.safeParse(body({ intent: 'user_impersonate', userId: 'x' })).success,
     ).toBe(false);
+  });
+
+  /*
+   * Removing an account is three intents rather than one, so that the
+   * reversible step and the irreversible one can never be the same request —
+   * see `archiveAdminUser` / `purgeAdminUser`.
+   */
+  it('parses archive and restore from nothing but an id', () => {
+    const id = '11111111-1111-4111-8111-111111111111';
+
+    expect(adminUserActionSchema.parse(body({ intent: 'user_archive', userId: id }))).toEqual({
+      intent: 'user_archive',
+      userId: id,
+    });
+    expect(adminUserActionSchema.parse(body({ intent: 'user_restore', userId: id }))).toEqual({
+      intent: 'user_restore',
+      userId: id,
+    });
+  });
+
+  it('refuses any of the three against an id that is not a uuid', () => {
+    for (const intent of ['user_archive', 'user_restore', 'user_purge']) {
+      const parsed = adminUserActionSchema.safeParse(
+        body({ intent, userId: 'not-a-uuid', email: 'anna@balier.ua' }),
+      );
+
+      expect(parsed.success, intent).toBe(false);
+      expect(adminIssueKey(parsed.error!), intent).toBe('bad_request');
+    }
+  });
+
+  it('will not purge without the address typed back', () => {
+    const parsed = adminUserActionSchema.safeParse(
+      body({ intent: 'user_purge', userId: '11111111-1111-4111-8111-111111111111', email: '  ' }),
+    );
+
+    expect(parsed.success).toBe(false);
+    expect(adminIssueKey(parsed.error!)).toBe('confirm_email');
+  });
+
+  it('trims the typed-back address, since the row it is matched against is normalised', () => {
+    const id = '11111111-1111-4111-8111-111111111111';
+
+    expect(
+      adminUserActionSchema.parse(
+        body({ intent: 'user_purge', userId: id, email: '  Anna@Balier.UA ' }),
+      ),
+    ).toEqual({ intent: 'user_purge', userId: id, email: 'Anna@Balier.UA' });
   });
 });

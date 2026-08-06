@@ -254,9 +254,21 @@ const leavingTerminal = order?.status === 'cancelled' || order?.status === 'refu
                   exiting it did) and there is no script on this page. Two
                   deliberate clicks. */}
               {(exits.length > 0 || (revert && leavingTerminal)) && (
-                <details class="border-border mt-4 border-t pt-4">
-                  <summary class="text-fg-muted hover:text-fg min-h-touch flex cursor-pointer items-center text-sm">
+                <details class="admin-disclosure border-border mt-4 border-t pt-4">
+                  <summary>
                     Інші дії
+                    <svg
+                      class="h-4 w-4 shrink-0"
+                      viewBox="0 0 16 16"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.5"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      aria-hidden="true"
+                    >
+                      <path d="m4 6 4 4 4-4" />
+                    </svg>
                   </summary>
                   {revert && leavingTerminal && (
                     <form method="post" action={selfUrl} class="mt-3">

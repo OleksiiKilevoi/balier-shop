@@ -145,25 +145,26 @@ describe('sessionStillValid', () => {
   /** `sessions_valid_from` as a `Date`, from epoch seconds. */
   const validFrom = (seconds: number) => new Date(seconds * 1000);
 
+  /** A live account, revoked whenever the caller says. */
+  const account = (seconds: number) => ({
+    isActive: true,
+    archivedAt: null,
+    sessionsValidFrom: validFrom(seconds),
+  });
+
   it('keeps a token minted after the account was last revoked', () => {
-    expect(sessionStillValid(session, { isActive: true, sessionsValidFrom: validFrom(NOW - 60) })).toBe(
-      true,
-    );
+    expect(sessionStillValid(session, account(NOW - 60))).toBe(true);
   });
 
   it('refuses every token minted before the revocation', () => {
-    expect(sessionStillValid(session, { isActive: true, sessionsValidFrom: validFrom(NOW + 1) })).toBe(
-      false,
-    );
+    expect(sessionStillValid(session, account(NOW + 1))).toBe(false);
   });
 
   it('keeps a token minted in the same second as the revocation', () => {
     // The sign-in that immediately follows a password change: the revocation
     // and the fresh token land in the same second, and treating that as revoked
     // would make the new password fail to take.
-    expect(sessionStillValid(session, { isActive: true, sessionsValidFrom: validFrom(NOW) })).toBe(
-      true,
-    );
+    expect(sessionStillValid(session, account(NOW))).toBe(true);
   });
 
   it('ignores the sub-second part of the column, which is milliseconds', () => {
@@ -171,12 +172,32 @@ describe('sessionStillValid', () => {
     // a revocation at NOW.500 would kill a token minted at NOW — including the
     // one just issued to replace it.
     const withMillis = new Date(NOW * 1000 + 500);
-    expect(sessionStillValid(session, { isActive: true, sessionsValidFrom: withMillis })).toBe(true);
+    expect(
+      sessionStillValid(session, { isActive: true, archivedAt: null, sessionsValidFrom: withMillis }),
+    ).toBe(true);
   });
 
   it('refuses a disabled account whatever the timestamps say', () => {
     expect(
-      sessionStillValid(session, { isActive: false, sessionsValidFrom: validFrom(NOW - 3600) }),
+      sessionStillValid(session, {
+        isActive: false,
+        archivedAt: null,
+        sessionsValidFrom: validFrom(NOW - 3600),
+      }),
+    ).toBe(false);
+  });
+
+  it('refuses an archived account even though it is still marked active', () => {
+    // Archiving deliberately leaves `isActive` alone, so that «Відновити» puts
+    // the account back in the state it was removed in. That is only safe
+    // because this check reads the two facts separately — an archived row is
+    // the one case where `isActive: true` must not mean «may sign in».
+    expect(
+      sessionStillValid(session, {
+        isActive: true,
+        archivedAt: new Date((NOW - 3600) * 1000),
+        sessionsValidFrom: validFrom(NOW - 7200),
+      }),
     ).toBe(false);
   });
 });

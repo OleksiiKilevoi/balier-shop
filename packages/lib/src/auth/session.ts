@@ -138,10 +138,14 @@ export async function verifySession(
  *
  * Split out of the gate and kept pure so it can be tested without a database,
  * because it is the piece that decides whether somebody is still signed in.
- * Both halves matter and they answer different questions:
+ * All three parts matter and they answer different questions:
  *
  *   - `isActive` — is this still an account at all. A disabled user is turned
  *     away on their next request rather than at the end of their working day.
+ *   - `archivedAt` — has the account been removed from the panel. Checked
+ *     independently of `isActive`, because archiving deliberately leaves that
+ *     flag alone so «Відновити» can put the account back as it was — which
+ *     means an archived row may still be `isActive: true`.
  *   - `sessionsValidFrom` — every token minted before this instant is dead.
  *     Set on a password change and on being switched off, so «I think my
  *     password leaked» has an answer that is true everywhere at once, not just
@@ -156,9 +160,9 @@ export async function verifySession(
  */
 export function sessionStillValid(
   session: AdminSession,
-  user: { isActive: boolean; sessionsValidFrom: Date },
+  user: { isActive: boolean; archivedAt: Date | null; sessionsValidFrom: Date },
 ): boolean {
-  if (!user.isActive) return false;
+  if (!user.isActive || user.archivedAt !== null) return false;
   return session.issuedAt >= Math.floor(user.sessionsValidFrom.getTime() / 1000);
 }
 

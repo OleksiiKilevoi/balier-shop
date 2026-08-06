@@ -20,10 +20,16 @@ import { PASSWORD_MIN_LENGTH } from '@balier/lib/validation/admin';
  *   pnpm admin:user enable   <email>
  *   pnpm admin:user list
  *
- * The panel grew its own «Користувачі» section on `/settings`, so this is no
- * longer the only way an account comes into being — but it is still the only
- * way the *first* one does, which is the chicken-and-egg the login form cannot
- * solve for itself, and the only way back in when the last admin is locked out.
+ * The panel has its own `/users` screen, so this is no longer the only way an
+ * account comes into being — but it is still the only way the *first* one does,
+ * which is the chicken-and-egg the login form cannot solve for itself, and the
+ * only way back in when the last admin is locked out.
+ *
+ * `disable` here and «Видалити» there are different acts and this script has no
+ * equivalent of the second: archiving and purging are panel actions, on the
+ * grounds that the irreversible one should take a screen that shows you what
+ * you are deleting. Nothing here writes `archived_at`, and `enable` will not
+ * lift an account out of the archive.
  *
  * `role` exists for one more reason: migration `0007` added the column with a
  * default of `manager`, so every account that predates it — including the
@@ -208,9 +214,13 @@ async function main() {
         .update(schema.adminUsers)
         .set({ isActive, updatedAt: new Date() })
         .where(eq(schema.adminUsers.email, email))
-        .returning({ email: schema.adminUsers.email });
+        .returning({
+          email: schema.adminUsers.email,
+          archivedAt: schema.adminUsers.archivedAt,
+        });
 
-      if (updated.length === 0) {
+      const [row] = updated;
+      if (!row) {
         console.error(`No admin with the address ${email}.`);
         process.exit(1);
       }
@@ -218,6 +228,14 @@ async function main() {
       console.log(`${email} is now ${isActive ? 'active' : 'disabled'}.`);
       if (!isActive) {
         console.log('Any session they already hold stays valid until it expires.');
+      }
+      /* Said out loud rather than left to be discovered at a login form: the
+         flag this just set is not the one keeping them out, and no command here
+         lifts an account out of the archive. */
+      if (isActive && row.archivedAt) {
+        console.log(
+          'They are archived, so they still cannot sign in — restore them in the panel at /users.',
+        );
       }
       break;
     }
@@ -229,6 +247,7 @@ async function main() {
           name: schema.adminUsers.name,
           role: schema.adminUsers.role,
           isActive: schema.adminUsers.isActive,
+          archivedAt: schema.adminUsers.archivedAt,
           lastLoginAt: schema.adminUsers.lastLoginAt,
         })
         .from(schema.adminUsers);
@@ -240,8 +259,13 @@ async function main() {
 
       for (const row of rows) {
         const last = row.lastLoginAt ? row.lastLoginAt.toISOString() : 'never';
+        /* The archive outranks the flag in the marker, because it outranks it
+           in the gate: an archived row may well be `is_active`, and printing
+           `[on]` next to an account that cannot sign in would make this tool
+           lie in exactly the situation it exists for. */
+        const state = row.archivedAt ? '[arch]' : row.isActive ? '[on]  ' : '[off] ';
         console.log(
-          `${row.isActive ? '[on] ' : '[off]'} ${row.role.padEnd(7)} ${row.email}${row.name ? ` (${row.name})` : ''} — last login: ${last}`,
+          `${state} ${row.role.padEnd(7)} ${row.email}${row.name ? ` (${row.name})` : ''} — last login: ${last}`,
         );
       }
       break;

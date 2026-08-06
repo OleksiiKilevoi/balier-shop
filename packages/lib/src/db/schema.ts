@@ -402,6 +402,25 @@ export const npWarehouses = pgTable(
   ],
 );
 
+/**
+ * Scratch space for one warehouse sync run: the ref of every branch the feed
+ * returned, truncated at the start of each run.
+ *
+ * It exists because retirement used to be inferred from `np_warehouses.updated_at`
+ * — "anything the run didn't touch is gone from the feed" — which only worked
+ * because the sync rewrote every row every night. That rewrite is what made the
+ * database ten times bigger than its data, and Postgres cannot touch a row's
+ * timestamp without writing the whole 800-byte row again, so there is no cheap
+ * in-place "seen" mark. A 36-byte ref per branch is ~2 MB against ~45 MB.
+ *
+ * Deliberately without an index: it is written once and read once per run, by an
+ * anti-join that hashes it whole. It assumes one sync at a time, which the daily
+ * cron guarantees.
+ */
+export const npSyncSeen = pgTable('np_sync_seen', {
+  ref: text('ref').notNull(),
+});
+
 /* -------------------------------------------------------- content & config */
 
 export const pages = pgTable('pages', {
@@ -446,8 +465,13 @@ export const settings = pgTable('settings', {
  * — never a raw password, and never reversible. `email` is stored lower-cased;
  * `normalizeEmail` there is the only thing that writes or looks it up.
  *
- * `isActive` is how an admin is removed: revoking access must not delete the
- * row, because `lastLoginAt` is the only record that the account was ever used.
+ * Access is taken away in two steps, and they mean different things.
+ * `isActive` is the pause — the person is still on the team, the row stays in
+ * the panel's list, and switching it back on is one click. `archivedAt` is the
+ * removal: the row leaves the list for the «Архів» tab, keeps `lastLoginAt` as
+ * the record that the account was ever used, and can still be restored. Only
+ * from that tab can a row be dropped for good, which is the one thing that
+ * frees the address for re-use.
  */
 export const adminUsers = pgTable('admin_users', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -471,6 +495,17 @@ export const adminUsers = pgTable('admin_users', {
   sessionsValidFrom: timestamp('sessions_valid_from', { withTimezone: true })
     .notNull()
     .defaultNow(),
+  /**
+   * Set when the account is removed from the panel's list. NULL is the normal
+   * state, so every reader that forgets the filter sees the live accounts —
+   * the safe half of the mistake.
+   *
+   * An archived row cannot sign in whatever `isActive` says: both login
+   * readers require this to be NULL. `isActive` is left exactly as it was, so
+   * «Відновити» puts the account back in the state it was removed in rather
+   * than silently re-enabling one that was already switched off.
+   */
+  archivedAt: timestamp('archived_at', { withTimezone: true }),
   lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
   createdAt,
   updatedAt,

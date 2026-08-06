@@ -164,18 +164,20 @@ export const adminPasswordChangeSchema = z
 export type AdminPasswordChange = z.infer<typeof adminPasswordChangeSchema>;
 
 /**
- * The «Користувачі» section of `/settings` — admin-only, and the role is
- * re-read from the database on every one of these, never taken from the
- * session cookie (`/settings.astro`).
+ * `/users` — admin-only, and the role is re-read from the database on every one
+ * of these, never taken from the session cookie (`users.astro`).
  *
  * The address is validated here, unlike at login: a typo in a *new* account is
  * an account nobody can ever sign into, and the person who would find out is
  * not the person making the mistake. It is lower-cased by `normalizeEmail` in
  * the query layer, which is the only writer of the column.
  *
- * There is no delete. `isActive` is how an account is taken away — the row
- * carries `lastLoginAt`, the only record the account was ever used, and the
- * same reasoning that keeps archived products out of the delete business.
+ * Removal is three intents rather than one, because it is deliberately two
+ * decisions: `user_archive` takes the account out of the list and is undone by
+ * `user_restore`, and `user_purge` — reachable only from the archive tab, and
+ * refused by `purgeAdminUser` for anything not already in it — is the one that
+ * drops the row. Nothing about the shape of these bodies enforces that order;
+ * the query layer does, since a body is whatever somebody chooses to send.
  */
 export const adminUserActionSchema = z.discriminatedUnion('intent', [
   z.object({
@@ -203,6 +205,27 @@ export const adminUserActionSchema = z.discriminatedUnion('intent', [
     intent: z.literal('user_password'),
     userId: z.uuid('bad_request'),
     password: newPasswordSchema,
+  }),
+  z.object({
+    intent: z.literal('user_archive'),
+    userId: z.uuid('bad_request'),
+  }),
+  z.object({
+    intent: z.literal('user_restore'),
+    userId: z.uuid('bad_request'),
+  }),
+  z.object({
+    intent: z.literal('user_purge'),
+    userId: z.uuid('bad_request'),
+    /**
+     * The address as the archive tab rendered it, typed back by the operator.
+     * Not a security control — anyone posting by hand supplies whatever this
+     * says — but the last irreversible step in the panel should take more than
+     * a click landing on the wrong row, and typing the address is the one
+     * confirmation that cannot be given absent-mindedly. `purgeAdminUser` is
+     * handed it and refuses if the row's real address differs.
+     */
+    email: z.string().trim().min(1, 'confirm_email').max(320, 'confirm_email'),
   }),
 ]);
 

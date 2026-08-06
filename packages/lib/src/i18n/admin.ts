@@ -171,12 +171,13 @@ export const ADMIN_CARD_LINK_EXPIRED =
   'Термін дії посилання минув. Замовлення скасується автоматично, якщо цього ще не сталося.';
 
 /**
- * `/settings` — the cash-on-delivery limit, the signed-in user's own password,
- * and (for an admin) the accounts.
+ * `/settings` — the cash-on-delivery limit and the signed-in user's own
+ * password. Nothing else: managing other people's accounts moved to `/users`,
+ * and took its own message map with it (below).
  *
  * One map because the screen has one banner. The keys are the schemas' own
- * issue names (`~/validation/admin`) and the query layer's own refusal reasons,
- * so a rule is worded where it is enforced and this file only translates it.
+ * issue names (`~/validation/admin`), so a rule is worded where it is enforced
+ * and this file only translates it.
  *
  * The cod-limit refusal names the range rather than just saying "invalid",
  * because the field accepts one thing and rejects two different ways of getting
@@ -195,22 +196,6 @@ export const ADMIN_SETTINGS_MESSAGES = {
   passwords_do_not_match: 'Паролі не збігаються.',
   password_unchanged: 'Новий пароль такий самий, як поточний.',
   too_many_attempts: 'Забагато невдалих спроб. Спробуйте пізніше.',
-
-  /* The accounts. */
-  user_created: 'Користувача створено.',
-  user_saved: 'Зміни збережено.',
-  user_password_set: 'Пароль користувача змінено.',
-  invalid_email: 'Вкажіть коректну адресу пошти.',
-  email_taken: 'Користувач із такою поштою вже існує.',
-  /* Not «помилка»: the refusal is the feature. Says who it is about, because
-     the same sentence answers both "disable" and "demote". */
-  last_admin: 'Це єдиний активний адміністратор — спершу призначте іншого.',
-  self_demote: 'Не можна змінити роль або вимкнути власний обліковий запис.',
-  self_password: 'Власний пароль змінюйте в розділі «Зміна пароля» — там потрібен поточний.',
-  not_found: 'Користувача не знайдено — можливо, його змінили в іншій вкладці.',
-  /* A manager who reached a user-management POST anyway: a stale tab open from
-     before a demotion, or a hand-made request. */
-  forbidden: 'Потрібні права адміністратора.',
 } as const;
 
 export type AdminSettingsMessage = keyof typeof ADMIN_SETTINGS_MESSAGES;
@@ -225,13 +210,69 @@ export const ADMIN_SETTINGS_FAILURES = new Set<AdminSettingsMessage>([
   'passwords_do_not_match',
   'password_unchanged',
   'too_many_attempts',
+]);
+
+/**
+ * `/users` — its own map, not a slice of the one above, because the two are now
+ * two screens with one banner each. The overlap is two generic keys
+ * (`bad_request`, `not_found`), which is a smaller price than a shared map
+ * where half the entries can never appear on the screen reading it.
+ *
+ * The keys are again the schemas' issue names and the query layer's refusal
+ * reasons, verbatim.
+ */
+export const ADMIN_USERS_MESSAGES = {
+  user_created: 'Користувача створено.',
+  user_saved: 'Зміни збережено.',
+  user_password_set: 'Пароль користувача змінено.',
+  user_archived: 'Користувача перенесено в архів. Його сеанси завершено.',
+  user_restored: 'Користувача відновлено.',
+  user_purged: 'Обліковий запис видалено назавжди. Пошту знову можна використати.',
+
+  invalid_email: 'Вкажіть коректну адресу пошти.',
+  /* Both password fields on this screen — the new account's and the reset —
+     are the same `newPasswordSchema` as `/settings`, so they refuse in the
+     same words. */
+  password_too_short: `Пароль має містити щонайменше ${PASSWORD_MIN_LENGTH} символів.`,
+  password_too_long: `Пароль задовгий — не більше ${PASSWORD_MAX_LENGTH} символів.`,
+  /* Names the archive out loud: a colleague who was removed still holds the
+     address, and «вже існує» with nothing on the active tab using it is the
+     kind of answer that sends somebody looking for a bug. */
+  email_taken: 'Користувач із такою поштою вже існує — можливо, він в архіві.',
+  /* Not «помилка»: the refusal is the feature. Says who it is about, because
+     the same sentence answers "disable", "demote" and "archive". */
+  last_admin: 'Це єдиний активний адміністратор — спершу призначте іншого.',
+  self_demote: 'Не можна змінити роль або вимкнути власний обліковий запис.',
+  self_archive: 'Власний обліковий запис не архівують — це зробить інший адміністратор.',
+  self_password: 'Власний пароль змінюють у «Налаштуваннях» — там потрібен поточний.',
+  not_found: 'Користувача не знайдено — можливо, його змінили в іншій вкладці.',
+  /* The purge guards, each naming what to do next rather than what failed. */
+  not_archived:
+    'Видалити назавжди можна лише те, що вже в архіві — цей запис відновили в іншій вкладці.',
+  confirm_email: 'Пошта не збігається. Введіть адресу точно так, як вона показана вище.',
+  /* A manager who reached one of these POSTs anyway: a stale tab open from
+     before a demotion, or a hand-made request. */
+  forbidden: 'Потрібні права адміністратора.',
+  bad_request: 'Не вдалося зберегти зміни.',
+} as const;
+
+export type AdminUsersMessage = keyof typeof ADMIN_USERS_MESSAGES;
+
+/** Shown in red rather than in grey — everything that is not a confirmation. */
+export const ADMIN_USERS_FAILURES = new Set<AdminUsersMessage>([
   'invalid_email',
+  'password_too_short',
+  'password_too_long',
   'email_taken',
   'last_admin',
   'self_demote',
+  'self_archive',
   'self_password',
   'not_found',
+  'not_archived',
+  'confirm_email',
   'forbidden',
+  'bad_request',
 ]);
 
 export const ADMIN_ROLE_LABELS: Record<AdminRole, string> = {
@@ -260,8 +301,17 @@ export const ADMIN_PASSWORD_HINT = `Щонайменше ${PASSWORD_MIN_LENGTH} 
 export const ADMIN_USER_DISABLE_HINT =
   'Вимкнений користувач не зможе ввійти, а його поточний сеанс завершиться одразу.';
 
+/**
+ * The three ways an account can be taken away, in the order they cost, said
+ * once at the top of `/users` — because the difference between them is the one
+ * thing the buttons themselves cannot explain.
+ */
 export const ADMIN_USERS_HINT =
-  'Тут створюють облікові записи панелі. Видалення немає — доступ забирають вимкненням, щоб зберігся запис про входи.';
+  'Тут створюють облікові записи панелі. Вимкнений користувач лишається у списку й повертається одним кліком; архівований зникає зі списку, але його можна відновити. Видалити назавжди — тільки з архіву.';
+
+/** Under the archive tab, where every row is one action away from being gone. */
+export const ADMIN_ARCHIVE_HINT =
+  'Ці облікові записи не можуть увійти. Відновлення повертає їх у список у тому ж стані. Видалення назавжди прибирає рядок разом із записом про входи й звільняє пошту.';
 
 /**
  * Under the limit field. Says what the number does at checkout, in the same

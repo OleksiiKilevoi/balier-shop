@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fold, searchText } from './normalize';
+import { addressSearchText, fold, searchText } from './normalize';
 
 /**
  * The cases below are the ones that actually cost us orders, not synthetic
@@ -75,5 +75,34 @@ describe('searchText', () => {
     const stored = searchText('Дніпро', 'Днепр', 'Dnipro');
     expect(stored.includes(fold('Днипро'))).toBe(true);
     expect(stored.includes(fold('ДНЕПР'))).toBe(true);
+  });
+});
+
+describe('addressSearchText', () => {
+  const branch = 'Відділення №12: вул. Івана Мазепи, 4';
+
+  it('still matches what the customer types, folded the same way', () => {
+    const stored = addressSearchText(branch, 'Отделение №12: ул. Ивана Мазепы, 4');
+
+    expect(stored).toContain(fold('відділення 12'));
+    expect(stored).toContain(fold('мазепи'));
+    // The Russian description is the reason both spellings are indexed at all.
+    expect(stored).toContain(fold('Мазепы'));
+  });
+
+  it('does not store the separator-free copy of an address', () => {
+    // ~200 bytes per row across 53 556 warehouses, matching a query nobody
+    // types: this is the storage half of the change, so it is asserted.
+    const stored = addressSearchText(branch);
+
+    expect(stored).not.toContain('виддилення12вул');
+    expect(stored.length).toBeLessThan(searchText(branch).length);
+  });
+
+  it('is otherwise identical to searchText — same fold, same de-duplication', () => {
+    // A name with no separators has no collapsed variant to drop, so the two
+    // agree exactly; that is what keeps one fold valid for both columns.
+    expect(addressSearchText('Грунь', 'Грунь')).toBe(searchText('Грунь', 'Грунь'));
+    expect(addressSearchText('Львів', null, undefined, '')).toBe('лвив');
   });
 });
