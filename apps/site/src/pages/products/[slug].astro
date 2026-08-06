@@ -1,0 +1,342 @@
+---
+import { env } from 'cloudflare:workers';
+import BaseLayout from '~/layouts/BaseLayout.astro';
+import Container from '~/components/Container.astro';
+import Button from '~/components/Button.astro';
+import ProductGallery from '~/components/ProductGallery.astro';
+import QuantityStepper from '~/components/QuantityStepper.astro';
+import { createDb } from '@balier/lib/db';
+import { getProductBySlug } from '@balier/lib/db/queries/products';
+import { formatPrice } from '@balier/lib/money';
+import { orderDeepLink } from '@balier/lib/telegram';
+
+export const prerender = false;
+
+const db = createDb(env.DATABASE_URL);
+const product = await getProductBySlug(db, Astro.params.slug ?? '');
+if (!product) return Astro.rewrite('/404');
+
+// Guaranteed by the query — every product has at least one active variant — but
+// `noUncheckedIndexedAccess` is right to make us say so.
+const [defaultVariant] = product.variants;
+if (!defaultVariant) return Astro.rewrite('/404');
+
+const hasColourChoice = product.variants.length > 1;
+
+const detailLines =
+  product.details
+    ?.split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean) ?? [];
+
+const productUrl = new URL(Astro.url.pathname, Astro.site ?? Astro.url).href;
+const manager = env.PUBLIC_TELEGRAM_MANAGER;
+
+/**
+ * Rendered server-side for the default variant, then rebuilt by the script below
+ * as the colour and quantity change. Null when no manager is configured, in
+ * which case the button is simply not rendered.
+ */
+const telegramHref = orderDeepLink(manager, {
+  title: product.title,
+  sku: defaultVariant.sku,
+  price: defaultVariant.price,
+  quantity: 1,
+  url: productUrl,
+  variantName: hasColourChoice ? defaultVariant.colorName : null,
+});
+
+const inStock = defaultVariant.available > 0;
+const showCompareAt =
+  product.compareAtPrice !== null && product.compareAtPrice > defaultVariant.price;
+---
+
+<BaseLayout
+  title={product.metaTitle ?? product.title}
+  description={product.metaDescription ?? product.description ?? undefined}
+  ogImage={product.images[0]?.url}
+>
+  <Container class="py-6 sm:py-10 lg:py-14">
+    {/* One column on a phone: the gallery leads, then everything that decides
+        the purchase. The mockup's side-by-side split needs both halves ~550px,
+        so it only arrives at lg. */}
+    <div
+      class="grid gap-8 lg:grid-cols-2 lg:gap-12"
+      data-product
+      data-title={product.title}
+      data-url={productUrl}
+      data-manager={manager}
+      data-colour-choice={String(hasColourChoice)}
+    >
+      <ProductGallery images={product.images} title={product.title} />
+
+      {/* min-w-0 for the same reason as the gallery: a grid item's automatic
+          minimum size is its content, so one unbreakable child would widen the
+          whole column rather than being allowed to shrink or wrap. */}
+      <div class="min-w-0">
+        <h1 class="text-2xl sm:text-3xl lg:text-4xl">{product.title}</h1>
+
+        {/* The pill links to the category listing when one exists; the visual
+            stays on the inner span so the phone-sized hit area (min-h-touch,
+            compacting at md like the footer links) does not inflate the pill.
+            -my-2 gives most of that height back to the layout. */}
+        {
+          product.categoryTitle &&
+            (product.categorySlug ? (
+              <p class="mt-3">
+                <a
+                  href={`/products/category/${product.categorySlug}`}
+                  class="-my-2 inline-flex min-h-touch items-center md:my-0 md:min-h-0"
+                >
+                  <span class="bg-tag text-tag-ink hover:bg-tag/70 rounded-full px-3 py-1 text-xs transition-colors">
+                    {product.categoryTitle}
+                  </span>
+                </a>
+              </p>
+            ) : (
+              <p class="mt-3">
+                <span class="bg-tag text-tag-ink rounded-full px-3 py-1 text-xs">
+                  {product.categoryTitle}
+                </span>
+              </p>
+            ))
+        }
+
+        <p class="mt-5 flex items-baseline gap-3">
+          <span class="price text-2xl sm:text-3xl" data-price-display>
+            {formatPrice(defaultVariant.price)}
+          </span>
+          {
+            showCompareAt && (
+              <span class="text-ink-muted text-base line-through tabular-nums">
+                {formatPrice(product.compareAtPrice ?? 0)}
+              </span>
+            )
+          }
+        </p>
+
+        {product.description && <p class="text-ink-muted mt-5">{product.description}</p>}
+
+        {
+          detailLines.length > 0 && (
+            <ul class="text-ink-muted mt-4 space-y-1.5 text-sm">
+              {detailLines.map((line) => (
+                <li class="flex gap-2">
+                  <span class="text-brand" aria-hidden="true">
+                    •
+                  </span>
+                  <span>{line}</span>
+                </li>
+              ))}
+            </ul>
+          )
+        }
+
+        {
+          product.dimensions && (
+            <div class="border-line mt-6 border-t pt-5">
+              <h2 class="text-sm">Розміри</h2>
+              <p class="text-ink-muted mt-1 text-sm">{product.dimensions}</p>
+            </div>
+          )
+        }
+
+        {/* Always rendered so the script has one place to read the current
+            variant from; `hidden` when there is nothing to choose between. */}
+        <div
+          role="group"
+          aria-label="Колір"
+          class="border-line mt-6 border-t pt-5"
+          hidden={!hasColourChoice}
+        >
+          <p class="text-sm">
+            Колір: <span class="text-ink-muted" data-variant-name>{defaultVariant.colorName}</span>
+          </p>
+
+          <div class="mt-3 flex flex-wrap gap-2">
+            {
+              product.variants.map((variant, index) => (
+                <button
+                  type="button"
+                  data-variant
+                  data-variant-id={variant.id}
+                  data-sku={variant.sku}
+                  data-price={String(variant.price)}
+                  data-available={String(variant.available)}
+                  data-colour-name={variant.colorName ?? ''}
+                  aria-pressed={index === 0 ? 'true' : 'false'}
+                  class="border-line-strong rounded-btn aria-pressed:border-brand aria-pressed:bg-tag/60 inline-flex min-h-touch items-center gap-2 border px-3 text-sm transition-colors md:min-h-10"
+                >
+                  <span
+                    class="border-line-strong size-4 shrink-0 rounded-full border"
+                    style={variant.colorHex ? `background-color:${variant.colorHex}` : undefined}
+                    aria-hidden="true"
+                  />
+                  {variant.colorName}
+                </button>
+              ))
+            }
+          </div>
+        </div>
+
+        <div class="border-line mt-6 flex items-center gap-4 border-t pt-6">
+          <span class="text-sm">Кількість</span>
+          <QuantityStepper max={Math.max(defaultVariant.available, 1)} />
+        </div>
+
+        {/* Full-width stacked CTAs: on a phone these are the bottom of the page
+            and the only thing that matters on it. */}
+        <div class="mt-5 space-y-3">
+          <Button variant="primary" size="lg" block data-add-to-cart disabled={!inStock}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <g fill="none" stroke="currentColor" stroke-width="1.5">
+                <path
+                  d="M3.864 16.455c-.858-3.432-1.287-5.147-.386-6.301S6.148 9 9.685 9h4.63c3.538 0 5.306 0 6.207 1.154s.472 2.87-.386 6.301c-.546 2.183-.818 3.274-1.632 3.91c-.814.635-1.939.635-4.189.635h-4.63c-2.25 0-3.375 0-4.189-.635c-.814-.636-1.087-1.727-1.632-3.91Z"
+                ></path>
+                <path
+                  d="m19.5 9.5l-.71-2.605c-.274-1.005-.411-1.507-.692-1.886A2.5 2.5 0 0 0 17 4.172C16.56 4 16.04 4 15 4M4.5 9.5l.71-2.605c.274-1.005.411-1.507.692-1.886A2.5 2.5 0 0 1 7 4.172C7.44 4 7.96 4 9 4"
+                ></path>
+                <path d="M9 4a1 1 0 0 1 1-1h4a1 1 0 1 1 0 2h-4a1 1 0 0 1-1-1Z"></path>
+              </g>
+            </svg>
+            Додати до кошика
+          </Button>
+
+          {
+            telegramHref && (
+              <Button
+                variant="telegram"
+                size="lg"
+                block
+                href={telegramHref}
+                target="_blank"
+                rel="noopener"
+                data-telegram
+              >
+                <svg width="18" height="18" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                  <path
+                    d="M17.5 3 2.5 9l4.5 1.5L16 5l-7 6.5V16l2.5-3 3.5 2.5L17.5 3Z"
+                    stroke="currentColor"
+                    stroke-width="1.5"
+                    stroke-linejoin="round"
+                  />
+                </svg>
+                Замовити через Телеграм
+              </Button>
+            )
+          }
+        </div>
+
+        <p class="text-ink-muted mt-4 text-sm" data-stock-note hidden={inStock}>
+          Немає в наявності. Напишіть у Телеграм — повідомимо, щойно з'явиться.
+        </p>
+      </div>
+    </div>
+  </Container>
+</BaseLayout>
+
+<script>
+  import { formatPrice } from '@balier/lib/money';
+  import { orderDeepLink } from '@balier/lib/telegram';
+  import { openCartPopup } from '@balier/lib/cartPopup';
+  import { addToCart } from '@balier/lib/cart/store';
+
+  const root = document.querySelector<HTMLElement>('[data-product]');
+
+  if (root) {
+    const variantButtons = [...root.querySelectorAll<HTMLButtonElement>('button[data-variant]')];
+    const priceDisplay = root.querySelector<HTMLElement>('[data-price-display]');
+    const variantName = root.querySelector<HTMLElement>('[data-variant-name]');
+    const quantity = root.querySelector<HTMLInputElement>('input[data-quantity]');
+    const addButton = root.querySelector<HTMLButtonElement>('[data-add-to-cart]');
+    const telegram = root.querySelector<HTMLAnchorElement>('a[data-telegram]');
+    const stockNote = root.querySelector<HTMLElement>('[data-stock-note]');
+
+    const title = root.dataset.title ?? '';
+    const url = root.dataset.url ?? '';
+    const manager = root.dataset.manager ?? '';
+    const showsColour = root.dataset.colourChoice === 'true';
+
+    /** The colour currently pressed — the one every action on this page applies to. */
+    const currentVariant = () =>
+      variantButtons.find((button) => button.getAttribute('aria-pressed') === 'true') ??
+      variantButtons[0];
+
+    /** Re-derives everything that depends on the chosen colour and quantity. */
+    const render = () => {
+      const variant = currentVariant();
+      if (!variant) return;
+
+      const price = Number(variant.dataset.price);
+      const available = Number(variant.dataset.available);
+      const colourName = variant.dataset.colourName || null;
+
+      if (priceDisplay) priceDisplay.textContent = formatPrice(price);
+      if (variantName && colourName) variantName.textContent = colourName;
+
+      if (quantity) {
+        quantity.max = String(Math.max(available, 1));
+        // A colour with less on hand than the current quantity must not leave a
+        // number in the field that cannot be bought.
+        if (Number(quantity.value) > available) {
+          quantity.value = String(Math.max(available, 1));
+        }
+      }
+
+      if (addButton) addButton.disabled = available < 1;
+      if (stockNote) stockNote.hidden = available > 0;
+
+      if (telegram) {
+        const href = orderDeepLink(manager, {
+          title,
+          sku: variant.dataset.sku ?? '',
+          price,
+          quantity: Number(quantity?.value) || 1,
+          url,
+          variantName: showsColour ? colourName : null,
+        });
+        if (href) telegram.href = href;
+      }
+    };
+
+    for (const button of variantButtons) {
+      button.addEventListener('click', () => {
+        for (const other of variantButtons) {
+          other.setAttribute('aria-pressed', String(other === button));
+        }
+
+        // The gallery listens for this and swaps to that colour's photos.
+        document.dispatchEvent(
+          new CustomEvent('product:variant', {
+            detail: { variantId: button.dataset.variantId ?? '' },
+          }),
+        );
+
+        render();
+      });
+    }
+
+    document.addEventListener('quantity:change', render);
+
+    /**
+     * Adding keeps the customer on the page — the popup that follows is the
+     * confirmation, with the full cart and a straight line to checkout, so
+     * browsing is never interrupted by a redirect to a cart they did not ask
+     * to see.
+     *
+     * Only the variant id and the quantity are stored. What that costs is
+     * resolved from the database by `/api/cart` when the popup opens, so
+     * nothing priced here can be carried forward as truth.
+     */
+    if (addButton) {
+      addButton.addEventListener('click', () => {
+        const variant = currentVariant();
+        const variantId = variant?.dataset.variantId;
+        if (!variantId) return;
+
+        addToCart(variantId, Number(quantity?.value) || 1);
+        openCartPopup();
+      });
+    }
+  }
+</script>

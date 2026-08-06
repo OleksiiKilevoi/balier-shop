@@ -1,0 +1,38 @@
+---
+import type { ProductStatus } from '@balier/lib/db/schema';
+import { PRODUCT_STATUS_LABELS } from '@balier/lib/i18n/admin';
+
+/**
+ * Whether a product is visible to customers, scannable down the catalog list.
+ *
+ * The same shape as `OrderStatusBadge` and for the same reason: the tone names
+ * a meaning rather than a colour, so nothing here holds a colour value and
+ * re-theming the panel stays a change to `admin.css` alone.
+ *
+ * `draft` and `archived` deliberately do not share a tone even though a
+ * customer cannot tell them apart — both are simply absent from the shop. To
+ * the person running it they are opposites: one has never been published, the
+ * other has been withdrawn, and a list where those look the same would make
+ * «what still needs finishing» impossible to see at a glance.
+ */
+
+interface Props {
+  status: ProductStatus;
+  class?: string;
+}
+
+const { status, class: className } = Astro.props;
+
+const TONES: Record<ProductStatus, string> = {
+  // Unfinished, and waiting on us.
+  draft: 'admin-tone-attention',
+  // Live in the shop.
+  active: 'admin-tone-positive',
+  // Withdrawn on purpose.
+  archived: 'admin-tone-neutral',
+};
+---
+
+<span class:list={['admin-badge', TONES[status], className]}>
+  {PRODUCT_STATUS_LABELS[status]}
+</span>

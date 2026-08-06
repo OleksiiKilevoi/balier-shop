@@ -1,0 +1,148 @@
+---
+import { env } from 'cloudflare:workers';
+import AdminLayout from '~/layouts/AdminLayout.astro';
+import { createDb } from '@balier/lib/db';
+import { getCodLimitSetting, setCodLimitKopiykas } from '@balier/lib/db/queries/settings';
+import {
+  ADMIN_COD_LIMIT_HINT,
+  ADMIN_SETTINGS_MESSAGES,
+  formatAdminDateTime,
+} from '@balier/lib/i18n/admin';
+import type { AdminSettingsMessage } from '@balier/lib/i18n/admin';
+import { formatPrice } from '@balier/lib/money';
+import {
+  COD_LIMIT_MAX_HRYVNIAS,
+  COD_LIMIT_MIN_HRYVNIAS,
+  adminSettingsSchema,
+} from '@balier/lib/validation/admin';
+
+/**
+ * Shop settings. Today that is one value — the cash-on-delivery limit, which
+ * `getCodLimitKopiykas` has been reading at checkout since Phase 3 with nothing
+ * in the product able to write it. `scripts/seed.ts` was the only writer.
+ *
+ * A plain form POST answered with a 303 back here, like the order detail page:
+ * one field and one button do not need the fetch layer `/admin/orders/new`
+ * carries, and post/redirect/get means a refresh after saving re-reads the row
+ * instead of re-writing it.
+ *
+ * The route is named for the section rather than for the setting, so the next
+ * shop-wide value lands here instead of earning a screen of its own.
+ */
+export const prerender = false;
+
+const SELF_URL = '/admin/settings';
+
+const db = createDb(env.DATABASE_URL);
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const parsed = adminSettingsSchema.safeParse(Object.fromEntries(form));
+
+  if (!parsed.success) {
+    /*
+     * The rejected value is deliberately not carried back through the redirect.
+     * It is one short number and the message states the range, so retyping is
+     * cheaper than putting a field's contents in the URL — which is the same
+     * reasoning that keeps the new-order draft out of the query string, applied
+     * to a field where it costs almost nothing.
+     */
+    const invalid = parsed.error.issues.some((issue) => issue.message === 'invalid_cod_limit');
+    return Astro.redirect(`${SELF_URL}?m=${invalid ? 'invalid_cod_limit' : 'bad_request'}`, 303);
+  }
+
+  await setCodLimitKopiykas(db, parsed.data.codLimit);
+  return Astro.redirect(`${SELF_URL}?m=cod_limit_updated`, 303);
+}
+
+const codLimit = await getCodLimitSetting(db);
+
+/* The field is in whole hryvnias — see `codLimitSchema`. Rendered bare rather
+   than through `formatPrice`: this is a value to be edited, and a grouping
+   separator in an input is a thing to delete before typing. */
+const codLimitHryvnias = Math.round(codLimit.kopiykas / 100);
+
+const messageParam = Astro.url.searchParams.get('m');
+const message =
+  messageParam && messageParam in ADMIN_SETTINGS_MESSAGES
+    ? (messageParam as AdminSettingsMessage)
+    : null;
+
+const FAILURES = new Set<AdminSettingsMessage>(['invalid_cod_limit', 'bad_request']);
+const failed = message !== null && FAILURES.has(message);
+---
+
+<AdminLayout title="Налаштування">
+  <h1 class="text-fg text-2xl font-semibold sm:text-3xl">Налаштування</h1>
+
+  {/* Same rule as the order page: a refusal earns colour, a success does not —
+      the saved value is right there in the field to confirm it. */}
+  {
+    message && (
+      <p
+        role="status"
+        class:list={[
+          'rounded-card mt-5 p-3 text-sm',
+          failed ? 'admin-tone-negative' : 'admin-card text-fg-muted',
+        ]}
+      >
+        {ADMIN_SETTINGS_MESSAGES[message]}
+      </p>
+    )
+  }
+
+  <section class="admin-card mt-6 p-5">
+    <h2 class="text-fg text-base font-semibold">Ліміт післяплати</h2>
+    <p class="text-fg-muted mt-1 text-sm">{ADMIN_COD_LIMIT_HINT}</p>
+
+    <form method="post" class="mt-4">
+      <label for="cod-limit" class="text-fg-subtle text-xs">Максимальна сума замовлення</label>
+
+      <div class="mt-1 flex flex-wrap items-center gap-3">
+        {/* `text` with a numeric keypad, not `number`: `admin-field` sets
+            `appearance: none`, which leaves a number input's spinner rendering
+            inconsistently across browsers, and the schema already accepts a
+            value pasted with spaces in it — which `type="number"` would reject
+            before the server ever saw it. */}
+        <div class="relative w-full sm:w-56">
+          <input
+            id="cod-limit"
+            name="codLimit"
+            type="text"
+            inputmode="numeric"
+            value={codLimitHryvnias}
+            autocomplete="off"
+            aria-describedby="cod-limit-range"
+            class:list={['admin-field pr-10', failed && 'border-danger']}
+          />
+          <span
+            class="text-fg-subtle pointer-events-none absolute inset-y-0 right-4.5 flex items-center text-base sm:text-sm"
+            aria-hidden="true"
+          >
+            ₴
+          </span>
+        </div>
+
+        <button type="submit" class="admin-btn admin-btn-primary">Зберегти</button>
+      </div>
+
+      <p id="cod-limit-range" class="text-fg-subtle mt-2 text-xs">
+        Цілими гривнями, від {COD_LIMIT_MIN_HRYVNIAS} до {
+          new Intl.NumberFormat('uk-UA').format(COD_LIMIT_MAX_HRYVNIAS)
+        } ₴. Зараз діє {formatPrice(codLimit.kopiykas)}.
+      </p>
+
+      {/* «Never changed» and «no row at all» are different facts, and the
+          second one matters: it means checkout is running on the fallback in
+          `getCodLimitKopiykas`, not on a value anybody chose. Saving once
+          creates the row and this line turns into a date. */}
+      <p class="text-fg-subtle mt-1 text-xs">
+        {
+          codLimit.updatedAt
+            ? `Востаннє змінено ${formatAdminDateTime(codLimit.updatedAt)}.`
+            : 'Значення ще не збережено — діє типове. Збережіть, щоб зафіксувати його.'
+        }
+      </p>
+    </form>
+  </section>
+</AdminLayout>

@@ -1,0 +1,161 @@
+---
+import { env } from 'cloudflare:workers';
+import BaseLayout from '~/layouts/BaseLayout.astro';
+import Container from '~/components/Container.astro';
+import Button from '~/components/Button.astro';
+import ProductCard from '~/components/ProductCard.astro';
+import { createDb } from '@balier/lib/db';
+import { listFeaturedProducts } from '@balier/lib/db/queries/products';
+
+export const prerender = false;
+
+/**
+ * Four, not five: the row is two cards on a phone and four at `lg`, so five
+ * leaves a ragged trailing card at every width. The 3-column step `/products`
+ * uses at `md` is skipped here for the same reason.
+ */
+const FEATURED_COUNT = 4;
+
+// Per request — never a module-scope singleton, every request is a fresh isolate.
+const db = createDb(env.DATABASE_URL);
+const featured = await listFeaturedProducts(db, FEATURED_COUNT);
+
+/**
+ * Teasers for the two content pages, so `/about` and `/care` have an entry point
+ * that is not the nav. The copy is placeholder-grade and stays generic on
+ * purpose: the real text arrives with the pages themselves (roadmap.md, Phase 5),
+ * and inventing a brand story here would just mean writing it twice.
+ */
+const teasers = [
+  {
+    href: '/about',
+    title: 'Про нас',
+    text: 'Невелика майстерня, у якій кожна річ шиється вручну й малими партіями.',
+    cta: 'Наша історія',
+  },
+  {
+    href: '/care',
+    title: 'Догляд за шкірою',
+    text: 'Кілька простих правил, які подовжать життя вашій речі на роки.',
+    cta: 'Як доглядати',
+  },
+];
+---
+
+<BaseLayout
+  title="Balier"
+  description="Шкіряні вироби ручної роботи. Обмежені партії, доставка Новою Поштою по всій Україні."
+>
+  <section
+    class="from-espresso via-espresso to-espresso-light bg-gradient-to-br text-white"
+    aria-labelledby="hero-heading"
+  >
+    {/* 32rem of hero eats a whole phone screen before anything else is visible,
+        so the tall version starts at the tablet breakpoint. */}
+    <Container class="flex min-h-[24rem] flex-col justify-center py-16 sm:min-h-[32rem] sm:py-28">
+      {/* 2rem keeps the forced break on one line down to a 320px viewport. */}
+      <h1 id="hero-heading" class="max-w-2xl text-[2rem] text-white sm:text-5xl lg:text-6xl">
+        Шкіряні вироби<br />ручної роботи
+      </h1>
+      <p class="mt-4 max-w-md text-white/80 sm:mt-5">
+        Кожен виріб розповідає історію майстерності та традицій.
+      </p>
+      <div class="mt-8">
+        <Button href="/products" size="lg" class="w-full sm:w-auto">До магазину</Button>
+      </div>
+    </Container>
+  </section>
+
+  {
+    featured.length > 0 && (
+      <Container as="section" class="py-12 sm:py-16" aria-labelledby="featured-heading">
+        {/* The heading and the link share a row from `sm:` up. On a phone the
+            link goes under the grid instead — a small "Усі товари" tucked beside
+            the heading is both a poor target and easy to miss above the fold. */}
+        <div class="flex items-baseline justify-between gap-4">
+          <h2 id="featured-heading" class="text-2xl sm:text-3xl">
+            Рекомендовані товари
+          </h2>
+          <a
+            href="/products"
+            class="text-ink-muted hover:text-brand hidden text-sm transition-colors sm:inline"
+          >
+            Дивитись усі →
+          </a>
+        </div>
+
+        {/* No card is `eager` here, unlike `/products`: the hero owns the LCP and
+            every one of these starts below the fold. */}
+        <div class="mt-6 grid grid-cols-2 gap-3 sm:mt-8 sm:gap-5 lg:grid-cols-4 lg:gap-6">
+          {featured.map((product) => (
+            <ProductCard
+              slug={product.slug}
+              title={product.title}
+              category={product.categoryTitle}
+              price={product.price}
+              compareAtPrice={product.compareAtPrice}
+              imageUrl={product.imageUrl}
+              imageAlt={product.imageAlt}
+              swatches={product.swatches}
+              soldOut={!product.inStock}
+            />
+          ))}
+        </div>
+
+        <Button href="/products" variant="secondary" block class="mt-6 sm:hidden">
+          Усі товари
+        </Button>
+      </Container>
+    )
+  }
+
+  <Container as="section" class="pb-12 sm:pb-16">
+    <div class="grid gap-4 sm:gap-5 md:grid-cols-2">
+      {
+        teasers.map((teaser) => (
+          <article class="border-line bg-paper-raised rounded-card flex flex-col p-6 sm:p-8">
+            <h2 class="text-xl sm:text-2xl">{teaser.title}</h2>
+            <p class="text-ink-muted mt-3 max-w-prose grow text-sm sm:text-base">{teaser.text}</p>
+            {/* The whole card is not a link: two links in one card and a
+                screen reader announces the same destination twice. */}
+            <a
+              href={teaser.href}
+              class="text-brand hover:text-brand-hover mt-4 inline-flex min-h-touch items-center text-sm font-medium transition-colors md:min-h-0"
+            >
+              {teaser.cta} →
+            </a>
+          </article>
+        ))
+      }
+    </div>
+  </Container>
+
+  {/* Reassurance for a first-time visitor arriving from Instagram — kept last,
+      where it answers "how do I actually get this" rather than interrupting the
+      products. */}
+  <Container as="section" class="border-line border-t py-12 sm:py-16">
+    {/* Three columns need ~230px each to avoid ragged two-word lines, so they
+        arrive at md rather than sm. */}
+    <div class="grid gap-8 sm:gap-10 md:grid-cols-3">
+      <div>
+        <h2 class="text-xl">Доставка Новою Поштою</h2>
+        <p class="text-ink-muted mt-2 text-sm">
+          Відділення, поштомат або кур'єр — за тарифами перевізника. Відправка протягом 1–2 робочих
+          днів.
+        </p>
+      </div>
+      <div>
+        <h2 class="text-xl">Оплата карткою або при отриманні</h2>
+        <p class="text-ink-muted mt-2 text-sm">
+          Безпечна оплата через Monobank або накладений платіж.
+        </p>
+      </div>
+      <div>
+        <h2 class="text-xl">Обмін і повернення</h2>
+        <p class="text-ink-muted mt-2 text-sm">
+          14 днів на обмін або повернення товару належної якості.
+        </p>
+      </div>
+    </div>
+  </Container>
+</BaseLayout>
