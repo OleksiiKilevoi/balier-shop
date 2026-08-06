@@ -32,7 +32,12 @@ const { title, description, ogImage, noindex = !SITE_IS_INDEXABLE } = Astro.prop
 
 const siteName = 'Balier';
 const fullTitle = title === siteName ? title : `${title} — ${siteName}`;
-const canonical = new URL(Astro.url.pathname, Astro.site ?? Astro.url).href;
+// Without the trim, the prerendered pages and the SSR ones disagree: a built
+// page's own pathname is the directory form it is emitted as (`/about/`), while
+// the same route rendered per request sees `/about`. One route must advertise one
+// canonical URL, and the no-slash form is the one every link on the site uses.
+const path = Astro.url.pathname.replace(/(.)\/$/, '$1');
+const canonical = new URL(path, Astro.site ?? Astro.url).href;
 const ogImageUrl = ogImage ? new URL(ogImage, Astro.site ?? Astro.url).href : undefined;
 ---
 

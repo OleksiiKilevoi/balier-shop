@@ -10,6 +10,19 @@ import Breadcrumbs from '~/components/Breadcrumbs.astro';
  * Only the frame lives here. The copy is plain markup in the page's slot and is
  * styled by the `prose-page` utility in `global.css`, so writing a page means
  * writing headings and paragraphs, not classes.
+ *
+ * Every page using this frame sets `prerender = true` — they are the only routes
+ * in the app that are. Nothing on them is per-request: no DB, no `env`, no
+ * cookies, and the header's active-nav and the canonical URL both derive from the
+ * page's own path, which is known at build time. So they are built to
+ * `dist/client/<path>/index.html` and served straight off the ASSETS binding,
+ * without waking the Worker at all.
+ *
+ * The cost is that their HTML is frozen until the next deploy. That is fine for
+ * copy, but note two things it freezes: `SITE_IS_INDEXABLE` in `BaseLayout` (the
+ * Phase 5 flip needs a rebuild, which a deploy does anyway) and the footer's
+ * `new Date().getFullYear()`, which will lag the SSR pages after a New Year until
+ * something is deployed.
  */
 interface Props {
   /** Also the `<h1>` and the last breadcrumb. */

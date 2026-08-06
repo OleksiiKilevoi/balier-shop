@@ -7,6 +7,15 @@ import tailwindcss from '@tailwindcss/vite';
 export default defineConfig({
   site: 'https://balier.ua',
   output: 'server',
+  // Prerendered pages are emitted as `about.html`, not `about/index.html`.
+  // Cloudflare's asset server (`html_handling: auto-trailing-slash`, the default
+  // the adapter deploys with) serves `about.html` at `/about` with a 200, but
+  // answers `/about` with a 307 to `/about/` when the file is `about/index.html`.
+  // Every link to these pages — the header nav, the whole footer — is written
+  // without the slash, so the directory form put a redirect in front of all of
+  // them. Only affects the seven prerendered content pages; SSR routing is
+  // unchanged.
+  build: { format: 'file' },
   // `passthrough`: no page uses `astro:assets` images (only `Font`), so the
   // IMAGES binding stayed with the admin app, whose upload pipeline is its one
   // real consumer.

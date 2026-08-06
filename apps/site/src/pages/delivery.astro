@@ -2,7 +2,8 @@
 import StaticPageLayout from '~/layouts/StaticPageLayout.astro';
 import ContentPlaceholder from '~/components/ContentPlaceholder.astro';
 
-export const prerender = false;
+// Static HTML, built once — see StaticPageLayout.
+export const prerender = true;
 ---
 
 <StaticPageLayout title="Доставка" lead="Способи доставки, терміни та оплата замовлення.">
