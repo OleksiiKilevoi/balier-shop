@@ -179,6 +179,10 @@ const showCompareAt =
           </div>
         </div>
 
+        <p class="text-ink-muted mt-4 text-sm" data-stock-note hidden={inStock}>
+          Немає в наявності.
+        </p>
+
         <div class="border-line mt-6 flex items-center gap-4 border-t pt-6">
           <span class="text-sm">Кількість</span>
           <QuantityStepper max={Math.max(defaultVariant.available, 1)} />
@@ -226,10 +230,6 @@ const showCompareAt =
             )
           }
         </div>
-
-        <p class="text-ink-muted mt-4 text-sm" data-stock-note hidden={inStock}>
-          Немає в наявності.
-        </p>
       </div>
     </div>
   </Container>
