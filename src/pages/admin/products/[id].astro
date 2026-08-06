@@ -50,20 +50,15 @@ import type { CatalogField } from '~/lib/validation/catalog';
  * settings screen carries one number and can afford to throw it away; this one
  * carries a description somebody wrote.
  *
- * NOTHING BELOW RELOADS THE PAGE. `/admin/orders/new`'s enhancement layer lifts
- * onto this file at the bottom — and, as that page's comment predicted, without
- * a single server-side line changing here. Every submit becomes a `fetch` of the
- * exact POST the browser would have made; `fetch` follows the 303 itself, so
- * what comes back is this same page rendered by this same frontmatter, and it
- * replaces the editor in place. Saving one section therefore no longer discards
- * what is half-typed in another, and the sections stay separate saves because
- * they are separate decisions, not because a reload used to punish them.
- *
- * The answer moves with it. A reload put the banner at the top of the page and
- * scrolled there; a swap leaves the manager where they clicked, so script moves
- * that same server-rendered `<p>` into the fixed host below (`admin-toast-host`
- * in `admin.css`) and lets a confirmation expire. With script off it stays a
- * banner above the form, which is where the scriptless page has to put it.
+ * NOTHING BELOW RELOADS THE PAGE. `enhanceAdminForms` from `~/lib/admin/forms`
+ * does that for every panel screen made of plain forms, and it changed not a
+ * single server-side line here: every submit becomes a `fetch` of the exact POST
+ * the browser would have made, `fetch` follows the 303 itself, and what comes
+ * back replaces the editor in place. Saving one section therefore no longer
+ * discards what is half-typed in another, and the sections stay separate saves
+ * because they are separate decisions, not because a reload used to punish them.
+ * The answer moves with it, into the fixed toast host at the bottom of this
+ * file. Read that module for the whole of how it works.
  */
 export const prerender = false;
 
@@ -1302,62 +1297,27 @@ function imageMeta(image: (typeof images)[number]): string {
   <div id="product-toast" class="admin-toast-host" aria-live="polite" aria-atomic="true"></div>
 
   {/*
-    The enhancement layer, lifted from `/admin/orders/new` and narrowed to what
-    this page is: a set of forms that each *change something*, rather than one
-    draft that re-renders as it is typed into.
-
-    Two differences follow from that, and they are the only ones:
-      - Submits are serialised, never abandoned. There, an in-flight render was
-        safe to abort because a newer body superseded it; here every POST writes
-        a row, so a second one waits (and cannot be clicked — the editor is
-        inert while it works) instead of racing the first.
-      - There is no typing, no debounce and no search. Every swap follows a
-        button somebody pressed.
-
-    Everything else is the same deal: no client-side state beyond four flags, no
-    client rendering, no diffing. The server remains the only thing that decides
-    what this page looks like, and any failure falls back to a real submit of the
-    same body — so the worst case is the reload this script exists to avoid.
+    The enhancement layer lives in `~/lib/admin/forms` and is shared with
+    `/admin/categories` — every panel screen made of plain forms gets the same
+    swap-in-place and the same toast from it. What stays here is the one thing
+    that is only about *this* page: the colour swatches.
   */}
   <script>
+    import { enhanceAdminForms } from '~/lib/admin/forms';
+
     const editor = document.getElementById('product-editor');
     const toastHost = document.getElementById('product-toast');
 
     if (editor && toastHost) {
-      /** How long a confirmation stays. A refusal has no timer — see below. */
-      const TOAST_MS = 4000;
       /** The only value a swatch can paint — same shape the schema accepts. */
       const HEX = /^#[0-9a-f]{6}$/;
-      /** Where a render is still *this page*; anything else is a navigation. */
-      const SELF = window.location.pathname;
-
-      /** Set once the fetch path has failed: submits go back to the browser. */
-      let bypass = false;
-      /** Every POST here writes a row, so exactly one may be in flight. */
-      let busy = false;
-      /** Following a redirect (session expired, or the row is gone): stop. */
-      let navigating = false;
-      let toastTimer: ReturnType<typeof setTimeout> | undefined;
-
-      editor.addEventListener('submit', (event) => {
-        if (bypass) return;
-        const form = event.target;
-        if (!(form instanceof HTMLFormElement)) return;
-
-        event.preventDefault();
-        const submitter =
-          event instanceof SubmitEvent && event.submitter instanceof HTMLButtonElement
-            ? event.submitter
-            : null;
-        void post(form, submitter);
-      });
 
       /*
-       * The colour swatches, both directions. Delegated for the same reason the
-       * submit handler is: every save replaces the editor's contents, so a
-       * listener bound to a field would be holding a detached node one click
-       * later. Nothing is initialised here either — the server renders each
-       * swatch already painted, and this only keeps it honest as it is typed in.
+       * The colour swatches, both directions. Delegated because every save
+       * replaces the editor's contents, so a listener bound to a field would be
+       * holding a detached node one click later. Nothing is initialised here
+       * either — the server renders each swatch already painted, and this only
+       * keeps it honest as it is typed in.
        *
        * Neither control is the truth. The text field is what gets submitted;
        * the circle is what gets read. A value that is not a hex paints nothing
@@ -1387,9 +1347,9 @@ function imageMeta(image: (typeof images)[number]): string {
         paint(swatch.parentElement, value);
       });
 
-      // Whatever the server already rendered for this load — a product just
-      // created, or a save that went through the scriptless path.
-      showAnswer();
+      // The rest of it — the swap in place, the toast, the focus and the
+      // fallback to a real submit — is the same on every screen made of forms.
+      enhanceAdminForms({ root: editor, toastHost, messageId: 'editor-message' });
 
       /** Fills the circle, or marks it empty — `admin.css` draws both states. */
       function paint(swatch: HTMLElement | null, value: string) {
@@ -1400,160 +1360,6 @@ function imageMeta(image: (typeof images)[number]): string {
         } else {
           swatch.style.removeProperty('--swatch');
           swatch.setAttribute('data-empty', '');
-        }
-      }
-
-      async function post(form: HTMLFormElement, submitter: HTMLButtonElement | null) {
-        if (busy || navigating || !editor) return;
-
-        busy = true;
-        // Dims the editor and stops it taking a second click while it works.
-        editor.setAttribute('aria-busy', 'true');
-
-        const body = new FormData(form);
-        if (submitter?.name) body.append(submitter.name, submitter.value);
-
-        /*
-         * Only the round trip is guarded, and the swap deliberately happens
-         * after it: falling back means submitting `form` for real, and by the
-         * time anything has been rendered `form` is a detached node that
-         * `requestSubmit` would quietly ignore. So the answer is held here and
-         * handed on once there is nothing left that could fail into the wrong
-         * recovery.
-         */
-        let html: string | null = null;
-
-        try {
-          const response = await fetch(form.action, { method: 'POST', body });
-
-          // The 303 every successful action answers with has already been
-          // followed by `fetch`, so this is the GET that came back from it.
-          // Landing anywhere but here is a decision — the login form, most
-          // likely — and has to be shown as one.
-          if (new URL(response.url).pathname !== SELF) {
-            navigating = true;
-            window.location.assign(response.url);
-            return;
-          }
-
-          if (!response.ok) throw new Error(`POST ${response.status}`);
-
-          html = await response.text();
-        } catch {
-          // The scriptless path still works; take it rather than strand the
-          // click behind a broken fetch.
-          bypass = true;
-          form.requestSubmit(submitter ?? undefined);
-        } finally {
-          busy = false;
-          if (!navigating) editor.removeAttribute('aria-busy');
-        }
-
-        if (html !== null) render(html, form.dataset.form ?? null);
-      }
-
-      function render(html: string, formKey: string | null) {
-        if (!editor) return;
-
-        const next = new DOMParser()
-          .parseFromString(html, 'text/html')
-          .getElementById('product-editor');
-        if (!next) {
-          // Not this page — whatever it is, show it honestly.
-          window.location.reload();
-          return;
-        }
-
-        /*
-         * Two things the response cannot know, because they are how the manager
-         * has the screen arranged rather than anything the server was told: which
-         * disclosures are open, and where the keyboard is. Both are read off the
-         * live DOM before it is replaced and put back after.
-         */
-        const opened = [...editor.querySelectorAll('details[open]')]
-          .map((node) => node.id)
-          .filter((id) => id !== '');
-        const focused = document.activeElement instanceof HTMLElement
-          ? document.activeElement.id
-          : '';
-
-        editor.innerHTML = next.innerHTML;
-
-        /*
-         * The banner leaves the flow before anything below forces a layout.
-         * `focus()` flushes one, and with the banner still a block above the
-         * viewport at that moment, the browser picks its scroll anchor against
-         * a page one banner taller than the one finally painted — then
-         * "corrects" the scroll by that height, a small upward jump on every
-         * save. Moved out first, no intermediate layout differs from the
-         * painted one and there is nothing to correct.
-         */
-        showAnswer();
-
-        for (const id of opened) {
-          const node = document.getElementById(id);
-          if (node instanceof HTMLDetailsElement) node.open = true;
-        }
-
-        /*
-         * Enter in a field submits the form around it, so the keyboard may have
-         * been in a named control; a mouse leaves it on the button, which has no
-         * id, and `data-form` finds that form's button again. A form that the
-         * action removed — the photo it belonged to is gone — has neither, and
-         * focus is left where the browser put it.
-         */
-        const field = focused ? document.getElementById(focused) : null;
-        if (field) {
-          field.focus({ preventScroll: true });
-          if (field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement) {
-            try {
-              field.setSelectionRange(field.value.length, field.value.length);
-            } catch {
-              /* not a text-entry field */
-            }
-          }
-        } else if (formKey) {
-          const button = editor.querySelector(
-            `[data-form="${CSS.escape(formKey)}"] button[type="submit"]`,
-          );
-          if (button instanceof HTMLElement) button.focus({ preventScroll: true });
-        }
-
-        /* A refusal marks the field it is about, and «Зберегти» can be a screen
-           below it. `nearest` means an already-visible field is not scrolled. */
-        editor
-          .querySelector('.border-danger')
-          ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-      }
-
-      /**
-       * Moves the server's banner into the fixed host, so an answer is visible
-       * from wherever the click was made.
-       */
-      function showAnswer() {
-        if (!editor || !toastHost) return;
-        clearTimeout(toastTimer);
-
-        const message = editor.querySelector('#editor-message');
-        if (!(message instanceof HTMLElement)) {
-          toastHost.replaceChildren();
-          return;
-        }
-
-        // The host is the live region now. Left in place, the banner's own
-        // `role` would make a screen reader announce the same sentence twice.
-        message.removeAttribute('role');
-        toastHost.replaceChildren(message);
-
-        // Which is also why it can be clicked away: the one below has no timer,
-        // and it sits over the bottom of the page.
-        message.addEventListener('click', () => message.remove(), { once: true });
-
-        // A confirmation is redundant the moment it is read — what it confirms
-        // is on screen. A refusal is the only record of why nothing changed, so
-        // it stays until it is dismissed or the next action replaces it.
-        if (message.dataset.tone === 'ok') {
-          toastTimer = setTimeout(() => message.remove(), TOAST_MS);
         }
       }
     }

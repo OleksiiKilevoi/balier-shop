@@ -168,6 +168,34 @@ Non-negotiables, all enforced by tokens in `global.css`:
 - `--spacing-header` is the sticky header height. Anything computing viewport-minus-header, or any
   scroll offset, uses it rather than a repeated `4rem`.
 
+## Admin panel
+
+Build out of `src/styles/admin.css`'s utilities (`admin-btn*`, `admin-icon-btn`, `admin-field`,
+`admin-select`, `admin-textarea`, `admin-card`, `admin-badge`, `admin-tone-*`). A storefront token
+under `/admin` compiles to nothing — the panel's stylesheet is `source(none)` — and for the same
+reason **a new panel component must live in `src/components/admin/`**. Colours go in as
+`light-dark()` pairs on a token; nothing reads `prefers-color-scheme` directly, or it ignores the
+theme switch.
+
+**A panel screen may not reload itself to answer a save.** Every screen is plain
+`<form method="post">` blocks answered with a 303, which must keep working with script off — but a
+reload throws the page away and scrolls to the top, so a manager who pressed «Зберегти» three
+screens down lands on the header and never sees the banner they were sent. The fix is written once,
+in `src/lib/admin/forms.ts`; a screen wires it up rather than reimplementing it:
+
+- one element with an `id` around everything a save can change (the swapped `root`);
+- `data-form="<unique>"` on each form, so focus can find its button again after the swap;
+- the server's banner rendered with an `id` and `data-tone="ok" | "bad"` — script moves that same
+  `<p>` into a fixed `.admin-toast-host` div, a confirmation expires, a refusal waits to be
+  dismissed. **There is no toast component and no second copy of the message**: the tone, the
+  wording and the markup stay the server's, and the scriptless page shows the identical `<p>` in
+  the flow of the page.
+
+`/admin/orders/new` is the one screen that does not use it, and deliberately: it is a single draft
+form that re-renders as it is typed into, so it debounces, abandons in-flight renders for newer
+ones, and guards only the create submit. Its script is the ancestor of the shared module, not a
+duplicate to be merged.
+
 ## Code conventions
 
 - TypeScript strict. `any` only with a comment explaining why nothing else works.

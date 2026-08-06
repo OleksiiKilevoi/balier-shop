@@ -4,7 +4,15 @@
 
 ## 📍 CURRENT STATE (overwrite this block; keep tight)
 
-- **Last done:** the **admin image pipeline**, in a browser rather than over curl (2026-08-06) —
+- **Last done:** `/admin/categories` no longer reloads and scrolls to the top on save (2026-08-06).
+  The product editor's enhancement layer was the only copy of that behaviour, so it moved out to
+  **`src/lib/admin/forms.ts`** (`enhanceAdminForms`) and both screens now call it: submit goes by
+  `fetch`, the response replaces the screen's root in place, and the server's own banner is moved
+  into the fixed `.admin-toast-host` — confirmation expires after 4s, refusal waits to be dismissed.
+  `/admin/orders/new` deliberately keeps its own script (it is one draft form that re-renders as it
+  is typed into). The rule is now in `docs/CONVENTIONS.md` under «Admin panel». `pnpm check` 0
+  errors / `pnpm test` 221 / `pnpm build` clean. **Not yet driven in a browser.**
+- **Before that:** the **admin image pipeline**, in a browser rather than over curl (2026-08-06) —
   which is how four things came out at once. (1) **Upload was broken for every browser that ever
   tried it**: `imageAddSchema` required `alt`, the upload form has no such field (it is written
   afterwards, on the row the upload creates), so every real upload died on «Не вдалося зберегти
@@ -22,16 +30,13 @@
   repeating it. `pnpm check` 0 errors / `pnpm test` 221 / `pnpm build` clean.
 - **In progress:** nothing. All of the above is **uncommitted** — see «Active branch».
 - **Next step:** finish the **browser pass** this session started. `/admin/products` and its editor
-  have now been driven for real; `/admin/categories` and `/admin/settings` are still screens nobody
-  has ever looked at, functionally verified over curl and visually unverified — and the upload bug
-  is the standing evidence for what that distinction is worth. Then commit + deploy, then Phase 5.
-- **Rules that bind any future panel screen:**
-  - Build out of `src/styles/admin.css`'s utilities (`admin-btn*`, `admin-icon-btn`, `admin-field`,
-    `admin-select`, `admin-textarea`, `admin-card`, `admin-badge`, `admin-tone-*`). A storefront
-    token under `/admin` is a bug, not a shortcut — `source(none)` means it would silently compile
-    to nothing anyway — and **a new component must live under `src/components/admin/`** or its
-    classes compile to nothing for the same reason. Colours go in as `light-dark()` pairs on a
-    token; nothing reads `prefers-color-scheme` directly, or it ignores the theme switch.
+  have been driven for real; `/admin/categories` has now been rewritten but *not* driven, and
+  `/admin/settings` is still a screen nobody has ever looked at — both need a real browser, and the
+  upload bug is the standing evidence for what that distinction is worth. `/admin/settings` is also
+  the last screen still on the reload-and-scroll-to-top path the new convention forbids. Then
+  commit + deploy, then Phase 5.
+- **Rules that bind any future panel screen** (now written up in `docs/CONVENTIONS.md` → «Admin
+  panel»: the `admin.css` utilities, `src/components/admin/`, and the no-reload/toast contract):
   - **A schema is only verified against the body the form actually sends.** `curl -F` composes a
     body by hand and will happily supply a field no control on the page renders, so a screen can
     pass a full curl pass and be unusable in a browser — which is exactly what happened to image
@@ -90,8 +95,9 @@
   created 2026-08-05T19:10:58Z, one minute after `c6608d4`, so the whole panel (order creation,
   settings, the catalog screens, migration `0005`) is on `balier.mlosko.dev`. Earlier copies of this
   block said none of it was pushed; that was stale, and the deploy was verified rather than assumed.
-  **Uncommitted right now: this session's image work only** — `catalog.ts`, `media/index.ts`,
-  `media/upload.ts`, `i18n/admin.ts`, `products/[id].astro`, `wrangler.jsonc`, and three test files.
+  **Uncommitted right now: this session's image work and the categories fix** — `catalog.ts`,
+  `media/index.ts`, `media/upload.ts`, `i18n/admin.ts`, `products/[id].astro`, `categories.astro`,
+  the new `lib/admin/forms.ts`, `wrangler.jsonc`, `docs/CONVENTIONS.md`, and three test files.
   A push to `main` deploys (Workers Builds on `mykhailoshulezhko/balier`, production branch `main`,
   `pnpm run build` → `npx wrangler deploy`) and it is **not instant** — `npx wrangler deployments
   list` shows when a version actually landed.
@@ -141,6 +147,16 @@
 > Empty by design. Everything through the end of Phase 4 was moved to **`docs/history.md`** on
 > 2026-08-05, not rewritten — this file is read in full at every session start and had reached
 > 852 lines. New session entries go here; move a phase's entries across once the phase is done.
+
+**2026-08-06 (categories fix).** `/admin/categories` was still on the old deal: save → 303 → full
+reload → top of the page, with the answer in a banner the manager had scrolled away from. Rather
+than copy the product editor's script a second time, that script moved out to
+`src/lib/admin/forms.ts` as `enhanceAdminForms({ root, toastHost, messageId, onRender })` — swap in
+place, focus restored by id or `data-form`, the server's own `<p>` moved into `.admin-toast-host`,
+and a real submit as the fallback on any fetch failure. `[id].astro` now calls it and keeps only its
+colour-swatch listener; `categories.astro` calls it and re-delegates its slug suggestion (the old
+listener held nodes the swap replaces). `/admin/orders/new` untouched on purpose. Rule written into
+`docs/CONVENTIONS.md` → «Admin panel». 221 tests, check and build clean; no browser pass yet.
 
 **2026-08-06 (images session).** Drove the product editor in a browser and found upload broken for
 every browser that has ever tried it: `imageAddSchema` required an `alt` the upload form does not
