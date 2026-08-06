@@ -4,30 +4,15 @@
 
 ## 📍 CURRENT STATE (overwrite this block; keep tight)
 
-- **Last done:** `/admin/categories` no longer reloads and scrolls to the top on save (2026-08-06).
-  The product editor's enhancement layer was the only copy of that behaviour, so it moved out to
-  **`src/lib/admin/forms.ts`** (`enhanceAdminForms`) and both screens now call it: submit goes by
-  `fetch`, the response replaces the screen's root in place, and the server's own banner is moved
-  into the fixed `.admin-toast-host` — confirmation expires after 4s, refusal waits to be dismissed.
-  `/admin/orders/new` deliberately keeps its own script (it is one draft form that re-renders as it
-  is typed into). The rule is now in `docs/CONVENTIONS.md` under «Admin panel». `pnpm check` 0
-  errors / `pnpm test` 221 / `pnpm build` clean. **Not yet driven in a browser.**
-- **Before that:** the **admin image pipeline**, in a browser rather than over curl (2026-08-06) —
-  which is how four things came out at once. (1) **Upload was broken for every browser that ever
-  tried it**: `imageAddSchema` required `alt`, the upload form has no such field (it is written
-  afterwards, on the row the upload creates), so every real upload died on «Не вдалося зберегти
-  зміни.» while `curl -F alt=…` sailed through — the exact reason the curl pass declared this screen
-  working. `alt` is now optional on `image_add` only, and the regression test builds its body from a
-  real `FormData` so a field the form does not send can never pass again. (2) **The pixel rules are
-  gone** on request: no minimum short side, no maximum long side, no portrait-only. Every render
-  site is a fixed-ratio box with `object-cover` (`ProductCard`, `ProductGallery`, cart, cart popup,
-  panel thumbnails — all checked), so orientation and size cannot reach the layout; what is left
-  refuses a *file*, not a picture — empty, over 5 MB, unreadable, or not one of the four formats.
-  (3) Each photo row now shows its **file size** beside the dimensions, read from R2 with `head()`
-  at render (the DB has never stored bytes; objects are content-addressed, so the bucket's answer
-  cannot go stale) via the new `mediaKeyFromUrl`. (4) `ADMIN_UPLOAD_HINT` and the
-  `unsupported_format` refusal now **derive the format list** from `MEDIA_FORMATS` instead of
-  repeating it. `pnpm check` 0 errors / `pnpm test` 221 / `pnpm build` clean.
+- **Last done:** **order confirmation emails deliver now** (2026-08-06). The request was «build
+  email notifications» — exploration showed all four paths were already built and tested in Phase 3
+  (COD → email at creation in `create.ts`; card → email on the webhook's `paid` transition + cron
+  fallback; admin `/admin/orders/new` goes through the same `createOrder`; no email → silent skip).
+  The only thing missing was operational: the six Email Sending DNS records for `mail.mlosko.dev`.
+  They were added via the dashboard's auto-onboard, all six confirmed resolving on 1.1.1.1, a
+  `wrangler email sending send` smoke test reported **Delivered**, and a real COD order
+  (`B260806-A9AYA`, with an email address) was placed through the deployed `/api/checkout` to fire
+  the real path. Zero code changed. Categories-fix and image-session details are in the log below.
 - **In progress:** nothing. All of the above is **uncommitted** — see «Active branch».
 - **Next step:** finish the **browser pass** this session started. `/admin/products` and its editor
   have been driven for real; `/admin/categories` has now been rewritten but *not* driven, and
@@ -76,11 +61,6 @@
     workers/cron/wrangler.jsonc`, likewise `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` (same values as
     the app Worker; secrets are per-Worker). Until set, the sweep fails closed: expired stock is
     still freed, `awaiting_payment` orders are left untouched rather than cancelled on a guess.
-  - **Email Sending DNS records are not added yet.** Sending is enabled on `mail.mlosko.dev`
-    (tag `1d4ba47f…`, DKIM selector `cf-bounce`, return path `cf-bounce.mail.mlosko.dev`), but the
-    six records it needs — three MX on `cf-bounce.mail`, SPF, DKIM, DMARC — must be created in the
-    zone by hand; `wrangler email sending dns get mail.mlosko.dev` prints them exactly. Until they
-    exist, order emails keep failing closed.
   - Phase 0 externals unchanged: Monobank Acquiring registration, Nova Poshta business account +
     cash-on-delivery setup, Telegram manager account / bot / chat.
   - `PUBLIC_TELEGRAM_MANAGER` in `wrangler.jsonc` is a **placeholder handle**.
@@ -109,7 +89,9 @@
   so they correctly offer no revert. From the panel's own create screen: `B260805-67RJB` (COD,
   `confirmed`), `B260805-A88BY` (card, `awaiting_payment`, real Monobank invoice) and
   `B260805-BLF43` (COD courier with an email address — the one that proves the confirmation email
-  fires on that path). From the catalog session, the first rows the *panel* created: product
+  fires on that path), and `B260806-A9AYA` (COD warehouse, `lxstspxrk@gmail.com` — the first order
+  placed *after* the Email Sending DNS records existed, i.e. the first whose email could actually
+  deliver). From the catalog session, the first rows the *panel* created: product
   `sumka-test-liunet` left **archived** (two variants; its three image rows were removed again
   during the 2026-08-06 upload testing) and category `testova-katehoriia` left **deactivated** —
   archived rather than deleted on purpose, since archive-only is the rule the feature ships. The
@@ -130,8 +112,9 @@
 - [~] Phase 2 — Catalog / storefront (every page built; static-page copy outstanding)
 - [~] Phase 3 — Cart and payment (code-complete: cart, `/checkout`, both payment methods, Turnstile
       (built, then commented out on request — the code stays), the webhook, both Telegram
-      notifications, rate limiting, the confirmation email, `balier-cron` deployed. Only
-      non-code items remain: the Email Sending DNS records, and a live browser `/checkout` pass)
+      notifications, rate limiting, the confirmation email, `balier-cron` deployed, and as of
+      2026-08-06 the Email Sending DNS records exist and deliver. Only a live browser `/checkout`
+      pass remains)
 - [x] Phase 4 — Admin panel (its own login form — PBKDF2 + signed session cookie, fail-closed,
       verified on the deployed Worker; orders list, detail, transitions, TTN and manual order
       creation; `/admin/settings` for the COD limit; and the catalog — `/admin/products`, its
@@ -147,6 +130,17 @@
 > Empty by design. Everything through the end of Phase 4 was moved to **`docs/history.md`** on
 > 2026-08-05, not rewritten — this file is read in full at every session start and had reached
 > 852 lines. New session entries go here; move a phase's entries across once the phase is done.
+
+**2026-08-06 (email DNS session).** Asked to «build order confirmation emails» — they were already
+built (Phase 3: `notify/email.ts` routes COD→`orderCreated`, card→`orderPaid`; checkout, webhook,
+cron and `/admin/orders/new` all wired; optional email skips silently). The real gap was the known
+blocker: the six DNS records for `mail.mlosko.dev` were never in the zone, so every send died on
+`E_SENDER_NOT_VERIFIED`, silently. Added via the dashboard auto-onboard button (wrangler's OAuth
+token has no DNS-edit scope, so the API route was closed); all six verified on 1.1.1.1;
+`wrangler email sending send` smoke test → Delivered; live COD order `B260806-A9AYA` placed through
+deployed `/api/checkout` with a real email. No code changed. Known hole left open on purpose: no
+test asserts the call sites pass a *real* email notifier — swapping in `createNoopNotifier` would
+pass all 221 tests.
 
 **2026-08-06 (categories fix).** `/admin/categories` was still on the old deal: save → 303 → full
 reload → top of the page, with the answer in a banner the manager had scrolled away from. Rather
