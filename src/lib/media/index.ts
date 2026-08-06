@@ -32,6 +32,22 @@ export const MEDIA_FORMATS = {
 
 export type MediaExtension = keyof typeof MEDIA_FORMATS;
 
+/**
+ * The same four formats as they are written for a person — `jpg` is the stored
+ * extension, «JPEG» is what the manager's export dialog calls it.
+ *
+ * Here rather than in `~/lib/i18n/admin` because it is not a translation: these
+ * are product names, identical in every locale, and they belong beside the table
+ * they label. `satisfies` is what keeps the two in step — add a format to
+ * `MEDIA_FORMATS` and this stops compiling until it is named here too.
+ */
+export const MEDIA_FORMAT_LABELS = {
+  webp: 'WebP',
+  avif: 'AVIF',
+  jpg: 'JPEG',
+  png: 'PNG',
+} as const satisfies Record<MediaExtension, string>;
+
 export function isMediaExtension(value: string): value is MediaExtension {
   return Object.hasOwn(MEDIA_FORMATS, value);
 }
@@ -79,6 +95,34 @@ export function objectKey(hash: string, extension: MediaExtension): string {
  */
 export function mediaUrl(hash: string, extension: MediaExtension): string {
   return `/media/${objectKey(hash, extension)}`;
+}
+
+export const MEDIA_URL_PREFIX = '/media/';
+
+/**
+ * The inverse of `mediaUrl`: a stored row back to the object it names, or
+ * `null` when the row does not name one of ours.
+ *
+ * Both halves are validated against the same closed set `src/pages/media/
+ * [...key].ts` checks, and for the same reason — a database string must not be
+ * usable to probe the bucket for objects this project did not put there. A row
+ * written before this module existed, or pointing at some other host, simply
+ * has no key, and every caller has to handle that anyway.
+ */
+export function mediaKeyFromUrl(url: string): string | null {
+  if (!url.startsWith(MEDIA_URL_PREFIX)) return null;
+
+  const name = url.slice(MEDIA_URL_PREFIX.length);
+  if (name.includes('/')) return null;
+
+  const separator = name.lastIndexOf('.');
+  if (separator === -1) return null;
+
+  const hash = name.slice(0, separator);
+  const extension = name.slice(separator + 1);
+  if (!isMediaHash(hash) || !isMediaExtension(extension)) return null;
+
+  return objectKey(hash, extension);
 }
 
 /* ------------------------------------------------------------------ upload */

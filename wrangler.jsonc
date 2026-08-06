@@ -36,10 +36,24 @@
   // at `/media/**`, never over the bucket's public `r2.dev` URL (rate-limited,
   // and documented as unsuitable for production).
   //   wrangler r2 bucket create balier-media
+  //
+  // `remote: true` points this binding at the real bucket **in local development
+  // too**, and is the reason the panel's uploads exist anywhere but this laptop.
+  // Without it, `pnpm dev` binds MEDIA to Miniflare's simulated bucket under
+  // `.wrangler/state/v3/r2/`, so a photo uploaded through `/admin/products/…`
+  // was written to disk while its `product_images` row went to the *real* Neon
+  // database — a row pointing at an object no deployed Worker could ever serve.
+  // Local R2 and remote Postgres is the one combination that silently produces
+  // broken data rather than a broken screen.
+  //
+  // The flag is local-development only; a deployed Worker always had the real
+  // bucket. The cost is that dev writes are real writes: an upload made while
+  // testing puts an object in the production bucket and it stays there.
   "r2_buckets": [
     {
       "binding": "MEDIA",
-      "bucket_name": "balier-media"
+      "bucket_name": "balier-media",
+      "remote": true
     }
   ],
   // Cloudflare Email Sending — order-confirmation emails to customers

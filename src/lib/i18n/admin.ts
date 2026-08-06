@@ -1,11 +1,6 @@
 import type { OrderStatus, ProductStatus } from '~/lib/db/schema';
-import {
-  EXPECTED_HEIGHT,
-  EXPECTED_WIDTH,
-  MAX_LONG_SIDE,
-  MAX_UPLOAD_BYTES,
-  MIN_SHORT_SIDE,
-} from '~/lib/media/upload';
+import { MEDIA_FORMAT_LABELS } from '~/lib/media';
+import { EXPECTED_HEIGHT, EXPECTED_WIDTH, MAX_UPLOAD_BYTES } from '~/lib/media/upload';
 import type { UploadIssue } from '~/lib/media/upload';
 import { COD_LIMIT_MAX_HRYVNIAS, COD_LIMIT_MIN_HRYVNIAS } from '~/lib/validation/admin';
 import { PRODUCT_PRICE_MAX_HRYVNIAS, PRODUCT_PRICE_MIN_HRYVNIAS } from '~/lib/validation/catalog';
@@ -247,24 +242,60 @@ export const ADMIN_PRODUCT_MESSAGES = {
 export type AdminProductMessage = keyof typeof ADMIN_PRODUCT_MESSAGES;
 
 /**
+ * «WebP, AVIF, JPEG і PNG» — read off `MEDIA_FORMATS` rather than typed out, so
+ * the sentence the manager reads cannot claim support the bucket does not have.
+ * Both the hint and the refusal below are built from this one string.
+ */
+const SUPPORTED_FORMATS = new Intl.ListFormat('uk-UA', { type: 'conjunction' }).format(
+  Object.values(MEDIA_FORMAT_LABELS),
+);
+
+/** The byte cap as the manager sees it, in both sentences that mention it. */
+const MAX_UPLOAD_MEGABYTES = Math.round(MAX_UPLOAD_BYTES / 1024 / 1024);
+
+/**
  * Why an uploaded file was refused.
  *
- * Nothing in this project resizes an image, so every one of these is the
- * difference between a working product page and a broken-looking one — the
- * message says what to do to the file, not what rule it broke.
+ * Only four things can refuse a photo now — see `~/lib/media/upload` for why the
+ * pixel rules went. Each of the four is about the file rather than the picture,
+ * and the message says what to do to the file, not what rule it broke.
  */
 export const ADMIN_UPLOAD_ERRORS: Record<UploadIssue, string> = {
   empty: 'Оберіть файл.',
-  too_large: `Файл завеликий — до ${Math.round(MAX_UPLOAD_BYTES / 1024 / 1024)} МБ. Експортуйте фото ще раз із меншою якістю.`,
-  unsupported_format: 'Підтримуються тільки WebP, AVIF, JPEG і PNG.',
+  too_large: `Файл завеликий — до ${MAX_UPLOAD_MEGABYTES} МБ. Експортуйте фото ще раз із меншою якістю.`,
   unreadable: 'Не вдалося прочитати це зображення. Можливо, файл пошкоджено або це не фото.',
-  too_small: `Замале зображення — коротша сторона має бути від ${MIN_SHORT_SIDE} px, інакше в каталозі воно розтягнеться.`,
-  too_big: `Завелике зображення — довша сторона до ${MAX_LONG_SIDE} px. Схоже, це оригінал із фотоапарата, а не підготовлений експорт.`,
-  landscape: 'Потрібне вертикальне або квадратне фото — горизонтальне ламає сітку каталогу.',
+  unsupported_format: `Підтримуються тільки ${SUPPORTED_FORMATS}.`,
 };
 
-/** Stated on the upload control, since nothing resizes what goes in. */
-export const ADMIN_UPLOAD_HINT = `Очікуваний розмір — ${EXPECTED_WIDTH}×${EXPECTED_HEIGHT} px, вертикальне.`;
+/**
+ * A stored file's size, for the photo rows in the product editor.
+ *
+ * Whole kilobytes up to a megabyte and one decimal above it, because the only
+ * decision behind this number is «is this photo too heavy for the page» — and
+ * nothing here resizes, so that decision is the manager's to make with a new
+ * export. Bytes appear only under a kilobyte, where rounding to 0 КБ would look
+ * like a broken row rather than a small file.
+ */
+export function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} Б`;
+
+  const kilobytes = bytes / 1024;
+  // Rounded before the comparison, not after: 1 048 575 B is 1023.999 KB, and
+  // testing the unrounded value would print «1024 КБ» instead of «1 МБ».
+  if (Math.round(kilobytes) < 1024) return `${Math.round(kilobytes)} КБ`;
+
+  const megabytes = new Intl.NumberFormat('uk-UA', { maximumFractionDigits: 1 }).format(
+    kilobytes / 1024,
+  );
+  return `${megabytes} МБ`;
+}
+
+/**
+ * Stated on the upload control, in the order a file can fail: the two hard
+ * limits that will actually refuse it — the formats and the byte cap — then the
+ * pixels, which refuse nothing and are only a recommendation now.
+ */
+export const ADMIN_UPLOAD_HINT = `Формати: ${SUPPORTED_FORMATS}, до ${MAX_UPLOAD_MEGABYTES} МБ.`;
 
 /**
  * Messages under individual controls, keyed by the field

@@ -181,7 +181,18 @@ const variantActivateSchema = z.object({
  */
 const imageAddSchema = z.object({
   intent: z.literal('image_add'),
-  alt: optionalText(ALT_MAX),
+  /*
+   * Absent, not blank — and that is this form's *normal* body rather than a
+   * tampered one. The upload control asks for a file and who it belongs to;
+   * the description is written afterwards, in the row the upload creates, and
+   * `image_save` below is where it is a field. A required `alt` here refused
+   * every upload a browser ever made with «Не вдалося зберегти зміни.» while
+   * the same POST from `curl -F alt=…` went through, which is exactly how the
+   * screen passed its first pass and still could not upload a photo.
+   */
+  alt: optionalText(ALT_MAX)
+    .optional()
+    .transform((value) => value ?? null),
   variantId: optionalId,
 });
 

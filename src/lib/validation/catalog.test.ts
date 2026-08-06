@@ -249,6 +249,24 @@ describe('image intents', () => {
     }
   });
 
+  /*
+   * The body the *upload form* posts, built the way the page builds it. The
+   * test above passes an `alt` no browser sends, which is how a required `alt`
+   * survived both the suite and a curl pass while refusing every real upload.
+   */
+  it('accepts the upload form’s body, which carries no alt at all', () => {
+    const form = new FormData();
+    form.set('intent', 'image_add');
+    form.set('file', new File([new Uint8Array([0])], 'photo.webp'));
+    form.set('variantId', '');
+
+    const result = productActionSchema.safeParse(Object.fromEntries(form));
+    expect(result.success).toBe(true);
+    if (result.success && result.data.intent === 'image_add') {
+      expect(result.data.alt).toBeNull();
+    }
+  });
+
   it('only moves in the two directions the buttons offer', () => {
     expect(productActionSchema.safeParse({ intent: 'image_move', imageId, direction: 'up' }).success).toBe(true);
     expect(productActionSchema.safeParse({ intent: 'image_move', imageId, direction: 'top' }).success).toBe(false);

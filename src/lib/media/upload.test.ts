@@ -1,19 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import {
-  MAX_LONG_SIDE,
-  MAX_UPLOAD_BYTES,
-  MIN_SHORT_SIDE,
-  checkUploadedImage,
-} from './upload';
+import { MAX_UPLOAD_BYTES, checkUploadedImage } from './upload';
 import type { UploadCandidate } from './upload';
 
 /**
  * The guard in front of the only path that writes to the media bucket.
  *
- * Worth testing on its own because the failure it prevents is silent: nothing
- * resizes an image anywhere in this project, so a file that gets past here is
- * served to customers exactly as uploaded, and a wrong bound shows up as a
- * broken-looking product grid rather than as an error.
+ * It checks the file, not the picture: every render site crops into a fixed
+ * ratio with `object-cover`, so no width, height or orientation can reach the
+ * layout. What is left is «can we serve these bytes» and «are there too many of
+ * them», and nothing resizes, so the second one is the customer's download.
  *
  * The numbers below were checked against the real catalog with the Images
  * binding: `test-products/1/2.webp` is 204 608 bytes, `image/webp`, 1440×1920.
@@ -22,8 +17,6 @@ import type { UploadCandidate } from './upload';
 const GOOD: UploadCandidate = {
   size: 204_608,
   format: 'image/webp',
-  width: 1440,
-  height: 1920,
 };
 
 function check(overrides: Partial<UploadCandidate>) {
@@ -44,12 +37,7 @@ describe('checkUploadedImage', () => {
   it('refuses an empty file before anything else', () => {
     expect(check({ size: 0 })).toBe('empty');
     // Even when everything else about it is wrong too.
-    expect(check({ size: 0, format: null, width: null, height: null })).toBe('empty');
-  });
-
-  it('refuses a file over the size cap', () => {
-    expect(check({ size: MAX_UPLOAD_BYTES + 1 })).toBe('too_large');
-    expect(check({ size: MAX_UPLOAD_BYTES })).toBeNull();
+    expect(check({ size: 0, format: null })).toBe('empty');
   });
 
   it('refuses a format the media module cannot serve', () => {
@@ -58,34 +46,36 @@ describe('checkUploadedImage', () => {
     }
   });
 
-  it('refuses a file whose dimensions could not be read', () => {
-    // A corrupt file: the binding throws, so the caller has no format and no
-    // pixels — the format check catches it first.
-    expect(check({ format: null, width: null, height: null })).toBe('unsupported_format');
-    // An SVG: a format the binding *does* name, with no intrinsic pixel size.
-    // `image/svg+xml` is not servable either, so that is what it is refused for.
-    expect(check({ format: 'image/svg+xml', width: null, height: null })).toBe('unsupported_format');
-    // And a servable format whose pixels still could not be read.
-    expect(check({ width: null, height: null })).toBe('unreadable');
-    expect(check({ format: 'image/png', width: 1440, height: null })).toBe('unreadable');
-    expect(check({ format: 'image/png', width: 0, height: 0 })).toBe('unreadable');
+  it('refuses a file the binding could not read as an image at all', () => {
+    // The binding throws on a corrupt file or a non-image, and the caller has
+    // no format to report. Distinct from a format we simply do not serve — the
+    // manager is told the file is broken rather than that it is the wrong kind.
+    expect(check({ format: null })).toBe('unreadable');
   });
 
-  it('refuses anything the grid would have to upscale', () => {
-    expect(check({ width: MIN_SHORT_SIDE - 1, height: 1920 })).toBe('too_small');
-    expect(check({ width: MIN_SHORT_SIDE, height: 1920 })).toBeNull();
-    // The *short* side is what matters, whichever side that is.
-    expect(check({ width: 400, height: 400 })).toBe('too_small');
+  /*
+   * The three rules this guard used to have — a minimum short side, a maximum
+   * long side, portrait-or-square — are gone, because `object-cover` inside a
+   * fixed-ratio box makes all three invisible to the layout. Pixels are no
+   * longer part of `UploadCandidate` at all, so the way to state that is to
+   * hand the guard the dimensions it once refused and watch it not care.
+   */
+  it('accepts pixel sizes and orientations the old bounds refused', () => {
+    const refusedBefore = [
+      { width: 320, height: 480 }, // under the old 800 px minimum short side
+      { width: 6_000, height: 8_000 }, // over the old 4 000 px maximum long side
+      { width: 1_920, height: 1_080 }, // landscape, which the grid now crops
+    ];
+
+    for (const pixels of refusedBefore) {
+      // Cast because the guard's input no longer *has* these fields; passing
+      // them anyway is precisely the point of the assertion.
+      expect(checkUploadedImage({ ...GOOD, ...pixels } as UploadCandidate)).toBeNull();
+    }
   });
 
-  it('refuses an unprepared camera original', () => {
-    expect(check({ width: 3000, height: MAX_LONG_SIDE + 1 })).toBe('too_big');
-    expect(check({ width: 3000, height: MAX_LONG_SIDE })).toBeNull();
-  });
-
-  it('refuses landscape but allows square', () => {
-    expect(check({ width: 1920, height: 1440 })).toBe('landscape');
-    expect(check({ width: 1440, height: 1440 })).toBeNull();
-    expect(check({ width: 1439, height: 1440 })).toBeNull();
+  it('still refuses on bytes, because nothing resizes what is served', () => {
+    expect(check({ size: MAX_UPLOAD_BYTES + 1 })).toBe('too_large');
+    expect(check({ size: MAX_UPLOAD_BYTES })).toBeNull();
   });
 });

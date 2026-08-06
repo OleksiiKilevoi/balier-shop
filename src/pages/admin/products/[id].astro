@@ -27,9 +27,10 @@ import {
   PRODUCT_STATUS_HINTS,
   PRODUCT_STATUS_LABELS,
   formatAdminDateTime,
+  formatFileSize,
 } from '~/lib/i18n/admin';
 import type { AdminProductMessage } from '~/lib/i18n/admin';
-import { storeImage } from '~/lib/media';
+import { mediaKeyFromUrl, storeImage } from '~/lib/media';
 import { checkUploadedImage } from '~/lib/media/upload';
 import type { UploadIssue } from '~/lib/media/upload';
 import { formatPrice } from '~/lib/money';
@@ -153,11 +154,15 @@ if (Astro.request.method === 'POST') {
           const bytes = await file.arrayBuffer();
 
           /*
-           * The *decoded* format and size, not what the browser declared. Those
-           * differ more often than they should — a `curl -F` upload arrives as
+           * The *decoded* format, not what the browser declared. Those differ
+           * more often than they should — a `curl -F` upload arrives as
            * `application/octet-stream` and is still a perfectly good WebP — and
            * the binding throws outright on a file that is not an image at all,
-           * which is the same answer as «unreadable» and is treated as one.
+           * which is what leaves `format` null and is refused as «unreadable».
+           *
+           * Width and height decide nothing any more (see `~/lib/media/upload`);
+           * they are read here only to be stored, so the markup can reserve the
+           * space and the page does not shift as photos load.
            */
           let format: string | null = null;
           let width: number | null = null;
@@ -175,7 +180,7 @@ if (Astro.request.method === 'POST') {
             // Left null; `checkUploadedImage` refuses on exactly that.
           }
 
-          const issue = checkUploadedImage({ size: bytes.byteLength, format, width, height });
+          const issue = checkUploadedImage({ size: bytes.byteLength, format });
           if (issue) {
             uploadIssue = issue;
             break;
@@ -269,6 +274,35 @@ const product = detail?.product;
 const variants = detail?.variants ?? [];
 const images = detail?.images ?? [];
 
+/*
+ * File sizes come from the bucket rather than the database, because the database
+ * has never held them: `product_images` stores a url, an alt, and the width and
+ * height that reserve layout space. R2 is the only thing that knows how heavy a
+ * photo is — and since object names are content hashes, its answer for a given
+ * url cannot change, so there is nothing to keep in sync and nothing to backfill
+ * for the rows that predate this.
+ *
+ * One `head` per photo, all in flight together. `head` is metadata: it moves no
+ * bytes, costs a class-B operation, and this screen is one manager at a time. A
+ * failure is silence rather than an error — a size is a line of text, and the
+ * editor has to open even when the bucket does not answer.
+ */
+const imageSizes = new Map<string, number>();
+
+await Promise.all(
+  images.map(async (image) => {
+    const key = mediaKeyFromUrl(image.url);
+    if (key === null) return;
+
+    try {
+      const object = await env.MEDIA.head(key);
+      if (object) imageSizes.set(image.id, object.size);
+    } catch {
+      // Left out of the map; the row renders without it.
+    }
+  }),
+);
+
 /* --- what the storefront will actually do with this row -------------------- */
 
 const activeVariants = variants.filter((variant) => variant.isActive);
@@ -317,6 +351,23 @@ const nextSku = product ? suggestSku(product.slug, body.colorName) : '';
 
 const variantLabel = (variant: (typeof variants)[number]) =>
   variant.colorName ?? variant.sku;
+
+/**
+ * «1440×1920 px · 204 КБ» — the two facts about the file under its url, either
+ * of which can be missing on its own. Dimensions are absent on a row stored
+ * before they could be read; a size is absent when the object is not in the
+ * bucket, which is worth seeing as a gap rather than papering over.
+ */
+function imageMeta(image: (typeof images)[number]): string {
+  const parts: string[] = [];
+
+  if (image.width && image.height) parts.push(`${image.width}×${image.height} px`);
+
+  const size = imageSizes.get(image.id);
+  if (size !== undefined) parts.push(formatFileSize(size));
+
+  return parts.length > 0 ? parts.join(' · ') : 'розмір невідомий';
+}
 ---
 
 <AdminLayout title={detail?.translation?.title ?? 'Товар'}>
@@ -1108,9 +1159,7 @@ const variantLabel = (variant: (typeof variants)[number]) =>
                           </p>
                         )}
                         <p class="text-fg-subtle mt-1 font-mono text-xs break-all">{image.url}</p>
-                        <p class="text-fg-subtle mt-0.5 text-xs">
-                          {image.width && image.height ? `${image.width}×${image.height} px` : 'розмір невідомий'}
-                        </p>
+                        <p class="text-fg-subtle mt-0.5 text-xs">{imageMeta(image)}</p>
                       </div>
                     </div>
 
