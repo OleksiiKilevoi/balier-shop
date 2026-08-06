@@ -224,6 +224,18 @@ duplicate to be merged.
   configuration for this: the Worker is reachable on more hostnames than any edge policy covers.
   Unconfigured means deny. Passwords are PBKDF2 via Web Crypto (`src/lib/auth/`) — never plaintext,
   never a home-made hash, never a Node crypto import.
+- **Account state is read from the database on every request, never taken from the session cookie.**
+  The cookie is signed, which proves it is ours and unedited — it proves nothing about whether the
+  account still wants it. So the gate (`apps/admin/src/middleware.ts`) calls `findActiveAdminById`
+  on every request it lets through and checks `sessionStillValid`: a disabled account and a token
+  older than that account's `sessions_valid_from` are both turned away on the next request. The row
+  is passed to the page in `locals.adminUser`, so a screen that needs the role or the password hash
+  does not read it twice.
+- **Anything that invalidates a password or an account bumps `sessions_valid_from`** — a password
+  change, an admin resetting somebody's password, and an account being switched off *or back on*
+  (re-enabling without the bump would resurrect the tokens that were live when it went off).
+  A role change does not: it is not a reason to sign anybody out. A silent rehash at login does not
+  either. That column is the whole of revocation; there is no session table.
 - Rate limiting on all public API routes (checkout, search, order creation).
 - Do not log PII (phone, address, full name) or tokens. Telegram order notifications carry the
   minimum data needed.

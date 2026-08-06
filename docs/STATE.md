@@ -4,51 +4,53 @@
 
 ## 📍 CURRENT STATE (overwrite this block; keep tight)
 
-- **Last done:** **the `/checkout` Nova Poshta pickers got faster and stopped depending on
-  perfect Ukrainian spelling** (2026-08-06, migration `0006`). Search now matches a folded
-  `search_text` column carrying NP's Ukrainian, **Russian (`DescriptionRu`) and Latin
-  (`DescriptionTranslit`)** spellings — all three were in every API response and the sync had been
-  discarding them. `packages/lib/src/novaposhta/normalize.ts` folds `і/ї/ы/й→и`, `є/э/ё→е`, `ґ→г`
-  and drops soft signs and apostrophes, so a Russian keyboard («Днипро», «Харкив», «мыколаив»)
-  finds the Ukrainian name — verified against real data. `pg_trgm` + a GIN index took the
-  settlement query from a **8.9 ms seq scan to 0.14 ms**; the two endpoints are **edge-cached**
-  (`apps/site/src/lib/edgeCache.ts`, 1 h `s-maxage`), which is the real win since the query was
-  never the cost — the ~45 ms Worker→Neon round trip was. Typo fallback is pg_trgm `<%` at its
-  default 0.6, indexed; a more forgiving 0.4 was tried and **rejected on measurement** (78 ms seq
-  scan and the answers turn to noise). **Three bugs fixed on the way:** branch lists were ordered
-  lexicographically (Kyiv opened 1, 10, 10063, … — now `number_sort`), `is_active` was hardcoded
-  `true` by the sync so closed branches stayed selectable (now from `WarehouseStatus`/
-  `DenyToSelect`, plus branches that vanish from the feed are retired), and the checkout client
-  had no `AbortController`, so a slow reply for «ки» could repaint over «київ».
-  Under the settlement input there is now a row of **one-tap suggestion chips**: the four
-  settlements with the most NP branches (Київ, Львів, Дніпро, Одеса — `warehouse_count`, not a
-  hardcoded list), plus the visitor's own city first when Cloudflare's `request.cf.city` resolves
-  to one. That geo lookup is free of any new dependency — `cf` is workerd's per-request bag, and
-  it resolves because `name_translit` ("Kyiv", "Lviv") is now in `search_text`. It is a
-  suggestion, never a prefill: Cloudflare geolocates the ISP's egress, so it can name a nearby
-  city rather than the customer's, and the chip still has to be tapped.
-  Also this session: **courier delivery is withdrawn**, and the branch field's label is now
-  dynamic («Відділення» / «Поштомат», with the dropdown's `aria-label` following it) instead of
-  the ambiguous «Відділення / поштомат». `np_courier` is gone from the storefront, the admin
-  order form and `deliverySchema` — `POST /api/checkout` answers a courier payload with 400,
-  verified. **The `delivery_method` enum keeps `np_courier`** so the 6 existing courier orders
-  still load and render; `readDraft` now accepts only the *selectable* methods
-  (`SELECTABLE_DELIVERY_METHODS`), so a stale or forged form naming courier falls back to
-  «відділення» rather than producing a draft nothing can render. The dead address plumbing went
-  with it (`np_address` stays on the row and in the notification formatter, for those same
-  historical orders).
-- **In progress:** nothing. The gate is green (`pnpm check && pnpm build`, 232 tests). Migration
-  `0006` and a full `pnpm np:sync` have been run against the **dev** database: all 26 791
-  settlements carry `name_ru`/`name_translit`, 53 511 of 53 556 warehouses carry `description_ru`,
-  and the first run of the new retirement step deactivated **45** branches no longer in NP's feed.
-  Spot-checked live afterwards: «Киев»→Київ, «Львов»→Львів, «Николаев»→Миколаїв,
-  «Запорожье»→Запоріжжя, «Кривой Рог»→Кривий Ріг, «Kyiv»/«Lviv», and the typo «хркив»→Харків
-  through the fuzzy tier.
+- **Last done:** **sessions are revocable** (2026-08-06, migration `0008`). The panel's cookie was
+  signed but could not be withdrawn, so a changed password or a switched-off account left every
+  session already issued working for up to twelve hours. Now the token carries `iat`, every account
+  carries `admin_users.sessions_valid_from`, and **the gate reads the row on every request** and
+  applies `sessionStillValid` — so a revoked or disabled session is turned away on its *next*
+  request and its cookie is cleared. The stamp moves on a password change, on an admin resetting
+  somebody's password, and on the active flag changing **in either direction**; not on a role
+  change, and not on the silent rehash at login. The device that changes its own password is handed
+  a replacement cookie in the same response, so good hygiene does not sign you out of your own tab.
+  `locals.adminUser` carries the row to the page, so `/settings` reads it for free. **Driving it
+  found a real bug in my first version:** stamping only on *disable* meant re-enabling an account
+  inside twelve hours resurrected the old browser's token — reproduced live, fixed, re-verified.
+  Legacy tokens (no `iat`) are refused, so everyone signs in once more. Cost measured on the
+  deployed Worker, not assumed: warm `/orders` median **88 ms**, inside the noise of the samples
+  taken before the change. Earlier the same day, and the reason this mattered now: the panel grew
+  **user management and roles** (migration `0007`, «Користувачі» on `/settings`, admin-only) — see
+  the session log below.
+- **In progress:** nothing. The gate is green (`pnpm check && pnpm build`, **252 tests**).
+  Migrations `0006`, `0007` and `0008` are all applied to the **dev** database and
+  `admin@balier.com` is `admin`. Both features were **driven end to end**, locally and then on the
+  deployed Worker — every rendered control's `name` checked against the schema, both roles, every
+  refusal, a manager's hand-made `user_create` POST refused with no row written, and each of the
+  five revocation paths: password change (other devices out, changing device keeps a fresh cookie),
+  disable, re-enable (old token stays dead), admin reset, and role change (session **kept**, new
+  role live immediately). What none of that covers is the `enhanceAdminForms` layer — curl does not
+  run script — so the swap/toast behaviour on `/settings` is still unverified in a browser, and its
+  scriptless fallback, which is what was tested, is the path that works either way.
+- **Deployed 2026-08-06, all three Workers, verified over HTTPS** — `balier-admin-dev`
+  (**`c8d656f2`**, the revocation build; `2f82ee50` was the users build earlier the same day),
+  `balier-dev` (`2fea0176`) and `balier-cron` (`39167a18`, all five secrets still
+  present after the «override remote configuration» warning). The panel's users section was driven
+  on `admin.balier.mlosko.dev`, not just locally: a user **created through the deployed panel**
+  signs in, the duplicate is refused, and a password was changed live — which is the check that
+  matters most, since the PBKDF2 iteration ceiling only bites on the deployed runtime and no local
+  gate can catch a breach of it. The storefront's NP search from the previous session is live too
+  («Киев»→Київ, «хркив»→Харків, «Lviv»→Львів against the deployed endpoint).
+  **Everything above is deployed but NOT committed** — the working tree still holds this session's
+  changes.
 - **Next step:** the standing **browser pass** — `/checkout`'s delivery step is the one to drive
-  first, since this session changed it and only curl/DB-level checks have been run against it;
-  then `/categories` (rewritten, never driven) and `/settings` (never looked at) on
+  first, since only curl/DB-level checks have been run against it; then `/categories` (rewritten,
+  never driven) and `/settings`, whose script layer is now the newest untested thing on it, on
   `admin.balier.mlosko.dev`, plus the panel flows curl cannot drive (image upload preview,
   `/orders/new` card order confirming the Monobank invoice's URLs). Then Phase 5.
+  **A production deploy needs `pnpm db:migrate` against that database and one
+  `pnpm admin:user role <email> admin`, or the panel ships with nobody able to add a user.**
+  Migration `0008` must land **before** that deploy too — the gate reads `sessions_valid_from` on
+  every request, so code ahead of schema is a panel nobody can open.
   **Not yet deployed** — the two Workers need a push/deploy to pick this up, and **`balier-cron`
   needs a redeploy too** this time: the sync changes live in `@balier/lib`, so the note below
   about the split not requiring one no longer applies to this change.
@@ -89,8 +91,9 @@
     does*: Node, Vite's dev server and `wrangler dev`'s own workerd all derive 210 000 happily, so
     no local gate can catch a breach of it. It is also under OWASP's 600 000 — an open decision,
     deliberately not taken.
-  - **A session cannot be revoked before its 12 hours are up** — rotating `ADMIN_SESSION_SECRET` is
-    the only way to end all of them at once. The price of the stateless signed cookie.
+  - **Sessions are revocable per account as of 2026-08-06** (`sessions_valid_from` + the gate's
+    per-request row read). Rotating `ADMIN_SESSION_SECRET` is still the way to end *everyone's* at
+    once, and it is still the only lever if the database itself is the problem.
   - **Turnstile is commented out, not deleted** (`grep -rn "Turnstile:" src wrangler.jsonc` to
     restore), so **the KV rate limiter is the only bot defence on `/api/checkout`** — 10/min per IP.
   - Leftovers from earlier phases: Phase 3 is code-complete but still wants a real browser pass
@@ -132,7 +135,11 @@
   during the 2026-08-06 upload testing) and category `testova-katehoriia` left **deactivated** —
   archived rather than deleted on purpose, since archive-only is the rule the feature ships. The
   five seeded products are untouched and all `active`. **`admin@balier.com` is the only enabled
-  admin account.**
+  admin account, and the only one with the `admin` role.** Five disabled rows sit alongside it:
+  `qa-settings@` / `qa-catalog@` from earlier passes, and `qa-users@balier.test` (admin),
+  `anna@balier.test` and `qa-live@balier.test` (managers) from the users pass — the last one is the
+  account created *through the deployed panel* as proof it works. All switched off afterwards; the
+  section has no delete by design, so «cleaned up» means disabled.
 - **Media state (checked 2026-08-06, not inferred):** all **17** `product_images` rows —
   `lorem-ipsum`, `lunet`, `space`, `wallet` — point at seeded objects that are in `balier-media`,
   so nothing in the catalog is a broken image. Five objects sit in the *local* Miniflare store and
@@ -166,6 +173,26 @@
 > Empty by design. Everything through the end of Phase 4 was moved to **`docs/history.md`** on
 > 2026-08-05, not rewritten — this file is read in full at every session start and had reached
 > 852 lines. New session entries go here; move a phase's entries across once the phase is done.
+
+**2026-08-06 (session revocation).** Asked to close the hole the users session left open: a changed
+password or a disabled account must not leave somebody signed in for hours. Migration `0008` adds
+`sessions_valid_from`, the token gains `iat`, and the gate now reads the account row on every
+request (`sessionStillValid`) instead of trusting the signature alone — the row rides along in
+`locals.adminUser`, so `/settings` stops querying for it. The stamp moves on a password change, an
+admin reset, and the active flag changing **either way**; the device doing its own change is
+re-cookied so it stays signed in. Driving it caught the bug the first version had: stamping only on
+disable let a re-enable inside 12 h resurrect the old token. Legacy tokens without `iat` are
+refused, so everyone re-logs in once. Deployed and measured: warm `/orders` median 88 ms. 252 tests.
+
+**2026-08-06 (admin users).** Asked for user creation in the panel, an admin/manager split gating
+it, and a password section on `/settings`. Migration `0007` adds `admin_role`; the role is read
+from the row per request rather than put in the session cookie, since the cookie is not revocable
+and would carry a stale `admin` for up to 12 h — the same read now ends a disabled user's session.
+`/settings` grew two sections and moved onto `enhanceAdminForms`. Guards: no self-demote, no
+self-disable, and no self-reset from the users list (that path skips the current-password check).
+Driving the real screen showed the `last_admin` guard cannot fire from it — the actor is always
+another active admin — so the comment says so instead of implying it works. 245 tests; gate green;
+`pnpm admin:user` gained `role` and `--role=`, which is also the one manual step after migrating.
 
 **2026-08-06 (checkout search).** Asked how the NP city/branch pickers could be faster and forgiving
 of Russian input and typos. Measured first: the SQL was never the cost (8.9 ms) — the ~45 ms

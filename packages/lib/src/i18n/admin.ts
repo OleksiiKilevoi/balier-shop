@@ -1,8 +1,13 @@
-import type { OrderStatus, ProductStatus } from '../db/schema';
+import type { AdminRole, OrderStatus, ProductStatus } from '../db/schema';
 import { MEDIA_FORMAT_LABELS } from '../media';
 import { EXPECTED_HEIGHT, EXPECTED_WIDTH, MAX_UPLOAD_BYTES } from '../media/upload';
 import type { UploadIssue } from '../media/upload';
-import { COD_LIMIT_MAX_HRYVNIAS, COD_LIMIT_MIN_HRYVNIAS } from '../validation/admin';
+import {
+  COD_LIMIT_MAX_HRYVNIAS,
+  COD_LIMIT_MIN_HRYVNIAS,
+  PASSWORD_MAX_LENGTH,
+  PASSWORD_MIN_LENGTH,
+} from '../validation/admin';
 import { PRODUCT_PRICE_MAX_HRYVNIAS, PRODUCT_PRICE_MIN_HRYVNIAS } from '../validation/catalog';
 import type { CatalogField } from '../validation/catalog';
 
@@ -166,19 +171,97 @@ export const ADMIN_CARD_LINK_EXPIRED =
   'Термін дії посилання минув. Замовлення скасується автоматично, якщо цього ще не сталося.';
 
 /**
- * `/admin/settings` — currently the cash-on-delivery limit and nothing else.
+ * `/settings` — the cash-on-delivery limit, the signed-in user's own password,
+ * and (for an admin) the accounts.
  *
- * The refusal names the range rather than just saying "invalid", because the
- * field accepts one thing and rejects two different ways of getting it wrong
- * (a stray decimal point, and a value outside the bounds).
+ * One map because the screen has one banner. The keys are the schemas' own
+ * issue names (`~/validation/admin`) and the query layer's own refusal reasons,
+ * so a rule is worded where it is enforced and this file only translates it.
+ *
+ * The cod-limit refusal names the range rather than just saying "invalid",
+ * because the field accepts one thing and rejects two different ways of getting
+ * it wrong (a stray decimal point, and a value outside the bounds).
  */
 export const ADMIN_SETTINGS_MESSAGES = {
   cod_limit_updated: 'Ліміт післяплати збережено.',
   invalid_cod_limit: `Вкажіть суму цілими гривнями — від ${COD_LIMIT_MIN_HRYVNIAS} до ${new Intl.NumberFormat('uk-UA').format(COD_LIMIT_MAX_HRYVNIAS)} ₴.`,
   bad_request: 'Не вдалося зберегти зміни.',
+
+  /* Your own password. */
+  password_changed: 'Пароль змінено.',
+  wrong_password: 'Поточний пароль невірний.',
+  password_too_short: `Новий пароль має містити щонайменше ${PASSWORD_MIN_LENGTH} символів.`,
+  password_too_long: `Пароль задовгий — не більше ${PASSWORD_MAX_LENGTH} символів.`,
+  passwords_do_not_match: 'Паролі не збігаються.',
+  password_unchanged: 'Новий пароль такий самий, як поточний.',
+  too_many_attempts: 'Забагато невдалих спроб. Спробуйте пізніше.',
+
+  /* The accounts. */
+  user_created: 'Користувача створено.',
+  user_saved: 'Зміни збережено.',
+  user_password_set: 'Пароль користувача змінено.',
+  invalid_email: 'Вкажіть коректну адресу пошти.',
+  email_taken: 'Користувач із такою поштою вже існує.',
+  /* Not «помилка»: the refusal is the feature. Says who it is about, because
+     the same sentence answers both "disable" and "demote". */
+  last_admin: 'Це єдиний активний адміністратор — спершу призначте іншого.',
+  self_demote: 'Не можна змінити роль або вимкнути власний обліковий запис.',
+  self_password: 'Власний пароль змінюйте в розділі «Зміна пароля» — там потрібен поточний.',
+  not_found: 'Користувача не знайдено — можливо, його змінили в іншій вкладці.',
+  /* A manager who reached a user-management POST anyway: a stale tab open from
+     before a demotion, or a hand-made request. */
+  forbidden: 'Потрібні права адміністратора.',
 } as const;
 
 export type AdminSettingsMessage = keyof typeof ADMIN_SETTINGS_MESSAGES;
+
+/** The message keys the screen shows in red rather than in grey. */
+export const ADMIN_SETTINGS_FAILURES = new Set<AdminSettingsMessage>([
+  'invalid_cod_limit',
+  'bad_request',
+  'wrong_password',
+  'password_too_short',
+  'password_too_long',
+  'passwords_do_not_match',
+  'password_unchanged',
+  'too_many_attempts',
+  'invalid_email',
+  'email_taken',
+  'last_admin',
+  'self_demote',
+  'self_password',
+  'not_found',
+  'forbidden',
+]);
+
+export const ADMIN_ROLE_LABELS: Record<AdminRole, string> = {
+  admin: 'Адміністратор',
+  manager: 'Менеджер',
+};
+
+/**
+ * What the two roles actually differ on, next to the role selector. One
+ * sentence, because there is one difference — if this ever needs a list, the
+ * roles have grown into permissions and the copy is the smallest of the
+ * problems.
+ */
+export const ADMIN_ROLE_HINT =
+  'Менеджер працює із замовленнями, каталогом і налаштуваннями. Адміністратор — те саме плюс керування користувачами.';
+
+/**
+ * Under the password section, and it now promises the opposite of what it used
+ * to: changing a password ends every other session for the account, on every
+ * device, immediately (`revokeAdminSessions`). Said out loud because it is the
+ * reason somebody changes a password they still know.
+ */
+export const ADMIN_PASSWORD_HINT = `Щонайменше ${PASSWORD_MIN_LENGTH} символів. Після зміни всі інші сеанси цього облікового запису завершаться — на інших пристроях доведеться увійти знову.`;
+
+/** The same promise, where an admin is switching somebody else off. */
+export const ADMIN_USER_DISABLE_HINT =
+  'Вимкнений користувач не зможе ввійти, а його поточний сеанс завершиться одразу.';
+
+export const ADMIN_USERS_HINT =
+  'Тут створюють облікові записи панелі. Видалення немає — доступ забирають вимкненням, щоб зберігся запис про входи.';
 
 /**
  * Under the limit field. Says what the number does at checkout, in the same

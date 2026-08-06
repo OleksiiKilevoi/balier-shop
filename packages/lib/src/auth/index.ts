@@ -24,6 +24,7 @@ export {
   SESSION_COOKIE,
   SESSION_TTL_SECONDS,
   sessionCookieOptions,
+  sessionStillValid,
   signSession,
   verifySession,
   type AdminSession,

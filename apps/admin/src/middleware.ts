@@ -1,6 +1,14 @@
 import { defineMiddleware } from 'astro:middleware';
+import type { AstroCookies } from 'astro';
 import { env } from 'cloudflare:workers';
-import { SESSION_COOKIE, verifySession } from '@balier/lib/auth';
+import {
+  SESSION_COOKIE,
+  sessionCookieOptions,
+  sessionStillValid,
+  verifySession,
+} from '@balier/lib/auth';
+import { createDb } from '@balier/lib/db';
+import { findActiveAdminById } from '@balier/lib/db/queries/adminUsers';
 
 /**
  * The admin gate, inverted: on this Worker every route needs a valid session
@@ -48,7 +56,32 @@ export const onRequest = defineMiddleware(async ({ url, cookies, locals }, next)
   const session = await verifySession(env.ADMIN_SESSION_SECRET, cookies.get(SESSION_COOKIE)?.value);
   if (!session) return unauthorized(url);
 
+  /*
+   * The signature proves the token was minted here and has not been edited. It
+   * cannot prove the account still wants it — so the row is read, every
+   * request. See `sessionStillValid`: a disabled account and a token older than
+   * the account's `sessions_valid_from` are both turned away here rather than
+   * at the end of a twelve-hour day.
+   *
+   * The cost is one Neon round trip per page the panel serves, which is the
+   * price of revocation without a session table, on a panel with a handful of
+   * accounts. `locals.adminUser` carries the row on to the page so the screens
+   * that need it — `/settings` — do not read it a second time.
+   */
+  let user;
+  try {
+    user = await findActiveAdminById(createDb(env.DATABASE_URL), session.sub);
+  } catch {
+    // The database is unreachable. Deny, and say so: the same rule the rest of
+    // this gate is built on, since "we cannot check" is not "come in". The
+    // cookie is left alone — this is our outage, not their session's fault.
+    return unavailable();
+  }
+
+  if (!user || !sessionStillValid(session, user)) return signedOut(url, cookies);
+
   locals.admin = session;
+  locals.adminUser = user;
   return next();
 });
 
@@ -58,14 +91,48 @@ export const onRequest = defineMiddleware(async ({ url, cookies, locals }, next)
  * `/api/**` is gone with the split — this Worker has no API routes; admin
  * mutations are form POSTs to the pages themselves.)
  */
-function unauthorized(url: URL): Response {
+function unauthorized(url: URL, message?: string): Response {
   const target = new URL(LOGIN_PATH, url);
   // Path and query only. `next` is re-validated on the way out in
   // `login.astro` — this is a hint, not a trusted instruction.
   if (url.pathname !== '/') target.searchParams.set('next', `${url.pathname}${url.search}`);
+  if (message) target.searchParams.set('message', message);
 
   return new Response(null, {
     status: 303,
     headers: { location: `${target.pathname}${target.search}`, 'cache-control': 'no-store' },
+  });
+}
+
+/**
+ * A token that verifies but whose account no longer honours it: switched off,
+ * or every session revoked by a password change.
+ *
+ * The cookie is cleared on the way out rather than left to expire. It is dead
+ * either way, but a browser still holding it would keep sending it, and the
+ * operator would keep paying a database read to be turned away — and «сесія
+ * завершилася» next to a cookie that is visibly still there reads like a bug.
+ *
+ * Cleared through `cookies.delete` with `sessionCookieOptions`, the same call
+ * `/logout` makes: the attributes have to match the ones it was set with
+ * exactly, or the browser adds a second cookie instead of removing the first,
+ * and spelling them out here by hand is how they drift.
+ */
+function signedOut(url: URL, cookies: AstroCookies): Response {
+  const { path, httpOnly, secure, sameSite } = sessionCookieOptions();
+  cookies.delete(SESSION_COOKIE, { path, httpOnly, secure, sameSite });
+
+  return unauthorized(url, 'session_expired');
+}
+
+/**
+ * Neon is unreachable, so the gate cannot tell a live session from a revoked
+ * one. Fail closed, and do not redirect: bouncing to a login form that also
+ * needs the database would spend the outage in a loop.
+ */
+function unavailable(): Response {
+  return new Response('Панель тимчасово недоступна. Спробуйте за хвилину.', {
+    status: 503,
+    headers: { 'content-type': 'text/plain;charset=utf-8', 'cache-control': 'no-store' },
   });
 }

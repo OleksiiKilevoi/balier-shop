@@ -40,6 +40,17 @@ export const deliveryMethod = pgEnum('delivery_method', [
 ]);
 export const paymentProvider = pgEnum('payment_provider', ['monobank']);
 
+/**
+ * What an admin account may do. Two values, and deliberately not a permission
+ * matrix: the shop has a handful of accounts, and the only thing the two roles
+ * differ on is whether you may create and change accounts.
+ *
+ * `manager` is everything the panel is for — orders, the catalog, the shop
+ * settings. `admin` is that plus the «Користувачі» section of `/settings`.
+ * Ordered least-privileged first, which is also the column's default.
+ */
+export const adminRole = pgEnum('admin_role', ['manager', 'admin']);
+
 const createdAt = timestamp('created_at', { withTimezone: true }).notNull().defaultNow();
 const updatedAt = timestamp('updated_at', { withTimezone: true }).notNull().defaultNow();
 
@@ -444,7 +455,22 @@ export const adminUsers = pgTable('admin_users', {
   /** Shown in the panel header. NULL falls back to the email. */
   name: text('name'),
   passwordHash: text('password_hash').notNull(),
+  /**
+   * What the account may do beyond the panel's day job. See `adminRole` — the
+   * default is the lesser of the two on purpose, so a row created by any path
+   * that does not name a role cannot hand out the right to create accounts.
+   */
+  role: adminRole('role').notNull().default('manager'),
   isActive: boolean('is_active').notNull().default(true),
+  /**
+   * Every session token minted before this instant is refused. The whole of
+   * session revocation, in one column — see `sessionStillValid` in
+   * `~/auth/session`. Bumped on a password change and on being switched off;
+   * *not* bumped by a role change, which is not a reason to sign somebody out.
+   */
+  sessionsValidFrom: timestamp('sessions_valid_from', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
   lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
   createdAt,
   updatedAt,
@@ -526,6 +552,7 @@ export const pageTranslationsRelations = relations(pageTranslations, ({ one }) =
 /* -------------------------------------------------------------------- types */
 
 export type AdminUser = typeof adminUsers.$inferSelect;
+export type AdminRole = (typeof adminRole.enumValues)[number];
 export type Category = typeof categories.$inferSelect;
 export type Product = typeof products.$inferSelect;
 export type ProductVariant = typeof productVariants.$inferSelect;

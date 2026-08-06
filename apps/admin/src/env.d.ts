@@ -2,6 +2,7 @@
 
 import type { Runtime } from '@astrojs/cloudflare';
 import type { AdminSession } from '@balier/lib/auth';
+import type { AdminUserRecord } from '@balier/lib/db/queries/adminUsers';
 
 declare global {
   /**
@@ -33,6 +34,13 @@ declare global {
     interface Locals extends Runtime {
       /** Set by the gate for every route except `/login`, `/logout`, `/media/**`. */
       admin?: AdminSession;
+      /**
+       * The live `admin_users` row behind that session, read by the gate on
+       * every request it lets through — so a page needing the role or the
+       * password hash uses this rather than querying again. Present exactly
+       * when `admin` is.
+       */
+      adminUser?: AdminUserRecord;
     }
   }
 }

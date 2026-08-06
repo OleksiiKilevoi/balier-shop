@@ -1,58 +1,269 @@
 ---
 import { env } from 'cloudflare:workers';
 import AdminLayout from '~/layouts/AdminLayout.astro';
-import { createDb } from '@balier/lib/db';
+import {
+  SESSION_COOKIE,
+  hashPassword,
+  sessionCookieOptions,
+  signSession,
+  verifyPassword,
+} from '@balier/lib/auth';
+import { createDb, createTxDb } from '@balier/lib/db';
+import {
+  createAdminUser,
+  listAdminUsers,
+  revokeAdminSessions,
+  setAdminUserPassword,
+  updateAdminPasswordHash,
+  updateAdminUser,
+} from '@balier/lib/db/queries/adminUsers';
 import { getCodLimitSetting, setCodLimitKopiykas } from '@balier/lib/db/queries/settings';
 import {
   ADMIN_COD_LIMIT_HINT,
+  ADMIN_PASSWORD_HINT,
+  ADMIN_ROLE_HINT,
+  ADMIN_ROLE_LABELS,
+  ADMIN_SETTINGS_FAILURES,
   ADMIN_SETTINGS_MESSAGES,
+  ADMIN_USERS_HINT,
+  ADMIN_USER_DISABLE_HINT,
   formatAdminDateTime,
 } from '@balier/lib/i18n/admin';
 import type { AdminSettingsMessage } from '@balier/lib/i18n/admin';
 import { formatPrice } from '@balier/lib/money';
+import { peekRateLimit, recordRateLimitHit } from '@balier/lib/rateLimit';
 import {
   COD_LIMIT_MAX_HRYVNIAS,
   COD_LIMIT_MIN_HRYVNIAS,
+  PASSWORD_MAX_LENGTH,
+  PASSWORD_MIN_LENGTH,
+  adminIssueKey,
+  adminPasswordChangeSchema,
   adminSettingsSchema,
+  adminUserActionSchema,
 } from '@balier/lib/validation/admin';
+import { adminRole } from '@balier/lib/db/schema';
 
 /**
- * Shop settings. Today that is one value — the cash-on-delivery limit, which
- * `getCodLimitKopiykas` has been reading at checkout since Phase 3 with nothing
- * in the product able to write it. `scripts/seed.ts` was the only writer.
+ * Shop settings, in three sections: the cash-on-delivery limit, the signed-in
+ * user's own password, and — for an admin — the accounts.
  *
- * A plain form POST answered with a 303 back here, like the order detail page:
- * one field and one button do not need the fetch layer `/orders/new`
- * carries, and post/redirect/get means a refresh after saving re-reads the row
- * instead of re-writing it.
+ * WHY THE ROLE COMES FROM THE ROW AND NOT FROM THE COOKIE
+ * The session is a signed token, so anything carried in it is true as of the
+ * moment somebody signed in. A role in the token would mean a demoted admin
+ * keeps the right to create accounts for the rest of the day, which is the one
+ * thing this screen exists to control. The live row comes from `locals.adminUser`
+ * — the gate in `src/middleware.ts` reads it on every request now, so this page
+ * gets the fresh role, and the fresh password hash the section below needs, for
+ * no query of its own.
  *
- * The route is named for the section rather than for the setting, so the next
- * shop-wide value lands here instead of earning a screen of its own.
+ * The cod-limit section is deliberately open to both roles. The one thing
+ * `manager` cannot do is anything in «Користувачі».
+ *
+ * Every section is a plain `<form method="post">` answered with a 303, and works
+ * with script off. `enhanceAdminForms` then takes the reload out of it: the page
+ * is now long enough that a save at the bottom would otherwise throw the
+ * operator back to the header to read the answer.
  */
 export const prerender = false;
 
 const SELF_URL = '/settings';
 
+/**
+ * A borrowed laptop is the threat here, not a guesser on the internet: reaching
+ * this form already needs a valid session. Ten wrong current-passwords in a
+ * quarter of an hour is nowhere near a person who mistyped, and it caps what a
+ * stolen cookie can turn into. Per user id rather than per IP — the account is
+ * what is being attacked, and the attacker is inside the same NAT as often as
+ * not.
+ */
+const PASSWORD_LIMIT = 10;
+const PASSWORD_WINDOW_SECONDS = 900;
+
+/** Nothing on this page may sit in a cache: it renders account state. */
+Astro.response.headers.set('cache-control', 'no-store');
+
+/* Both are set by the gate for every route it lets through, and this is one of
+   them — the guard is for the type, not for a case that can happen. */
+const me = Astro.locals.adminUser;
+if (!me) return Astro.redirect('/login', 303);
+
 const db = createDb(env.DATABASE_URL);
+
+const isAdmin = me.role === 'admin';
+
+/** Set when a POST is answered in place rather than by a redirect. */
+let banner: AdminSettingsMessage | null = null;
+/** Which form failed, so only that one is marked and redrawn. */
+let failedIntent: string | null = null;
+let failedUserId: string | null = null;
+/** What was typed, to put back on a refusal. Never holds a password field. */
+let body: Record<string, string> = {};
 
 if (Astro.request.method === 'POST') {
   const form = await Astro.request.formData();
-  const parsed = adminSettingsSchema.safeParse(Object.fromEntries(form));
+  const intent = String(form.get('intent') ?? '');
+  failedIntent = intent;
 
-  if (!parsed.success) {
+  if (intent === 'cod_limit') {
     /*
-     * The rejected value is deliberately not carried back through the redirect.
-     * It is one short number and the message states the range, so retyping is
-     * cheaper than putting a field's contents in the URL — which is the same
-     * reasoning that keeps the new-order draft out of the query string, applied
-     * to a field where it costs almost nothing.
+     * The rejected value is deliberately not carried back. It is one short
+     * number and the message states the range, so retyping is cheaper than
+     * putting a field's contents in the URL — the same reasoning that keeps the
+     * new-order draft out of the query string, applied to a field where it
+     * costs almost nothing.
      */
-    const invalid = parsed.error.issues.some((issue) => issue.message === 'invalid_cod_limit');
-    return Astro.redirect(`${SELF_URL}?m=${invalid ? 'invalid_cod_limit' : 'bad_request'}`, 303);
-  }
+    const parsed = adminSettingsSchema.safeParse(Object.fromEntries(form));
 
-  await setCodLimitKopiykas(db, parsed.data.codLimit);
-  return Astro.redirect(`${SELF_URL}?m=cod_limit_updated`, 303);
+    if (!parsed.success) {
+      banner = parsed.error.issues.some((issue) => issue.message === 'invalid_cod_limit')
+        ? 'invalid_cod_limit'
+        : 'bad_request';
+    } else {
+      await setCodLimitKopiykas(db, parsed.data.codLimit);
+      return Astro.redirect(`${SELF_URL}?m=cod_limit_updated`, 303);
+    }
+  } else if (intent === 'password') {
+    const budgetKey = `admin-password:${me.id}`;
+    const limit = await peekRateLimit(
+      env.RATE_LIMIT,
+      budgetKey,
+      PASSWORD_LIMIT,
+      PASSWORD_WINDOW_SECONDS,
+    );
+
+    if (!limit.allowed) {
+      banner = 'too_many_attempts';
+    } else {
+      const parsed = adminPasswordChangeSchema.safeParse({
+        currentPassword: form.get('currentPassword'),
+        newPassword: form.get('newPassword'),
+        confirmPassword: form.get('confirmPassword'),
+      });
+
+      if (!parsed.success) {
+        // A shape refusal costs no budget: it never reached the stored hash, so
+        // it tells a guesser nothing and locking someone out over a mistyped
+        // confirmation would be absurd.
+        const key = adminIssueKey(parsed.error);
+        banner = key in ADMIN_SETTINGS_MESSAGES ? (key as AdminSettingsMessage) : 'bad_request';
+      } else if (!(await verifyPassword(parsed.data.currentPassword, me.passwordHash))) {
+        await recordRateLimitHit(env.RATE_LIMIT, budgetKey, PASSWORD_WINDOW_SECONDS);
+        banner = 'wrong_password';
+      } else {
+        await updateAdminPasswordHash(db, me.id, await hashPassword(parsed.data.newPassword));
+
+        /*
+         * Every session this account holds is now dead, including this one —
+         * which is the point: «my password leaked» has to end the sessions on
+         * the devices the person is not holding. The tab that did the changing
+         * is then handed a fresh cookie below, so the operator is not thrown
+         * back to the login form for having good hygiene. Anything else signed
+         * in with the old password is out on its next request.
+         */
+        await revokeAdminSessions(db, me.id);
+
+        const token = await signSession(env.ADMIN_SESSION_SECRET, {
+          sub: me.id,
+          email: me.email,
+        });
+        // No token means the secret is missing, which cannot happen on a
+        // request the gate let through — but the password *was* changed, so
+        // land on the login form rather than pretend otherwise.
+        if (token) Astro.cookies.set(SESSION_COOKIE, token, sessionCookieOptions());
+
+        return Astro.redirect(`${SELF_URL}?m=password_changed`, 303);
+      }
+    }
+  } else if (intent.startsWith('user_')) {
+    // The gate for the whole section, checked against the row rather than the
+    // cookie. A manager only gets here from a tab that was open before a
+    // demotion, or from a request made by hand — neither is a reason to trust
+    // the intent.
+    if (!isAdmin) {
+      banner = 'forbidden';
+    } else {
+      const fields = Object.fromEntries(form) as Record<string, string>;
+      const parsed = adminUserActionSchema.safeParse(fields);
+
+      if (!parsed.success) {
+        const key = adminIssueKey(parsed.error);
+        banner = key in ADMIN_SETTINGS_MESSAGES ? (key as AdminSettingsMessage) : 'bad_request';
+        failedUserId = fields.userId ?? null;
+        // Only the create form is redrawn, and only its non-secret fields.
+        if (fields.intent === 'user_create') {
+          body = { email: fields.email ?? '', name: fields.name ?? '', role: fields.role ?? '' };
+        }
+      } else {
+        const action = parsed.data;
+
+        if (action.intent === 'user_create') {
+          const result = await createAdminUser(db, {
+            email: action.email,
+            name: action.name,
+            role: action.role,
+            passwordHash: await hashPassword(action.password),
+          });
+
+          if (result.ok) return Astro.redirect(`${SELF_URL}?m=user_created`, 303);
+
+          banner = result.reason;
+          body = { email: action.email, name: action.name ?? '', role: action.role };
+        } else if (action.intent === 'user_save') {
+          failedUserId = action.userId;
+
+          /*
+           * You cannot demote or switch off yourself. `updateAdminUser`'s
+           * last-admin guard would catch the case that actually breaks the shop,
+           * but not this one: with two admins, demoting yourself passes that
+           * guard and silently takes away the section you are standing in. It is
+           * also almost never what was meant — the click was aimed at the row
+           * above.
+           */
+          if (action.userId === me.id && !(action.role === 'admin' && action.isActive)) {
+            banner = 'self_demote';
+          } else {
+            const { db: txDb, close } = createTxDb(env.DATABASE_URL);
+            try {
+              const result = await updateAdminUser(txDb, action.userId, {
+                role: action.role,
+                isActive: action.isActive,
+              });
+
+              if (result.ok) return Astro.redirect(`${SELF_URL}?m=user_saved`, 303);
+              banner = result.reason;
+            } finally {
+              Astro.locals.cfContext?.waitUntil?.(close());
+            }
+          }
+        } else {
+          failedUserId = action.userId;
+
+          /*
+           * Resetting somebody else's password needs no old password; resetting
+           * your own does, and that check lives in the section above. Allowing
+           * it here would hand anyone holding a stolen cookie a way to change
+           * the password without knowing it — the one thing «Зміна пароля» is
+           * there to prevent.
+           */
+          if (action.userId === me.id) {
+            banner = 'self_password';
+          } else {
+            const result = await setAdminUserPassword(
+              db,
+              action.userId,
+              await hashPassword(action.password),
+            );
+
+            if (result.ok) return Astro.redirect(`${SELF_URL}?m=user_password_set`, 303);
+            banner = result.reason;
+          }
+        }
+      }
+    }
+  } else {
+    banner = 'bad_request';
+  }
 }
 
 const codLimit = await getCodLimitSetting(db);
@@ -62,87 +273,451 @@ const codLimit = await getCodLimitSetting(db);
    separator in an input is a thing to delete before typing. */
 const codLimitHryvnias = Math.round(codLimit.kopiykas / 100);
 
+/* Only an admin sees the section, so only an admin pays for the query. */
+const users = isAdmin ? await listAdminUsers(db) : [];
+
 const messageParam = Astro.url.searchParams.get('m');
-const message =
+const redirectMessage =
   messageParam && messageParam in ADMIN_SETTINGS_MESSAGES
     ? (messageParam as AdminSettingsMessage)
     : null;
 
-const FAILURES = new Set<AdminSettingsMessage>(['invalid_cod_limit', 'bad_request']);
-const failed = message !== null && FAILURES.has(message);
+const message = banner ?? redirectMessage;
+const failed = message !== null && ADMIN_SETTINGS_FAILURES.has(message);
+
+/** Marks the one form a refusal is about, so the others are left alone. */
+const formFailed = (intent: string, userId?: string) =>
+  banner !== null && failedIntent === intent && (userId === undefined || failedUserId === userId);
+
+const creating = formFailed('user_create');
+const ROLES = adminRole.enumValues;
 ---
 
 <AdminLayout title="Налаштування">
-  <h1 class="text-fg text-2xl font-semibold sm:text-3xl">Налаштування</h1>
+  {/*
+    Everything a save can change lives inside this element, and it is what the
+    enhancement layer swaps. `id` is how the same element is found again in the
+    response.
+  */}
+  <div
+    id="settings-editor"
+    class="aria-busy:pointer-events-none aria-busy:opacity-60 transition-opacity"
+  >
+    <h1 class="text-fg text-2xl font-semibold sm:text-3xl">Налаштування</h1>
 
-  {/* Same rule as the order page: a refusal earns colour, a success does not —
-      the saved value is right there in the field to confirm it. */}
-  {
-    message && (
-      <p
-        role="status"
-        class:list={[
-          'rounded-card mt-5 p-3 text-sm',
-          failed ? 'admin-tone-negative' : 'admin-card text-fg-muted',
-        ]}
-      >
-        {ADMIN_SETTINGS_MESSAGES[message]}
-      </p>
-    )
-  }
+    {/* Same rule as the order page: a refusal earns colour, a success does not.
+        The id is what the script moves into the toast host; `data-tone` tells it
+        whether the sentence may expire. Both are inert without script, and this
+        stays a banner at the top of the page. */}
+    {
+      message && (
+        <p
+          id="settings-message"
+          data-tone={failed ? 'bad' : 'ok'}
+          role={failed ? 'alert' : 'status'}
+          class:list={[
+            'rounded-card mt-5 p-3 text-sm',
+            failed ? 'admin-tone-negative' : 'admin-card text-fg-muted',
+          ]}
+        >
+          {ADMIN_SETTINGS_MESSAGES[message]}
+        </p>
+      )
+    }
 
-  <section class="admin-card mt-6 p-5">
-    <h2 class="text-fg text-base font-semibold">Ліміт післяплати</h2>
-    <p class="text-fg-muted mt-1 text-sm">{ADMIN_COD_LIMIT_HINT}</p>
+    <section class="admin-card mt-6 p-5">
+      <h2 class="text-fg text-base font-semibold">Ліміт післяплати</h2>
+      <p class="text-fg-muted mt-1 text-sm">{ADMIN_COD_LIMIT_HINT}</p>
 
-    <form method="post" class="mt-4">
-      <label for="cod-limit" class="text-fg-subtle text-xs">Максимальна сума замовлення</label>
+      <form method="post" action={SELF_URL} data-form="cod-limit" class="mt-4">
+        <input type="hidden" name="intent" value="cod_limit" />
+        <label for="cod-limit" class="text-fg-subtle text-xs">Максимальна сума замовлення</label>
 
-      <div class="mt-1 flex flex-wrap items-center gap-3">
-        {/* `text` with a numeric keypad, not `number`: `admin-field` sets
-            `appearance: none`, which leaves a number input's spinner rendering
-            inconsistently across browsers, and the schema already accepts a
-            value pasted with spaces in it — which `type="number"` would reject
-            before the server ever saw it. */}
-        <div class="relative w-full sm:w-56">
-          <input
-            id="cod-limit"
-            name="codLimit"
-            type="text"
-            inputmode="numeric"
-            value={codLimitHryvnias}
-            autocomplete="off"
-            aria-describedby="cod-limit-range"
-            class:list={['admin-field pr-10', failed && 'border-danger']}
-          />
-          <span
-            class="text-fg-subtle pointer-events-none absolute inset-y-0 right-4.5 flex items-center text-base sm:text-sm"
-            aria-hidden="true"
-          >
-            ₴
-          </span>
+        <div class="mt-1 flex flex-wrap items-center gap-3">
+          {/* `text` with a numeric keypad, not `number`: `admin-field` sets
+              `appearance: none`, which leaves a number input's spinner rendering
+              inconsistently across browsers, and the schema already accepts a
+              value pasted with spaces in it — which `type="number"` would reject
+              before the server ever saw it. */}
+          <div class="relative w-full sm:w-56">
+            <input
+              id="cod-limit"
+              name="codLimit"
+              type="text"
+              inputmode="numeric"
+              value={codLimitHryvnias}
+              autocomplete="off"
+              aria-describedby="cod-limit-range"
+              class:list={['admin-field pr-10', formFailed('cod_limit') && 'border-danger']}
+            />
+            <span
+              class="text-fg-subtle pointer-events-none absolute inset-y-0 right-4.5 flex items-center text-base sm:text-sm"
+              aria-hidden="true"
+            >
+              ₴
+            </span>
+          </div>
+
+          <button type="submit" class="admin-btn admin-btn-primary">Зберегти</button>
         </div>
 
-        <button type="submit" class="admin-btn admin-btn-primary">Зберегти</button>
-      </div>
+        <p id="cod-limit-range" class="text-fg-subtle mt-2 text-xs">
+          Цілими гривнями, від {COD_LIMIT_MIN_HRYVNIAS} до {
+            new Intl.NumberFormat('uk-UA').format(COD_LIMIT_MAX_HRYVNIAS)
+          } ₴. Зараз діє {formatPrice(codLimit.kopiykas)}.
+        </p>
 
-      <p id="cod-limit-range" class="text-fg-subtle mt-2 text-xs">
-        Цілими гривнями, від {COD_LIMIT_MIN_HRYVNIAS} до {
-          new Intl.NumberFormat('uk-UA').format(COD_LIMIT_MAX_HRYVNIAS)
-        } ₴. Зараз діє {formatPrice(codLimit.kopiykas)}.
-      </p>
+        {/* «Never changed» and «no row at all» are different facts, and the
+            second one matters: it means checkout is running on the fallback in
+            `getCodLimitKopiykas`, not on a value anybody chose. Saving once
+            creates the row and this line turns into a date. */}
+        <p class="text-fg-subtle mt-1 text-xs">
+          {
+            codLimit.updatedAt
+              ? `Востаннє змінено ${formatAdminDateTime(codLimit.updatedAt)}.`
+              : 'Значення ще не збережено — діє типове. Збережіть, щоб зафіксувати його.'
+          }
+        </p>
+      </form>
+    </section>
 
-      {/* «Never changed» and «no row at all» are different facts, and the
-          second one matters: it means checkout is running on the fallback in
-          `getCodLimitKopiykas`, not on a value anybody chose. Saving once
-          creates the row and this line turns into a date. */}
-      <p class="text-fg-subtle mt-1 text-xs">
-        {
-          codLimit.updatedAt
-            ? `Востаннє змінено ${formatAdminDateTime(codLimit.updatedAt)}.`
-            : 'Значення ще не збережено — діє типове. Збережіть, щоб зафіксувати його.'
-        }
-      </p>
-    </form>
-  </section>
+    {/* Everyone's own password, whatever their role. */}
+    <section class="admin-card mt-6 p-5">
+      <h2 class="text-fg text-base font-semibold">Зміна пароля</h2>
+      <p class="text-fg-muted mt-1 text-sm">{ADMIN_PASSWORD_HINT}</p>
+
+      <form method="post" action={SELF_URL} data-form="password" class="mt-4" autocomplete="off">
+        <input type="hidden" name="intent" value="password" />
+
+        {/* The address the browser should file the new password under. Hidden
+            and unnamed on purpose: it is a hint to the password manager, not a
+            field this form submits — the server takes the account from the
+            session, never from the body. */}
+        <input
+          type="text"
+          value={me.email}
+          autocomplete="username"
+          class="hidden"
+          tabindex="-1"
+          aria-hidden="true"
+          readonly
+        />
+
+        <div class="flex flex-wrap gap-3">
+          <div class="w-full sm:w-64">
+            <label for="current-password" class="text-fg-subtle text-xs">Поточний пароль</label>
+            <input
+              id="current-password"
+              name="currentPassword"
+              type="password"
+              autocomplete="current-password"
+              maxlength={PASSWORD_MAX_LENGTH}
+              required
+              class:list={[
+                'admin-field mt-1',
+                formFailed('password') && banner === 'wrong_password' && 'border-danger',
+              ]}
+            />
+          </div>
+
+          <div class="w-full sm:w-64">
+            <label for="new-password" class="text-fg-subtle text-xs">Новий пароль</label>
+            <input
+              id="new-password"
+              name="newPassword"
+              type="password"
+              autocomplete="new-password"
+              minlength={PASSWORD_MIN_LENGTH}
+              maxlength={PASSWORD_MAX_LENGTH}
+              required
+              class:list={[
+                'admin-field mt-1',
+                formFailed('password') && banner !== 'wrong_password' && 'border-danger',
+              ]}
+            />
+          </div>
+
+          <div class="w-full sm:w-64">
+            <label for="confirm-password" class="text-fg-subtle text-xs">Повторіть новий</label>
+            <input
+              id="confirm-password"
+              name="confirmPassword"
+              type="password"
+              autocomplete="new-password"
+              minlength={PASSWORD_MIN_LENGTH}
+              maxlength={PASSWORD_MAX_LENGTH}
+              required
+              class:list={[
+                'admin-field mt-1',
+                formFailed('password') && banner === 'passwords_do_not_match' && 'border-danger',
+              ]}
+            />
+          </div>
+        </div>
+
+        <button type="submit" class="admin-btn admin-btn-primary mt-4">Змінити пароль</button>
+      </form>
+    </section>
+
+    {
+      isAdmin && (
+        <section class="mt-6">
+          <h2 class="text-fg text-base font-semibold">Користувачі</h2>
+          <p class="text-fg-muted mt-1 max-w-2xl text-sm">{ADMIN_USERS_HINT}</p>
+
+          <ul class="mt-4 space-y-3">
+            {users.map((user) => {
+              const self = user.id === me.id;
+              const rowFailed = formFailed('user_save', user.id);
+
+              return (
+                <li
+                  class:list={[
+                    'admin-card p-5',
+                    !user.isActive && 'opacity-70',
+                    (rowFailed || formFailed('user_password', user.id)) && 'border-danger',
+                  ]}
+                >
+                  <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                    <p class="text-fg text-sm font-medium">{user.email}</p>
+                    {user.name && <p class="text-fg-muted text-sm">{user.name}</p>}
+                    <span class="admin-badge text-xs">{ADMIN_ROLE_LABELS[user.role]}</span>
+                    {!user.isActive && (
+                      <span class="admin-badge admin-tone-negative text-xs">Вимкнено</span>
+                    )}
+                    {self && <span class="text-fg-subtle text-xs">це ви</span>}
+                  </div>
+
+                  <p class="text-fg-subtle mt-1 text-xs">
+                    {user.lastLoginAt
+                      ? `Останній вхід ${formatAdminDateTime(user.lastLoginAt)}.`
+                      : 'Ще жодного входу.'}
+                    {` Створено ${formatAdminDateTime(user.createdAt)}.`}
+                  </p>
+
+                  <form
+                    method="post"
+                    action={SELF_URL}
+                    data-form={`user:${user.id}`}
+                    class="mt-4 flex flex-wrap items-end gap-4"
+                  >
+                    <input type="hidden" name="intent" value="user_save" />
+                    <input type="hidden" name="userId" value={user.id} />
+
+                    <div class="w-full sm:w-56">
+                      <label for={`role-${user.id}`} class="text-fg-subtle text-xs">
+                        Роль
+                      </label>
+                      <select
+                        id={`role-${user.id}`}
+                        name="role"
+                        disabled={self}
+                        class="admin-field admin-select mt-1"
+                      >
+                        {ROLES.map((value) => (
+                          <option value={value} selected={value === user.role}>
+                            {ADMIN_ROLE_LABELS[value]}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <label class="flex min-h-touch items-center gap-2.5 text-sm">
+                      <input
+                        type="checkbox"
+                        name="isActive"
+                        checked={user.isActive}
+                        disabled={self}
+                        class="size-4"
+                      />
+                      <span class="text-fg-muted">Активний</span>
+                    </label>
+
+                    {/* Your own row is read-only rather than absent: seeing your
+                        role is the point of the list, and a control that refuses
+                        after the click teaches nothing. The server refuses it
+                        too — `self_demote` — since `disabled` is a courtesy of
+                        the browser's, not a rule. */}
+                    {self ? (
+                      <p class="text-fg-subtle text-xs">
+                        Власну роль і доступ змінити не можна — попросіть іншого адміністратора.
+                      </p>
+                    ) : (
+                      <button type="submit" class="admin-btn admin-btn-secondary">
+                        Зберегти
+                      </button>
+                    )}
+                  </form>
+
+                  {!self && (
+                    /* Folded away: it is the rare action on this screen, and an
+                       open password field on every row invites the wrong one to
+                       be typed into. `id` is what the enhancement layer uses to
+                       leave it open across a save. */
+                    <details id={`reset-${user.id}`} class="mt-3">
+                      <summary class="text-fg-muted cursor-pointer text-sm">
+                        Змінити пароль користувача
+                      </summary>
+
+                      <form
+                        method="post"
+                        action={SELF_URL}
+                        data-form={`user-password:${user.id}`}
+                        class="mt-3 flex flex-wrap items-end gap-3"
+                        autocomplete="off"
+                      >
+                        <input type="hidden" name="intent" value="user_password" />
+                        <input type="hidden" name="userId" value={user.id} />
+
+                        <div class="w-full sm:w-64">
+                          <label for={`password-${user.id}`} class="text-fg-subtle text-xs">
+                            Новий пароль
+                          </label>
+                          <input
+                            id={`password-${user.id}`}
+                            name="password"
+                            type="password"
+                            autocomplete="new-password"
+                            minlength={PASSWORD_MIN_LENGTH}
+                            maxlength={PASSWORD_MAX_LENGTH}
+                            required
+                            class:list={[
+                              'admin-field mt-1',
+                              formFailed('user_password', user.id) && 'border-danger',
+                            ]}
+                          />
+                        </div>
+
+                        <button type="submit" class="admin-btn admin-btn-secondary">
+                          Встановити
+                        </button>
+
+                        <p class="text-fg-subtle w-full text-xs">
+                          Користувач не отримає сповіщення — передайте пароль йому особисто. Його
+                          поточні сеанси завершаться одразу.
+                        </p>
+                      </form>
+                    </details>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+
+          <div class="admin-card mt-6 p-5">
+            <h3 class="text-fg text-base font-semibold">Новий користувач</h3>
+            <p class="text-fg-muted mt-1 text-sm">{ADMIN_ROLE_HINT}</p>
+
+            <form
+              method="post"
+              action={SELF_URL}
+              id="new-user-form"
+              data-form="user-new"
+              class="mt-4"
+              autocomplete="off"
+            >
+              <input type="hidden" name="intent" value="user_create" />
+
+              <div class="flex flex-wrap gap-3">
+                <div class="w-full sm:w-64">
+                  <label for="new-email" class="text-fg-subtle text-xs">
+                    Пошта
+                  </label>
+                  <input
+                    id="new-email"
+                    name="email"
+                    type="email"
+                    value={creating ? (body.email ?? '') : ''}
+                    maxlength={320}
+                    autocapitalize="none"
+                    spellcheck="false"
+                    required
+                    class:list={[
+                      'admin-field mt-1',
+                      creating &&
+                        (banner === 'invalid_email' || banner === 'email_taken') &&
+                        'border-danger',
+                    ]}
+                  />
+                </div>
+
+                <div class="w-full sm:w-56">
+                  <label for="new-name" class="text-fg-subtle text-xs">
+                    Ім'я
+                  </label>
+                  <input
+                    id="new-name"
+                    name="name"
+                    type="text"
+                    value={creating ? (body.name ?? '') : ''}
+                    maxlength={120}
+                    class="admin-field mt-1"
+                  />
+                </div>
+
+                <div class="w-full sm:w-56">
+                  <label for="new-role" class="text-fg-subtle text-xs">
+                    Роль
+                  </label>
+                  <select id="new-role" name="role" class="admin-field admin-select mt-1">
+                    {ROLES.map((value) => (
+                      <option value={value} selected={creating && body.role === value}>
+                        {ADMIN_ROLE_LABELS[value]}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div class="w-full sm:w-64">
+                  <label for="new-user-password" class="text-fg-subtle text-xs">
+                    Пароль
+                  </label>
+                  <input
+                    id="new-user-password"
+                    name="password"
+                    type="password"
+                    autocomplete="new-password"
+                    minlength={PASSWORD_MIN_LENGTH}
+                    maxlength={PASSWORD_MAX_LENGTH}
+                    required
+                    class:list={[
+                      'admin-field mt-1',
+                      creating &&
+                        (banner === 'password_too_short' || banner === 'password_too_long') &&
+                        'border-danger',
+                    ]}
+                  />
+                </div>
+              </div>
+
+              <p class="text-fg-subtle mt-2 text-xs">
+                Ім'я не обов'язкове — у шапці панелі замість нього буде пошта. Пароль:
+                щонайменше {PASSWORD_MIN_LENGTH} символів. {ADMIN_USER_DISABLE_HINT}
+              </p>
+
+              <button type="submit" class="admin-btn admin-btn-primary mt-4">Створити</button>
+            </form>
+          </div>
+        </section>
+      )
+    }
+  </div>
+
+  {/*
+    Empty until script has something to put in it, and hidden the rest of the
+    time by having nothing to lay out. The message it receives is the one
+    rendered above, moved rather than rebuilt.
+  */}
+  <div id="settings-toast" class="admin-toast-host" aria-live="polite" aria-atomic="true"></div>
+
+  <script>
+    import { enhanceAdminForms } from '@balier/lib/admin/forms';
+
+    const editor = document.getElementById('settings-editor');
+    const toastHost = document.getElementById('settings-toast');
+
+    if (editor && toastHost) {
+      enhanceAdminForms({ root: editor, toastHost, messageId: 'settings-message' });
+    }
+  </script>
 </AdminLayout>

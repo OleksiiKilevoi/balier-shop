@@ -8,15 +8,26 @@
  * buys is that none of the three can be *edited* — a cookie claiming a longer
  * life or somebody else's id fails to verify.
  *
- * WHY NO SESSION TABLE
- * Verifying is one HMAC, so the gate in `src/middleware.ts` costs nothing and
- * touches neither KV nor Neon on a request that is already going to query the
- * database for its own page. The price, and it is a real one: **a session
- * cannot be revoked before it expires.** Signing out clears the cookie in the
- * browser, and a copy taken off that browser first stays valid until `exp`.
- * `SESSION_TTL_SECONDS` is the whole blast radius, which is why it is a working
- * day rather than a month. Changing a password does not end sessions already
- * issued, for the same reason.
+ * WHY NO SESSION TABLE, AND WHAT REPLACED THE HOLE IT LEFT
+ * There is still no row per session: verifying is one HMAC, and a table of
+ * live sessions is a thing to expire, index and clean up. What that bought
+ * originally was a gate that touched neither KV nor Neon — and what it cost was
+ * that **a session could not be revoked at all**. A changed password, a
+ * switched-off account: both left every cookie already issued working for the
+ * rest of its twelve hours.
+ *
+ * That was the wrong trade for the thing being protected, so as of 2026-08-06
+ * the token carries `iat` and every account carries `admin_users.
+ * sessions_valid_from`. A token issued before that moment is dead — see
+ * `sessionStillValid`, which is the whole mechanism. Revoking is one `UPDATE`
+ * of one column, it costs nothing to store, and it revokes *every* session for
+ * that account at once, including ones on devices nobody has access to.
+ *
+ * The price is honest and it is paid in `src/middleware.ts`: the gate now reads
+ * the user's row on every request, so the panel spends one Neon round trip
+ * (~45 ms) per page view that it did not spend before. For a panel with a
+ * handful of accounts on it that is the right way round — and the row is handed
+ * to the page in `locals`, so a screen that needs it does not read it twice.
  *
  * Same contract as the rest of `src/lib/`: `verifySession` never throws, and
  * anything it cannot positively confirm comes back `null`. Fail closed.
@@ -41,6 +52,8 @@ export interface AdminSession {
   /** `admin_users.id`. */
   sub: string;
   email: string;
+  /** When this token was minted. Seconds since the epoch. */
+  issuedAt: number;
   /** Seconds since the epoch. */
   expiresAt: number;
 }
@@ -48,6 +61,7 @@ export interface AdminSession {
 interface SessionPayload {
   sub: string;
   email: string;
+  iat: number;
   exp: number;
 }
 
@@ -68,6 +82,7 @@ export async function signSession(
   const payload: SessionPayload = {
     sub: session.sub,
     email: session.email,
+    iat: now,
     exp: now + ttlSeconds,
   };
 
@@ -101,11 +116,50 @@ export async function verifySession(
     if (typeof payload.sub !== 'string' || !payload.sub) return null;
     if (typeof payload.email !== 'string' || !payload.email) return null;
     if (typeof payload.exp !== 'number' || payload.exp <= now) return null;
+    // A token with no `iat` cannot be compared against `sessions_valid_from`,
+    // which makes it a token that cannot be revoked — exactly the thing being
+    // fixed. Those are the ones minted before 2026-08-06; refusing them signs
+    // their holders out once, which is the correct one-off cost.
+    if (typeof payload.iat !== 'number' || payload.iat > now) return null;
 
-    return { sub: payload.sub, email: payload.email, expiresAt: payload.exp };
+    return {
+      sub: payload.sub,
+      email: payload.email,
+      issuedAt: payload.iat,
+      expiresAt: payload.exp,
+    };
   } catch {
     return null;
   }
+}
+
+/**
+ * The revocation check: is this token still one its account recognises?
+ *
+ * Split out of the gate and kept pure so it can be tested without a database,
+ * because it is the piece that decides whether somebody is still signed in.
+ * Both halves matter and they answer different questions:
+ *
+ *   - `isActive` — is this still an account at all. A disabled user is turned
+ *     away on their next request rather than at the end of their working day.
+ *   - `sessionsValidFrom` — every token minted before this instant is dead.
+ *     Set on a password change and on being switched off, so «I think my
+ *     password leaked» has an answer that is true everywhere at once, not just
+ *     in the browser doing the asking.
+ *
+ * Seconds versus milliseconds is the trap here: `iat` is epoch **seconds** and a
+ * `Date` is milliseconds, so the column is floored to seconds before the
+ * comparison. It is `<` rather than `<=` on purpose — a token minted in the same
+ * second as the revocation survives, which is the sign-in that immediately
+ * follows a password change, and the alternative is a login that mysteriously
+ * does not take.
+ */
+export function sessionStillValid(
+  session: AdminSession,
+  user: { isActive: boolean; sessionsValidFrom: Date },
+): boolean {
+  if (!user.isActive) return false;
+  return session.issuedAt >= Math.floor(user.sessionsValidFrom.getTime() / 1000);
 }
 
 /**

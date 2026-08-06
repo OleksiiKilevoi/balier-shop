@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { orderStatus } from '../db/schema';
+import { adminRole, orderStatus } from '../db/schema';
 import { cartItemsSchema } from './cart';
 import {
   MAX_CUSTOMER_NAME,
@@ -104,6 +104,124 @@ export const codLimitSchema = wholeHryvniaSchema({
 export const adminSettingsSchema = z.object({ codLimit: codLimitSchema });
 
 export type AdminSettings = z.infer<typeof adminSettingsSchema>;
+
+/* ------------------------------------------------------- passwords and roles */
+
+/**
+ * The floor for a password somebody *chooses*, as opposed to one they are
+ * merely proving they already know (`adminLoginSchema`, which has no minimum on
+ * purpose — see above).
+ *
+ * Twelve, matching `scripts/admin-user.ts`, which imports this rather than
+ * keeping its own number: the script and the panel write rows into the same
+ * column, and a rule only one of them enforces is not a rule. It carries more
+ * weight than it looks: the Workers runtime caps PBKDF2 at 100 000 iterations
+ * (`~/auth/password`), so length is the half of the trade still ours to set.
+ */
+export const PASSWORD_MIN_LENGTH = 12;
+
+/**
+ * A password being set, wherever it is set from. The maximum is
+ * `adminLoginSchema`'s and exists for the same reason — PBKDF2 hashes whatever
+ * it is handed — so a password that passes here can always be logged in with.
+ */
+const newPasswordSchema = z
+  .string()
+  .min(PASSWORD_MIN_LENGTH, 'password_too_short')
+  .max(PASSWORD_MAX_LENGTH, 'password_too_long');
+
+export const adminRoleSchema = z.enum(adminRole.enumValues);
+
+/**
+ * «Зміна пароля» on `/settings`, which every signed-in user gets for their own
+ * account — role has nothing to do with it.
+ *
+ * The current password is required and is checked against the stored hash by
+ * the page, not here: a session cookie is not proof that the person typing is
+ * the person who signed in, and without this field a borrowed laptop is a
+ * permanent account takeover.
+ *
+ * The second refinement is not pedantry. Re-submitting the same password reads
+ * as a successful change while nothing about the account has changed, which is
+ * exactly the wrong thing to tell somebody who is changing it because they
+ * think it leaked.
+ */
+export const adminPasswordChangeSchema = z
+  .object({
+    currentPassword: z.string().min(1, 'bad_request').max(PASSWORD_MAX_LENGTH, 'bad_request'),
+    newPassword: newPasswordSchema,
+    confirmPassword: z.string().max(PASSWORD_MAX_LENGTH),
+  })
+  .refine((data) => data.newPassword === data.confirmPassword, {
+    message: 'passwords_do_not_match',
+    path: ['confirmPassword'],
+  })
+  .refine((data) => data.newPassword !== data.currentPassword, {
+    message: 'password_unchanged',
+    path: ['newPassword'],
+  });
+
+export type AdminPasswordChange = z.infer<typeof adminPasswordChangeSchema>;
+
+/**
+ * The «Користувачі» section of `/settings` — admin-only, and the role is
+ * re-read from the database on every one of these, never taken from the
+ * session cookie (`/settings.astro`).
+ *
+ * The address is validated here, unlike at login: a typo in a *new* account is
+ * an account nobody can ever sign into, and the person who would find out is
+ * not the person making the mistake. It is lower-cased by `normalizeEmail` in
+ * the query layer, which is the only writer of the column.
+ *
+ * There is no delete. `isActive` is how an account is taken away — the row
+ * carries `lastLoginAt`, the only record the account was ever used, and the
+ * same reasoning that keeps archived products out of the delete business.
+ */
+export const adminUserActionSchema = z.discriminatedUnion('intent', [
+  z.object({
+    intent: z.literal('user_create'),
+    email: z.email('invalid_email').max(320, 'invalid_email'),
+    name: z
+      .string()
+      .trim()
+      .max(120)
+      .transform((value): string | null => (value === '' ? null : value)),
+    role: adminRoleSchema,
+    password: newPasswordSchema,
+  }),
+  z.object({
+    intent: z.literal('user_save'),
+    userId: z.uuid('bad_request'),
+    role: adminRoleSchema,
+    /** An unchecked checkbox is an absent key, never `false`. */
+    isActive: z
+      .string()
+      .optional()
+      .transform((value) => value === 'on'),
+  }),
+  z.object({
+    intent: z.literal('user_password'),
+    userId: z.uuid('bad_request'),
+    password: newPasswordSchema,
+  }),
+]);
+
+export type AdminUserAction = z.infer<typeof adminUserActionSchema>;
+
+/**
+ * The one message a rejected password or user form is shown as.
+ *
+ * These screens have a single banner, so the *first* issue is the answer — and
+ * the schemas above name their own issues (`password_too_short`,
+ * `passwords_do_not_match`, …) so that the key is chosen where the rule is
+ * written rather than inferred from a path later. Anything unrecognised comes
+ * back as `bad_request`, which is what an operator can act on when the form
+ * failed for a reason no field explains.
+ */
+export function adminIssueKey(error: z.ZodError): string {
+  const [issue] = error.issues;
+  return issue ? issue.message : 'bad_request';
+}
 
 /**
  * An order placed by a manager at `/admin/orders/new`.

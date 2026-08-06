@@ -1,0 +1,1 @@
+ALTER TABLE "admin_users" ADD COLUMN "sessions_valid_from" timestamp with time zone DEFAULT now() NOT NULL;

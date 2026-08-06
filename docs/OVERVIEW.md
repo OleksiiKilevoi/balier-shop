@@ -235,10 +235,14 @@ still means deny.
   more without complaint. This shipped as 210 000 and made the deployed panel unopenable; see
   `docs/STATE.md`, 2026-08-05.
 - **Sessions are a signed cookie, with no server-side store** (`src/lib/auth/session.ts`):
-  HMAC-SHA-256 over `{sub, email, exp}`, `__Host-admin_session`, HttpOnly/Secure/SameSite=Lax, 12
-  hours. Verifying costs one HMAC and no round trip. **The price: a session cannot be revoked before
-  it expires** — signing out clears the browser's copy, disabling an account stops the next login but
-  not a live session, and rotating `ADMIN_SESSION_SECRET` is the only way to end all of them at once.
+  HMAC-SHA-256 over `{sub, email, iat, exp}`, `__Host-admin_session`, HttpOnly/Secure/SameSite=Lax,
+  12 hours. There is still no session table, but **sessions are revocable** as of 2026-08-06: the
+  gate reads the account's row on every request and refuses any token minted before that account's
+  `admin_users.sessions_valid_from` (`sessionStillValid`). A password change, an admin resetting
+  somebody's password, and switching an account off or back on all move that stamp; a role change
+  does not. So the price is no longer "nothing can be undone for twelve hours" — it is one Neon
+  round trip per panel page view, and the row is reused by the page through `locals.adminUser`.
+  Rotating `ADMIN_SESSION_SECRET` remains the way to end *everyone's* sessions at once.
 - `/admin/login` and `/admin/logout` are the only routes under `/admin` the gate lets through. The
   login form carries its own per-IP budget (10 per 15 min, KV) so it can answer with a message
   rather than a bare 429; logout is POST-only so no prefetcher can trigger it.

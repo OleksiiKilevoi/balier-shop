@@ -5,20 +5,29 @@ import { neon } from '@neondatabase/serverless';
 import { drizzle } from 'drizzle-orm/neon-http';
 import { eq } from 'drizzle-orm';
 import * as schema from '@balier/lib/db/schema';
+import type { AdminRole } from '@balier/lib/db/schema';
 import { hashPassword, normalizeEmail } from '@balier/lib/auth/password';
+import { PASSWORD_MIN_LENGTH } from '@balier/lib/validation/admin';
 
 /**
- * Create an admin, reset an admin's password, or switch one off.
+ * Create an admin, reset an admin's password, change a role, or switch an
+ * account off.
  *
- *   pnpm admin:user create   <email> [name]
+ *   pnpm admin:user create   <email> [name] [--role=admin|manager]
  *   pnpm admin:user password <email>
+ *   pnpm admin:user role     <email> <admin|manager>
  *   pnpm admin:user disable  <email>
  *   pnpm admin:user enable   <email>
  *   pnpm admin:user list
  *
- * The panel has no screen for this yet, and until it does this script is the
- * only way an account comes into being — including the first one, which is the
- * chicken-and-egg the login form cannot solve for itself.
+ * The panel grew its own «Користувачі» section on `/settings`, so this is no
+ * longer the only way an account comes into being — but it is still the only
+ * way the *first* one does, which is the chicken-and-egg the login form cannot
+ * solve for itself, and the only way back in when the last admin is locked out.
+ *
+ * `role` exists for one more reason: migration `0007` added the column with a
+ * default of `manager`, so every account that predates it — including the
+ * original one — is a manager until promoted here once.
  *
  * **The password is never a command-line argument.** It is prompted for, or
  * read from a pipe when there is no terminal (`… | pnpm admin:user create x`),
@@ -47,12 +56,25 @@ const db = drizzle(neon(databaseUrl), { schema });
 const [command, emailArg, ...rest] = process.argv.slice(2);
 
 /**
- * Long enough that the PBKDF2 work is the attacker's cheapest path. It carries
- * more weight than it used to: the Workers runtime caps the iteration count at
- * 100 000 (`src/lib/auth/password.ts`), so length is the half of the trade that
- * is still ours to set.
+ * The panel's rule, imported rather than restated: both write into the same
+ * column, and a minimum only one of them enforces is not a minimum. Why twelve
+ * is in `~/validation/admin`.
  */
-const MIN_PASSWORD_LENGTH = 12;
+const MIN_PASSWORD_LENGTH = PASSWORD_MIN_LENGTH;
+
+const ROLES = schema.adminRole.enumValues;
+
+function parseRole(value: string | undefined): AdminRole {
+  if (value === undefined) {
+    console.error(`A role is required — one of ${ROLES.join(', ')}.`);
+    process.exit(1);
+  }
+  if (!(ROLES as readonly string[]).includes(value)) {
+    console.error(`Unknown role ${value}. Use one of ${ROLES.join(', ')}.`);
+    process.exit(1);
+  }
+  return value as AdminRole;
+}
 
 async function readPassword(): Promise<string> {
   // No terminal means the password is being piped in — by a deploy step, or by
@@ -120,12 +142,40 @@ async function main() {
         process.exit(1);
       }
 
-      const passwordHash = await hashPassword(await readPassword());
-      await db
-        .insert(schema.adminUsers)
-        .values({ email, name: rest.join(' ') || null, passwordHash });
+      // `--role=` anywhere in the tail; whatever is left is the display name.
+      // Absent means the column's default, which is the lesser role — an
+      // account that can create other accounts is never something this script
+      // hands out by omission.
+      const roleFlag = rest.find((arg) => arg.startsWith('--role='));
+      const role = roleFlag ? parseRole(roleFlag.slice('--role='.length)) : 'manager';
+      const name = rest.filter((arg) => arg !== roleFlag).join(' ') || null;
 
-      console.log(`Created ${email}.`);
+      const passwordHash = await hashPassword(await readPassword());
+      await db.insert(schema.adminUsers).values({ email, name, role, passwordHash });
+
+      console.log(`Created ${email} as ${role}.`);
+      break;
+    }
+
+    case 'role': {
+      const email = requireEmail();
+      const role = parseRole(rest[0]);
+
+      const updated = await db
+        .update(schema.adminUsers)
+        .set({ role, updatedAt: new Date() })
+        .where(eq(schema.adminUsers.email, email))
+        .returning({ email: schema.adminUsers.email });
+
+      if (updated.length === 0) {
+        console.error(`No admin with the address ${email}.`);
+        process.exit(1);
+      }
+
+      // No last-admin guard here, unlike the panel: this script is the way back
+      // *out* of a shop with no admins, so it must not be the thing that
+      // refuses to act. It runs on a laptop with the database URL in hand.
+      console.log(`${email} is now ${role}.`);
       break;
     }
 
@@ -177,6 +227,7 @@ async function main() {
         .select({
           email: schema.adminUsers.email,
           name: schema.adminUsers.name,
+          role: schema.adminUsers.role,
           isActive: schema.adminUsers.isActive,
           lastLoginAt: schema.adminUsers.lastLoginAt,
         })
@@ -190,7 +241,7 @@ async function main() {
       for (const row of rows) {
         const last = row.lastLoginAt ? row.lastLoginAt.toISOString() : 'never';
         console.log(
-          `${row.isActive ? '[on] ' : '[off]'} ${row.email}${row.name ? ` (${row.name})` : ''} — last login: ${last}`,
+          `${row.isActive ? '[on] ' : '[off]'} ${row.role.padEnd(7)} ${row.email}${row.name ? ` (${row.name})` : ''} — last login: ${last}`,
         );
       }
       break;
@@ -200,8 +251,9 @@ async function main() {
       console.error(
         [
           'Usage:',
-          '  pnpm admin:user create   <email> [name]',
+          '  pnpm admin:user create   <email> [name] [--role=admin|manager]',
           '  pnpm admin:user password <email>',
+          '  pnpm admin:user role     <email> <admin|manager>',
           '  pnpm admin:user disable  <email>',
           '  pnpm admin:user enable   <email>',
           '  pnpm admin:user list',
