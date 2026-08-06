@@ -3,8 +3,8 @@ import { config as loadEnv } from 'dotenv';
 import { neon } from '@neondatabase/serverless';
 import { drizzle } from 'drizzle-orm/neon-http';
 import { eq } from 'drizzle-orm';
-import * as schema from '../src/lib/db/schema';
-import { hryvnias } from '../src/lib/money';
+import * as schema from '@balier/lib/db/schema';
+import { hryvnias } from '@balier/lib/money';
 import {
   MANIFEST_PATH,
   TEST_CATEGORIES,

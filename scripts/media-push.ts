@@ -3,7 +3,7 @@ import { createRequire } from 'node:module';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { MEDIA_FORMATS, toMediaExtension } from '../src/lib/media';
+import { MEDIA_FORMATS, toMediaExtension } from '@balier/lib/media';
 import { MANIFEST_PATH, type MediaManifest } from './test-catalog';
 
 /**

@@ -1,9 +1,9 @@
 import { config as loadEnv } from 'dotenv';
 import { neon } from '@neondatabase/serverless';
 import { drizzle } from 'drizzle-orm/neon-http';
-import * as schema from '../src/lib/db/schema';
-import { createNovaPoshtaClient } from '../src/lib/novaposhta/client';
-import { syncNovaPoshtaReferenceData } from '../src/lib/novaposhta/sync';
+import * as schema from '@balier/lib/db/schema';
+import { createNovaPoshtaClient } from '@balier/lib/novaposhta/client';
+import { syncNovaPoshtaReferenceData } from '@balier/lib/novaposhta/sync';
 
 loadEnv({ path: '.dev.vars', quiet: true });
 loadEnv({ quiet: true });

@@ -1,36 +1,15 @@
-# Copy to `.dev.vars` and fill in. This file is read by wrangler for local dev
-# and by drizzle-kit for migrations. `.dev.vars` is gitignored — never commit it.
-#
-# In production these are set with: wrangler secret put <NAME>
+# Copy to `.dev.vars` and fill in. Since the workspace split each Worker reads
+# its own `.dev.vars` (apps/site, apps/admin, workers/cron — see the
+# `.dev.vars.example` next to each); this root file feeds only the Node-side
+# tooling: drizzle-kit (db:migrate / db:studio) and `scripts/*.ts`.
+# `.dev.vars` is gitignored — never commit it.
 
 # Neon pooled connection string (EU Frankfurt project)
 DATABASE_URL="postgresql://user:password@ep-xxx-pooler.eu-central-1.aws.neon.tech/balier?sslmode=require"
 
-# Monobank Acquiring. Use the TEST token until Phase 5.
-# https://api.monobank.ua/docs/acquiring.html
-MONOBANK_TOKEN=""
+# Neon direct (non-pooled) connection string — occasionally useful for
+# long-running DDL under drizzle-kit; nothing in the code reads it.
+DATABASE_URL_NONPOOL=""
 
-# Nova Poshta API key from the business cabinet
+# Nova Poshta API key — `pnpm np:sync` (scripts/sync-novaposhta.ts)
 NOVAPOSHTA_API_KEY=""
-
-# Cloudflare Turnstile secret key. The site key is public — it lives in
-# wrangler.jsonc's `vars` (`PUBLIC_TURNSTILE_SITE_KEY`), not here.
-TURNSTILE_SECRET_KEY=""
-
-# Telegram bot for new-order notifications
-TELEGRAM_BOT_TOKEN=""
-TELEGRAM_CHAT_ID=""
-
-# Signs the admin session cookie (src/lib/auth/session.ts) — the /admin gate.
-# Unlike the Cloudflare Access values this replaced, it IS a credential: anyone
-# holding it can mint a session for any admin. At least 32 random bytes,
-# different per environment. Unset = every /admin request is denied.
-# Rotating it signs everyone out, which is also the only way to end a session
-# early — there is no server-side session store.
-#
-# Generate one:
-#   node -e "console.log(require('crypto').randomBytes(48).toString('base64'))"
-#
-# There is NO dev bypass on the gate, so this is required for `pnpm dev` too.
-# Create the account to log in with: pnpm admin:user create you@example.com
-ADMIN_SESSION_SECRET=""

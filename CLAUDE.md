@@ -10,13 +10,20 @@
 
 ## ▶️ How to run
 
+pnpm workspace: `apps/site` (storefront Worker), `apps/admin` (admin-panel Worker),
+`packages/lib` (shared domain code + all tests), `workers/cron`.
+
 ```bash
-pnpm dev                  # local dev server (daemonised)
-pnpm check && pnpm build  # the gate — run before considering any task done
-pnpm deploy               # build + wrangler deploy
+pnpm dev                  # storefront dev server, port 4321 (alias of dev:site)
+pnpm dev:admin            # admin-panel dev server, port 4322
+pnpm check && pnpm build  # the gate, recursive over all packages — run before considering any task done
+pnpm deploy:site          # build + wrangler deploy the storefront
+pnpm deploy:admin         # build + wrangler deploy the admin panel
 ```
 
-Package manager is pnpm, pinned in `packageManager`. Full command list: `docs/CONVENTIONS.md`.
+There is deliberately no root `deploy` script — `pnpm deploy` is a pnpm workspace builtin and
+would shadow it. Package manager is pnpm, pinned in `packageManager`. Full command list:
+`docs/CONVENTIONS.md`.
 
 ## 🧭 Docs map (load only when relevant — don't auto-read these)
 

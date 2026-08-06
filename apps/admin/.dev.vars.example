@@ -1,0 +1,34 @@
+# Copy to `.dev.vars` and fill in. Read by wrangler for local dev of the
+# admin-panel Worker. `.dev.vars` is gitignored — never commit it.
+#
+# In production these are set with: wrangler secret put <NAME>  (from this dir)
+
+# Neon pooled connection string (EU Frankfurt project)
+DATABASE_URL="postgresql://user:password@ep-xxx-pooler.eu-central-1.aws.neon.tech/balier?sslmode=require"
+
+# Signs the admin session cookie (@balier/lib/auth) — the gate on every route.
+# It IS a credential: anyone holding it can mint a session for any admin. At
+# least 32 random bytes, different per environment. Unset = every request is
+# denied. Rotating it signs everyone out, which is also the only way to end a
+# session early — there is no server-side session store.
+#
+# Generate one:
+#   node -e "console.log(require('crypto').randomBytes(48).toString('base64'))"
+#
+# There is NO dev bypass on the gate, so this is required for `pnpm dev:admin`
+# too. Create the account to log in with: pnpm admin:user create you@example.com
+ADMIN_SESSION_SECRET=""
+
+# Monobank Acquiring — /orders/new mints card invoices. Use the TEST token
+# until Phase 5.
+MONOBANK_TOKEN=""
+
+# Telegram — the refund alert when a payment lands on a cancelled order.
+TELEGRAM_BOT_TOKEN=""
+TELEGRAM_CHAT_ID=""
+
+# Where the storefront lives: card invoices minted in the panel point their
+# webhook and customer redirect at this origin, never the admin one.
+# `wrangler.jsonc` carries the deployed value; this override is for local dev
+# against `pnpm dev` on the default port.
+SITE_ORIGIN="http://localhost:4321"
