@@ -9,7 +9,7 @@ loadEnv({ quiet: true });
 
 export default defineConfig({
   dialect: 'postgresql',
-  schema: './src/lib/db/schema.ts',
+  schema: './packages/lib/src/db/schema.ts',
   out: './migrations',
   strict: true,
   verbose: true,

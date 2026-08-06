@@ -1,12 +1,12 @@
 import { and, eq, inArray, lt, sql } from 'drizzle-orm';
-import { createDb, createTxDb } from '~/lib/db';
-import { orders, payments, stockReservations } from '~/lib/db/schema';
-import { createMonobankPayment } from '~/lib/monobank';
-import { createEmailNotifier } from '~/lib/notify/email';
-import { createTelegramNotifier } from '~/lib/notify/telegram';
-import { createNovaPoshtaClient } from '~/lib/novaposhta/client';
-import { syncNovaPoshtaReferenceData } from '~/lib/novaposhta/sync';
-import { confirmPayment } from '~/lib/orders/confirmPayment';
+import { createDb, createTxDb } from '@balier/lib/db';
+import { orders, payments, stockReservations } from '@balier/lib/db/schema';
+import { createMonobankPayment } from '@balier/lib/monobank';
+import { createEmailNotifier } from '@balier/lib/notify/email';
+import { createTelegramNotifier } from '@balier/lib/notify/telegram';
+import { createNovaPoshtaClient } from '@balier/lib/novaposhta/client';
+import { syncNovaPoshtaReferenceData } from '@balier/lib/novaposhta/sync';
+import { confirmPayment } from '@balier/lib/orders/confirmPayment';
 
 /**
  * Scheduled jobs run in their own Worker rather than in the Astro Worker.
@@ -15,7 +15,7 @@ import { confirmPayment } from '~/lib/orders/confirmPayment';
  * so there is nowhere to hang a `scheduled` handler. Keeping crons separate also
  * means a slow reference-data sync can never eat into request-path CPU budget,
  * and the two deploy and roll back independently. Shared domain code is imported
- * straight from `src/lib`.
+ * from the `@balier/lib` workspace package.
  *
  * Deploy: pnpm cron:deploy
  * Dev:    pnpm cron:dev, then hit the printed `__scheduled` URL with a cron= param.

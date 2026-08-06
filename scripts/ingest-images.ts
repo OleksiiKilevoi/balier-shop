@@ -1,7 +1,7 @@
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { getPlatformProxy } from 'wrangler';
-import { storeImage, toMediaExtension } from '../src/lib/media';
+import { storeImage, toMediaExtension } from '@balier/lib/media';
 import {
   MANIFEST_PATH,
   TEST_PRODUCTS,
@@ -25,8 +25,13 @@ import {
 
 async function main() {
   // Pinned to the local simulator even if a binding is later flagged
-  // `experimental_remote` for the dev server's benefit.
-  const { env, dispose } = await getPlatformProxy<Env>({ remoteBindings: false });
+  // `experimental_remote` for the dev server's benefit. The admin app's config
+  // is the one with both MEDIA and IMAGES since the workspace split — there is
+  // no root wrangler.jsonc for the default lookup to find anymore.
+  const { env, dispose } = await getPlatformProxy<Env>({
+    configPath: 'apps/admin/wrangler.jsonc',
+    remoteBindings: false,
+  });
 
   console.log('Ingesting into local R2 (.wrangler/state)…');
 

@@ -1,0 +1,19 @@
+# Copy to `.dev.vars` and fill in. Read by wrangler for local dev of the
+# storefront Worker. `.dev.vars` is gitignored — never commit it.
+#
+# In production these are set with: wrangler secret put <NAME>  (from this dir)
+
+# Neon pooled connection string (EU Frankfurt project)
+DATABASE_URL="postgresql://user:password@ep-xxx-pooler.eu-central-1.aws.neon.tech/balier?sslmode=require"
+
+# Monobank Acquiring. Use the TEST token until Phase 5.
+# https://api.monobank.ua/docs/acquiring.html
+MONOBANK_TOKEN=""
+
+# Cloudflare Turnstile secret key. The site key is public — it lives in
+# wrangler.jsonc's `vars` (`PUBLIC_TURNSTILE_SITE_KEY`), not here.
+TURNSTILE_SECRET_KEY=""
+
+# Telegram bot for new-order notifications
+TELEGRAM_BOT_TOKEN=""
+TELEGRAM_CHAT_ID=""

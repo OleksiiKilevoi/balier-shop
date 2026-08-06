@@ -1,0 +1,1087 @@
+---
+import { env } from 'cloudflare:workers';
+import AdminLayout from '~/layouts/AdminLayout.astro';
+import { createDb, createTxDb } from '@balier/lib/db';
+import type { TxDb } from '@balier/lib/db';
+import { findCartVariants } from '@balier/lib/db/queries/cart';
+import {
+  SETTLEMENT_MIN_QUERY_LENGTH,
+  findSettlement,
+  findWarehouse,
+  listWarehouses,
+  searchSettlements,
+} from '@balier/lib/db/queries/novaposhta';
+import { searchAdminVariants } from '@balier/lib/db/queries/products';
+import { getCodLimitKopiykas, getReservationTtlMinutes } from '@balier/lib/db/queries/settings';
+import {
+  ADMIN_NEW_ORDER_ERRORS,
+  ADMIN_NEW_ORDER_MESSAGES,
+  cardLinkValidityText,
+} from '@balier/lib/i18n/admin';
+import { checkoutNoticeText, codOverLimitText, settlementLabel } from '@balier/lib/i18n/checkout';
+import { formatPrice } from '@balier/lib/money';
+import { createMonobankPayment } from '@balier/lib/monobank';
+import { createEmailNotifier } from '@balier/lib/notify/email';
+import { DELIVERY_METHOD_LABELS, PAYMENT_METHOD_LABELS } from '@balier/lib/notify/format';
+import { createNoopNotifier } from '@balier/lib/notify/noop';
+import type { CheckoutNotice } from '@balier/lib/orders/checkoutCart';
+import { createOrder } from '@balier/lib/orders/create';
+import {
+  DRAFT_ACTIONS,
+  DRAFT_FIELDS,
+  applyDraftAction,
+  draftCartItems,
+  isCreateSubmit,
+  isSearchQuery,
+  readDraft,
+} from '@balier/lib/orders/draft';
+import type { OrderDraft } from '@balier/lib/orders/draft';
+import { formatPhoneDigits } from '@balier/lib/phone';
+import { adminNewOrderSchema, adminOrderFieldErrors } from '@balier/lib/validation/admin';
+import type { AdminNewOrder, AdminOrderField } from '@balier/lib/validation/admin';
+import { MAX_ITEM_QUANTITY } from '@balier/lib/validation/cart';
+import {
+  MAX_ADDRESS_LENGTH,
+  MAX_COMMENT_LENGTH,
+  MAX_CUSTOMER_NAME,
+} from '@balier/lib/validation/checkout';
+import { parseSearchQuery, searchTokens } from '@balier/lib/validation/search';
+
+/**
+ * An order a manager types in themselves — the Telegram case: a customer writes
+ * in the chat, and the order has to exist without anyone ever opening the shop.
+ *
+ * IT IS THE STOREFRONT'S OWN ORDER PATH. `createOrder` is called with exactly
+ * the input `/api/checkout` builds, so the money, the stock locking, the
+ * reservation and the state machine are all the code that has been running in
+ * production, not a second implementation for the panel. What is new here is
+ * only the way the input is collected.
+ *
+ * HOW IT WORKS WITHOUT SCRIPT. The whole page is one `<form method="post">`
+ * that posts back to itself, and the draft order lives in that form's own
+ * fields — see `~/lib/orders/draft.ts`. Every button is a submit: searching for
+ * a product, adding one, picking a settlement, removing a line. The server
+ * reads the body, applies at most one action, and renders the same page again,
+ * so nothing a manager has typed is ever lost to a round trip and there is no
+ * draft stored anywhere to expire or clean up.
+ *
+ * SCRIPT MAKES IT FEEL LIKE AN APP, WITHOUT CHANGING ANY OF THAT. The
+ * enhancement layer at the bottom of this file turns every submit into a
+ * `fetch` of the very same POST and re-renders the form in place from the
+ * response, fires searches as the manager types, and re-renders on quantity
+ * and delivery-method changes. The server contract is byte-identical — same
+ * bodies, same renders — and any failure falls back to a real submit, so the
+ * scriptless description above stays true; it just stops being the visible
+ * experience.
+ *
+ * Two consequences worth knowing:
+ *  - Only the *create* submit redirects (303, to the new order). Every other
+ *    submit answers 200 with the page. Without script that means a mid-draft
+ *    refresh asks the browser's "resend?" question (harmless — the post
+ *    re-renders the same screen); with script the URL never leaves the
+ *    initial GET, so a refresh quietly starts the draft over instead. Either
+ *    way the draft lives in the open tab and nowhere else.
+ *  - No field carries `required`, and the email box is a `text` input rather
+ *    than an `email` one. Browser validation fires on *any* submit, so a
+ *    `required` name would refuse to let the manager search for a product
+ *    before they had typed one. Everything is checked on the server, and only
+ *    when the order is actually being created.
+ */
+export const prerender = false;
+
+const SELF = '/orders/new';
+const PRODUCT_RESULT_LIMIT = 12;
+const SETTLEMENT_RESULT_LIMIT = 8;
+const WAREHOUSE_RESULT_LIMIT = 12;
+
+const db = createDb(env.DATABASE_URL);
+
+let draft: OrderDraft = readDraft(new FormData());
+let invalid = new Set<AdminOrderField>();
+let banner: string | null = null;
+/** Which lines the database refused, when the create attempt was repriced. */
+let notices: CheckoutNotice[] = [];
+
+const [codLimitKopiykas, reservationTtlMinutes] = await Promise.all([
+  getCodLimitKopiykas(db),
+  getReservationTtlMinutes(db),
+]);
+
+/** The submitted body, read exactly once — it is a stream. */
+const form = Astro.request.method === 'POST' ? await Astro.request.formData() : null;
+
+if (form) draft = applyDraftAction(readDraft(form), form);
+
+/**
+ * The two Nova Poshta refs the draft carries, resolved to rows.
+ *
+ * The branch is dropped unless it still matches what is chosen around it: a ref
+ * belongs to one settlement and is either a postomat or a counter, so switching
+ * city or switching «відділення» → «поштомат» leaves a ref that names a real
+ * place which is no longer a legal answer to the question being asked. Checking
+ * the row rather than trusting the hidden field is also what stops a forged body
+ * putting an arbitrary branch on the order.
+ */
+const settlementRow = draft.settlementRef ? await findSettlement(db, draft.settlementRef) : null;
+const branch = draft.warehouseRef ? await findWarehouse(db, draft.warehouseRef) : null;
+const branchRow =
+  branch &&
+  settlementRow &&
+  branch.settlementRef === settlementRow.ref &&
+  branch.isPostomat === (draft.deliveryMethod === 'np_postomat')
+    ? branch
+    : null;
+
+/**
+ * Then the same rule `/checkout` applies on the client, applied here on the
+ * server: each of the two boxes is *both* the search field and the display of
+ * what has been picked, so typing over a chosen city un-picks it (and takes the
+ * branch with it — the branch belonged to that city). `isSearchQuery` is the
+ * whole of that decision; see its comment in `~/lib/orders/draft.ts`.
+ */
+const settlementSearching = isSearchQuery(
+  draft.settlementQuery,
+  settlementRow ? settlementLabel(settlementRow) : null,
+);
+const settlement = settlementSearching ? null : settlementRow;
+
+/* The branch box is compared against `branch`, the row the ref names, and not
+   against `branchRow`, the row it is still *allowed* to name: switching
+   «відділення» → «поштомат» invalidates the choice without the manager having
+   touched the box, and reading the label left in it as a query would then
+   search the postomats for the name of a counter. This way the label simply
+   goes with the branch it belonged to, which is what `/checkout` does when the
+   delivery method changes. */
+const warehouseSearching = isSearchQuery(draft.warehouseQuery, branch?.description ?? null);
+const warehouse = settlement && !warehouseSearching ? branchRow : null;
+
+/** What each box shows: the query while searching, the chosen row otherwise. */
+const settlementValue = settlementSearching
+  ? draft.settlementQuery
+  : (settlement ? settlementLabel(settlement) : '');
+const warehouseValue = warehouseSearching
+  ? draft.warehouseQuery
+  : (warehouse ? warehouse.description : '');
+
+/**
+ * The delivery half of the order, in the shape `deliverySchema` discriminates
+ * on. Missing pieces are passed through as empty strings rather than omitted,
+ * so the union fails with a *path* — which is what tells the form whether to
+ * mark the settlement, the branch or the address.
+ */
+const deliveryInput =
+  draft.deliveryMethod === 'np_courier'
+    ? {
+        deliveryMethod: 'np_courier' as const,
+        npSettlementRef: settlement?.ref ?? '',
+        npSettlementName: settlement?.name ?? '',
+        npAddress: draft.address,
+      }
+    : {
+        deliveryMethod: draft.deliveryMethod,
+        npSettlementRef: settlement?.ref ?? '',
+        npSettlementName: settlement?.name ?? '',
+        npWarehouseRef: warehouse?.ref ?? '',
+        npWarehouseName: warehouse?.description ?? '',
+      };
+
+if (form && isCreateSubmit(form)) {
+  const parsed = adminNewOrderSchema.safeParse({
+    customerName: draft.customerName,
+    // The draft holds only the 9 local digits — the `+380` the field shows is
+    // a label, not part of its value. An empty or half-typed number fails
+    // `customerPhoneSchema` here exactly as it would from `/checkout`.
+    customerPhone: `+380${draft.customerPhoneDigits}`,
+    customerEmail: draft.customerEmail,
+    delivery: deliveryInput,
+    paymentMethod: draft.paymentMethod,
+    comment: draft.comment,
+    items: draftCartItems(draft),
+  });
+
+  if (!parsed.success) {
+    invalid = adminOrderFieldErrors(parsed.error);
+  } else {
+    // The *site* origin, not this request's: the Monobank webhook route and the
+    // customer's success/failure pages live on the storefront Worker, so a card
+    // invoice minted here must point at that hostname, never the admin one.
+    const origin = env.SITE_ORIGIN;
+    const { db: txDb, close } = createTxDb(env.DATABASE_URL);
+
+    try {
+      const result = await createOrderFromPanel(txDb, parsed.data, origin);
+
+      if (result.ok) {
+        return Astro.redirect(`/orders/${result.orderNumber}?m=created`, 303);
+      }
+
+      switch (result.reason) {
+        case 'cart_changed':
+          banner = ADMIN_NEW_ORDER_MESSAGES.cart_changed;
+          notices = result.notices;
+          break;
+        case 'cod_over_limit':
+          banner = codOverLimitText(codLimitKopiykas);
+          break;
+        case 'payment_failed':
+          banner = ADMIN_NEW_ORDER_MESSAGES.payment_failed;
+          break;
+      }
+    } finally {
+      Astro.locals.cfContext.waitUntil(close());
+    }
+  }
+}
+
+/* ------------------------------------------------------ what the page renders */
+
+const productTokens = searchTokens(parseSearchQuery(draft.productQuery));
+
+const [basketVariants, productResults, settlementResults, warehouseResults] = await Promise.all([
+  findCartVariants(
+    db,
+    draft.items.map((item) => item.variantId),
+  ),
+  productTokens.length > 0
+    ? searchAdminVariants(db, productTokens, PRODUCT_RESULT_LIMIT)
+    : Promise.resolve([]),
+  settlementSearching
+    ? searchSettlements(db, draft.settlementQuery, SETTLEMENT_RESULT_LIMIT)
+    : Promise.resolve([]),
+  /* Branches are listed even with the box empty — the list is already scoped to
+     one settlement, so "the first few here" is a useful answer rather than a
+     query nobody asked. It is the dropdown's *visibility* that then waits for
+     the field to be focused (CSS, below), which is the same thing `/checkout`
+     gets from its focus handler. */
+  settlement && draft.deliveryMethod !== 'np_courier'
+    ? listWarehouses(
+        db,
+        settlement.ref,
+        draft.deliveryMethod === 'np_postomat' ? 'np_postomat' : 'np_warehouse',
+        warehouseSearching ? draft.warehouseQuery : '',
+        WAREHOUSE_RESULT_LIMIT,
+      )
+    : Promise.resolve([]),
+]);
+
+/**
+ * Basket lines in the order they were added, each paired with what the catalog
+ * currently says. A line whose variant no longer resolves (deactivated, or its
+ * product archived, between the click that added it and now) is kept and shown
+ * as unavailable rather than silently dropped — it is still in the form, it
+ * would still refuse the order, and a manager needs to see the thing they have
+ * to remove.
+ */
+const basket = draft.items.map((item) => ({
+  ...item,
+  variant: basketVariants.find((candidate) => candidate.variantId === item.variantId) ?? null,
+}));
+
+const itemsTotal = basket.reduce(
+  (total, line) => total + (line.variant ? line.variant.unitPrice * line.quantity : 0),
+  0,
+);
+
+/** Display only. The order is priced from the database inside `createOrder`. */
+const hasUnavailable = basket.some((line) => !line.variant);
+const hasShortStock = basket.some(
+  (line) => line.variant && line.quantity > line.variant.available,
+);
+
+/**
+ * Whether the basket exceeds the COD ceiling. Whether that *matters* is decided
+ * by the payment radio — in CSS, at the call site — because the radios flip
+ * without a submit and the server only knows the state as of the last one.
+ */
+const overCodLimit = itemsTotal > codLimitKopiykas;
+
+/**
+ * The panel's call into the storefront's own order path. The only differences
+ * from `/api/checkout`'s call are the notifier (silent — see below) and where
+ * the origin comes from; everything else about how an order is created is
+ * shared, deliberately.
+ */
+function createOrderFromPanel(txDb: TxDb, input: AdminNewOrder, origin: string) {
+  return createOrder(
+    txDb,
+    {
+      customerName: input.customerName,
+      customerPhone: input.customerPhone,
+      customerEmail: input.customerEmail,
+      delivery: input.delivery,
+      paymentMethod: input.paymentMethod,
+      comment: input.comment,
+      items: input.items,
+    },
+    {
+      payment: createMonobankPayment(env.MONOBANK_TOKEN),
+      // The manager is the notification — they are already in the conversation
+      // this order came out of. See `@balier/lib/notify/noop`.
+      notifier: createNoopNotifier(),
+      email: createEmailNotifier(env.EMAIL, env.ORDER_EMAIL_FROM),
+      redirectBaseUrl: origin,
+      webhookUrl: new URL('/api/webhooks/monobank', origin).toString(),
+      reservationTtlMinutes,
+      codLimitKopiykas,
+    },
+  );
+}
+
+const DELIVERY_CHOICES = [
+  { value: 'np_warehouse', id: 'dm-warehouse' },
+  { value: 'np_postomat', id: 'dm-postomat' },
+  { value: 'np_courier', id: 'dm-courier' },
+] as const;
+---
+
+<AdminLayout title="Нове замовлення">
+  <a href="/orders" class="text-fg-muted hover:text-fg text-sm">← До списку</a>
+
+  <header class="mt-4">
+    <h1 class="text-fg text-2xl font-semibold sm:text-3xl">Нове замовлення</h1>
+    <p class="text-fg-muted mt-1 text-sm">
+      Для замовлень, які клієнт зробив у Telegram або по телефону. Створене тут замовлення нічим не
+      відрізняється від оформленого на сайті.
+    </p>
+  </header>
+
+  {/*
+    `id` and `group` are both the enhancement layer's: the id is what the script
+    re-renders in place, and `group` is what lets CSS below read the *live*
+    radio state (`group-has-[…:checked]`) instead of the state as of the last
+    submit. The banner lives inside the form so a refused create's explanation
+    arrives with the same swap that renders everything else.
+  */}
+  <form
+    method="post"
+    action={SELF}
+    id="new-order-form"
+    class="group aria-busy:pointer-events-none aria-busy:opacity-40 mt-6 space-y-6 transition-opacity"
+  >
+    {
+      banner && (
+        <p role="alert" class="admin-tone-negative rounded-card p-3 text-sm">
+          {banner}
+          {notices.length > 0 && (
+            <span class="mt-2 block space-y-1">
+              {notices.map((notice) => (
+                <span class="block">{checkoutNoticeText(notice)}</span>
+              ))}
+            </span>
+          )}
+        </p>
+      )
+    }
+    {/*
+      The form's default button, and the reason Enter behaves sanely in any of
+      the three search boxes: a browser submits the *first* submit button when
+      Enter is pressed in a text field, and every visible button on this page
+      does something specific — «Додати» would add a product, «Створити» would
+      place the order. This one carries no action name, so the server reads the
+      body, applies nothing, and re-renders with every search box freshly
+      answered, which is exactly what Enter should mean here.
+    */}
+    <button type="submit" class="sr-only" tabindex="-1" aria-hidden="true">Оновити</button>
+
+    {/* --------------------------------------------------------------- goods */}
+    <section class="admin-card p-5">
+      <h2 class="text-fg text-base font-semibold">Товари</h2>
+
+      {
+        basket.length === 0 ? (
+          <p
+            class:list={[
+              'mt-3 text-sm',
+              invalid.has('items') ? 'text-danger' : 'text-fg-subtle',
+            ]}
+          >
+            {invalid.has('items') ? ADMIN_NEW_ORDER_ERRORS.items : 'Кошик порожній.'}
+          </p>
+        ) : (
+          <ul class="divide-border mt-3 divide-y text-sm">
+            {basket.map((line) => (
+              <li class="flex flex-wrap items-center gap-x-4 gap-y-2 py-3 first:pt-0">
+                {/* The line itself: the id is the form's record of the basket,
+                    the quantity is a real field, so editing it and then hitting
+                    any button keeps the change. */}
+                <input type="hidden" name={DRAFT_FIELDS.item} value={line.variantId} />
+
+                <div class="min-w-0 flex-1">
+                  {line.variant ? (
+                    <>
+                      <p class="text-fg">
+                        {line.variant.productTitle}
+                        {line.variant.variantName && (
+                          <span class="text-fg-muted"> · {line.variant.variantName}</span>
+                        )}
+                      </p>
+                      <p class="text-fg-subtle text-xs">
+                        <span class="font-mono">{line.variant.sku}</span> ·{' '}
+                        {formatPrice(line.variant.unitPrice)} · у наявності{' '}
+                        {line.variant.available}
+                      </p>
+                    </>
+                  ) : (
+                    <p class="text-danger">
+                      Товар більше не продається — приберіть його з кошика.
+                    </p>
+                  )}
+                  {line.variant && line.quantity > line.variant.available && (
+                    <p class="text-danger text-xs">
+                      Замовлено більше, ніж є на складі — замовлення не створиться.
+                    </p>
+                  )}
+                </div>
+
+                <label class="sr-only" for={`qty-${line.variantId}`}>
+                  Кількість
+                </label>
+                <input
+                  id={`qty-${line.variantId}`}
+                  type="number"
+                  name={`${DRAFT_FIELDS.quantityPrefix}${line.variantId}`}
+                  value={line.quantity}
+                  min="1"
+                  max={MAX_ITEM_QUANTITY}
+                  inputmode="numeric"
+                  class="admin-field w-20 text-center"
+                />
+
+                <p class="text-fg w-24 text-right font-medium tabular-nums">
+                  {line.variant ? formatPrice(line.variant.unitPrice * line.quantity) : '—'}
+                </p>
+
+                <button
+                  type="submit"
+                  name={DRAFT_ACTIONS.remove}
+                  value={line.variantId}
+                  class="admin-btn admin-btn-secondary px-4"
+                >
+                  Прибрати
+                </button>
+              </li>
+            ))}
+          </ul>
+        )
+      }
+
+      {
+        basket.length > 0 && (
+          <p class="border-border text-fg mt-4 flex justify-between gap-x-4 border-t pt-4 font-medium">
+            <span>Разом</span>
+            <span class="tabular-nums whitespace-nowrap">{formatPrice(itemsTotal)}</span>
+          </p>
+        )
+      }
+
+      {/* ------------------------------------------------------ product search */}
+      <div class="border-border mt-5 border-t pt-5">
+        <label for="product-q" class="text-fg-subtle text-xs">
+          Знайти товар за назвою, кольором або артикулом
+        </label>
+        <div class="mt-1 flex flex-col gap-2 sm:flex-row">
+          <input
+            id="product-q"
+            name={DRAFT_FIELDS.productQuery}
+            type="search"
+            value={draft.productQuery}
+            placeholder="сумка, чорна, BAL-001"
+            autocomplete="off"
+            class="admin-field sm:flex-1"
+          />
+          <button type="submit" class="admin-btn admin-btn-secondary shrink-0">Знайти</button>
+        </div>
+
+        {
+          draft.productQuery && productResults.length === 0 && (
+            <p class="text-fg-subtle mt-3 text-sm">Нічого не знайдено.</p>
+          )
+        }
+
+        {
+          productResults.length > 0 && (
+            <ul class="divide-border mt-3 divide-y text-sm">
+              {productResults.map((result) => (
+                <li class="flex flex-wrap items-center gap-x-4 gap-y-2 py-2">
+                  <div class="min-w-0 flex-1">
+                    <p class="text-fg">
+                      {result.productTitle}
+                      {result.colorName && <span class="text-fg-muted"> · {result.colorName}</span>}
+                    </p>
+                    <p class="text-fg-subtle text-xs">
+                      <span class="font-mono">{result.sku}</span> · {formatPrice(result.price)} ·{' '}
+                      {result.available > 0 ? (
+                        <>у наявності {result.available}</>
+                      ) : (
+                        <span class="text-danger">немає в наявності</span>
+                      )}
+                    </p>
+                  </div>
+                  <button
+                    type="submit"
+                    name={DRAFT_ACTIONS.add}
+                    value={result.variantId}
+                    class="admin-btn admin-btn-secondary px-4"
+                  >
+                    Додати
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )
+        }
+      </div>
+    </section>
+
+    {/* ------------------------------------------------------------ customer */}
+    <section class="admin-card p-5">
+      <h2 class="text-fg text-base font-semibold">Клієнт</h2>
+
+      <div class="mt-3 grid gap-4 sm:grid-cols-2">
+        <div>
+          <label for="customer-name" class="text-fg-subtle text-xs">Ім’я</label>
+          <input
+            id="customer-name"
+            name={DRAFT_FIELDS.name}
+            type="text"
+            value={draft.customerName}
+            maxlength={MAX_CUSTOMER_NAME}
+            autocomplete="off"
+            class="admin-field mt-1"
+          />
+          {invalid.has('customerName') && (
+            <p class="text-danger mt-1 text-xs">{ADMIN_NEW_ORDER_ERRORS.customerName}</p>
+          )}
+        </div>
+
+        <div>
+          <label for="customer-phone" class="text-fg-subtle text-xs">Телефон</label>
+          {/* `/checkout`'s phone field, on this page: a fixed `+380` drawn over
+              the left end and nine local digits in the box, grouped as they are
+              read out loud. The mask is applied by the script below and, so it
+              still holds with the script off, on the server too — `readDraft`
+              keeps the digits and this renders them formatted, which is also
+              what makes a pasted `+380…` or `0…` land correctly. */}
+          <div class="relative mt-1">
+            <span
+              class="text-fg pointer-events-none absolute inset-y-0 left-4.5 flex items-center text-base sm:text-sm"
+              aria-hidden="true"
+            >
+              +380
+            </span>
+            <input
+              id="customer-phone"
+              name={DRAFT_FIELDS.phone}
+              type="tel"
+              inputmode="numeric"
+              value={formatPhoneDigits(draft.customerPhoneDigits)}
+              placeholder="XX XXX XX XX"
+              autocomplete="off"
+              class="admin-field admin-field-phone"
+              data-phone-input
+            />
+          </div>
+          {invalid.has('customerPhone') && (
+            <p class="text-danger mt-1 text-xs">{ADMIN_NEW_ORDER_ERRORS.customerPhone}</p>
+          )}
+        </div>
+
+        <div class="sm:col-span-2">
+          {/* `text`, not `email`: the browser would refuse every *other* submit
+              on this page — searching for a product, adding one — while the
+              address was half-typed. `customerEmailSchema` checks it, and only
+              when the order is created. */}
+          <label for="customer-email" class="text-fg-subtle text-xs">
+            Пошта <span class="text-fg-subtle">— не обов’язково</span>
+          </label>
+          <input
+            id="customer-email"
+            name={DRAFT_FIELDS.email}
+            type="text"
+            inputmode="email"
+            value={draft.customerEmail}
+            autocomplete="off"
+            class="admin-field mt-1"
+          />
+          <p class="text-fg-subtle mt-1 text-xs">
+            Якщо вказати, клієнт отримає лист із підтвердженням замовлення.
+          </p>
+          {invalid.has('customerEmail') && (
+            <p class="text-danger mt-1 text-xs">{ADMIN_NEW_ORDER_ERRORS.customerEmail}</p>
+          )}
+        </div>
+
+        <div class="sm:col-span-2">
+          <label for="order-comment" class="text-fg-subtle text-xs">Коментар</label>
+          <textarea
+            id="order-comment"
+            name={DRAFT_FIELDS.comment}
+            rows="2"
+            maxlength={MAX_COMMENT_LENGTH}
+            class="admin-field admin-textarea mt-1">{draft.comment}</textarea>
+        </div>
+      </div>
+    </section>
+
+    {/* ------------------------------------------------------------ delivery */}
+    <section class="admin-card group p-5">
+      <h2 class="text-fg text-base font-semibold">Доставка</h2>
+
+      {/* Radio then label, as siblings inside their own wrapper: the pill is
+          styled from the input's own `:checked` state, which is what keeps the
+          choice visible with no script. The wrapper is what makes `peer` work —
+          `peer-checked:` compiles to a *general sibling* selector, so three
+          bare radios and three labels in one row would light up every label
+          that follows the checked one. One pair per box scopes it. The inputs
+          are `sr-only` rather than hidden so they stay focusable and the group
+          is still keyboard-operable. */}
+      <div class="mt-3 flex flex-wrap gap-2">
+        {
+          DELIVERY_CHOICES.map((choice) => (
+            <div>
+              <input
+                type="radio"
+                id={choice.id}
+                name={DRAFT_FIELDS.deliveryMethod}
+                value={choice.value}
+                checked={draft.deliveryMethod === choice.value}
+                class="peer sr-only"
+              />
+              <label
+                for={choice.id}
+                class="admin-badge text-fg-muted peer-[:not(:checked)]:hover:bg-surface-hover peer-[:not(:checked)]:hover:text-fg peer-checked:bg-accent peer-checked:text-accent-fg peer-checked:cursor-default peer-focus-visible:outline-fg-subtle min-h-8 w-auto max-w-none cursor-pointer px-3 text-sm peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2"
+              >
+                {DELIVERY_METHOD_LABELS[choice.value]}
+              </label>
+            </div>
+          ))
+        }
+      </div>
+
+      {/* --------------------------------------------------------- settlement
+          One box with a dropdown under it, the shape `/checkout` uses: the box
+          holds what is picked, typing over it searches, and a row in the list
+          picks. Each row is a real submit button carrying its ref, so the whole
+          thing still works with the script below switched off — the only thing
+          missing then is search-as-you-type, and Enter (the form's default
+          submit, up top) asks for the same render. */}
+      <div class="border-border mt-5 border-t pt-5">
+        <label for="settlement-q" class="text-fg-subtle text-xs">Населений пункт</label>
+
+        {/* The chosen ref travels in the form, and only the ref: the name is
+            read back out of `np_settlements` on every render, so what goes on
+            the order is a row rather than a string a body could have edited. */}
+        <input type="hidden" name={DRAFT_FIELDS.settlement} value={settlement?.ref ?? ''} />
+
+        <div class="relative mt-1">
+          <input
+            id="settlement-q"
+            name={DRAFT_FIELDS.settlementQuery}
+            type="search"
+            value={settlementValue}
+            placeholder="Почніть вводити назву міста…"
+            autocomplete="off"
+            class:list={[
+              'admin-field',
+              invalid.has('settlement') && !settlement && 'border-danger',
+            ]}
+          />
+
+          {
+            settlementResults.length > 0 && (
+              <ul
+                role="listbox"
+                aria-label="Знайдені населені пункти"
+                class="admin-card divide-border absolute inset-x-0 top-full z-20 mt-1 max-h-64 divide-y overflow-y-auto shadow-lg"
+              >
+                {settlementResults.map((result) => (
+                  <li role="option">
+                    <button
+                      type="submit"
+                      name={DRAFT_ACTIONS.pickSettlement}
+                      value={result.ref}
+                      class="text-fg hover:bg-surface-hover w-full cursor-pointer px-4 py-2.5 text-left text-sm"
+                    >
+                      {settlementLabel(result)}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )
+          }
+        </div>
+
+        {
+          settlementSearching &&
+            settlementResults.length === 0 &&
+            draft.settlementQuery.length >= SETTLEMENT_MIN_QUERY_LENGTH && (
+              <p class="text-fg-subtle mt-1 text-xs">Нічого не знайдено.</p>
+            )
+        }
+        {
+          invalid.has('settlement') && !settlement && (
+            <p class="text-danger mt-1 text-xs">{ADMIN_NEW_ORDER_ERRORS.settlement}</p>
+          )
+        }
+      </div>
+
+      {/* ---------------------------------------------- branch, or an address
+          Same single-box-plus-dropdown as the settlement above, with one
+          difference it inherits from `/checkout`: the list is already scoped to
+          one city, so an empty box lists the first branches rather than
+          nothing. That list is only *shown* while the field has focus —
+          otherwise every render after picking a city would drop an open
+          dropdown over the payment section. `:focus-within` does it in CSS, so
+          it needs no script and a keyboard tab into the list keeps it open. */}
+      <div class="border-border mt-5 border-t pt-5 group-has-[#dm-courier:checked]:hidden">
+        <label for="warehouse-q" class="text-fg-subtle text-xs">Відділення або поштомат</label>
+
+        <input type="hidden" name={DRAFT_FIELDS.warehouse} value={warehouse?.ref ?? ''} />
+
+        <div class="group/wh relative mt-1">
+          <input
+            id="warehouse-q"
+            name={DRAFT_FIELDS.warehouseQuery}
+            type="search"
+            value={warehouseValue}
+            placeholder={
+              settlement ? 'Почніть вводити номер або вулицю…' : 'Спочатку оберіть населений пункт'
+            }
+            disabled={!settlement}
+            autocomplete="off"
+            class:list={[
+              'admin-field disabled:cursor-not-allowed disabled:opacity-40',
+              invalid.has('warehouse') && !warehouse && 'border-danger',
+            ]}
+          />
+
+          {
+            warehouseResults.length > 0 && (
+              <ul
+                role="listbox"
+                aria-label="Знайдені відділення"
+                class:list={[
+                  'admin-card divide-border absolute inset-x-0 top-full z-20 mt-1 max-h-64 divide-y overflow-y-auto shadow-lg',
+                  !warehouseSearching && 'hidden group-focus-within/wh:block',
+                ]}
+              >
+                {warehouseResults.map((result) => (
+                  <li role="option">
+                    <button
+                      type="submit"
+                      name={DRAFT_ACTIONS.pickWarehouse}
+                      value={result.ref}
+                      class="text-fg hover:bg-surface-hover w-full cursor-pointer px-4 py-2.5 text-left text-sm"
+                    >
+                      {result.description}
+                    </button>
+                  </li>
+                ))}
+
+                {/* The list is capped, so say so rather than letting a manager
+                    conclude a branch does not exist. Kyiv alone has thousands. */}
+                {warehouseResults.length === WAREHOUSE_RESULT_LIMIT && (
+                  <li class="text-fg-subtle px-4 py-2 text-xs">
+                    Показано перші {WAREHOUSE_RESULT_LIMIT}. Уточніть пошук, якщо потрібного немає.
+                  </li>
+                )}
+              </ul>
+            )
+          }
+        </div>
+
+        {
+          settlement && warehouseResults.length === 0 && (
+            <p class="text-fg-subtle mt-1 text-xs">
+              {warehouseSearching
+                ? 'Нічого не знайдено.'
+                : 'У цьому населеному пункті немає відповідних відділень.'}
+            </p>
+          )
+        }
+        {
+          invalid.has('warehouse') && !warehouse && (
+            <p class="text-danger mt-1 text-xs">{ADMIN_NEW_ORDER_ERRORS.warehouse}</p>
+          )
+        }
+      </div>
+
+      {/* Rendered always and revealed by the radio above, so an address that is
+          typed, then reconsidered, then chosen again is still there. */}
+      <div class="border-border mt-5 hidden border-t pt-5 group-has-[#dm-courier:checked]:block">
+        <label for="courier-address" class="text-fg-subtle text-xs">
+          Адреса — вулиця, будинок, квартира
+        </label>
+        <input
+          id="courier-address"
+          name={DRAFT_FIELDS.address}
+          type="text"
+          value={draft.address}
+          maxlength={MAX_ADDRESS_LENGTH}
+          autocomplete="off"
+          class="admin-field mt-1"
+        />
+        {
+          invalid.has('address') && (
+            <p class="text-danger mt-1 text-xs">{ADMIN_NEW_ORDER_ERRORS.address}</p>
+          )
+        }
+      </div>
+    </section>
+
+    {/* ------------------------------------------------------------- payment */}
+    <section class="admin-card p-5">
+      <h2 class="text-fg text-base font-semibold">Оплата</h2>
+
+      <div class="mt-3 flex flex-wrap gap-2">
+        {
+          (['cod', 'card'] as const).map((method) => (
+            <div>
+              <input
+                type="radio"
+                id={`pm-${method}`}
+                name={DRAFT_FIELDS.paymentMethod}
+                value={method}
+                checked={draft.paymentMethod === method}
+                class="peer sr-only"
+              />
+              <label
+                for={`pm-${method}`}
+                class="admin-badge text-fg-muted peer-[:not(:checked)]:hover:bg-surface-hover peer-[:not(:checked)]:hover:text-fg peer-checked:bg-accent peer-checked:text-accent-fg peer-checked:cursor-default peer-focus-visible:outline-fg-subtle min-h-8 w-auto max-w-none cursor-pointer px-3 text-sm peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2"
+              >
+                {PAYMENT_METHOD_LABELS[method]}
+              </label>
+            </div>
+          ))
+        }
+      </div>
+
+      {/* Both of these are things a manager finds out from an unhappy customer
+          otherwise: the card link has a deadline, and cash on delivery has a
+          ceiling that refuses the order outright. Both are always rendered and
+          CSS shows the one matching the radio checked *right now* — the radios
+          flip without a submit, so the server's `draft.paymentMethod` may be a
+          click behind. */}
+      <p class="text-fg-subtle group-has-[#pm-card:checked]:block mt-3 hidden text-sm">
+        {cardLinkValidityText(reservationTtlMinutes)}
+      </p>
+
+      {
+        overCodLimit && (
+          <p class="text-danger group-has-[#pm-cod:checked]:block mt-3 hidden text-sm">
+            {codOverLimitText(codLimitKopiykas)}
+          </p>
+        )
+      }
+    </section>
+
+    {/* -------------------------------------------------------------- create */}
+    <div class="flex flex-col gap-3 sm:flex-row-reverse sm:items-center">
+      <button
+        type="submit"
+        name={DRAFT_ACTIONS.create}
+        value="1"
+        class="admin-btn admin-btn-primary w-full sm:w-auto"
+      >
+        {/* Which caption shows is the payment radio's business — same live-CSS
+            arrangement as the hints in the payment section. */}
+        <span class="group-has-[#pm-card:checked]:inline hidden">Створити й отримати посилання</span>
+        <span class="group-has-[#pm-cod:checked]:inline hidden">Створити замовлення</span>
+      </button>
+
+      {
+        (hasUnavailable || hasShortStock) && (
+          <p class="text-danger text-sm">
+            Замовлення не створиться, поки в кошику є товар, якого немає в потрібній кількості.
+          </p>
+        )
+      }
+    </div>
+  </form>
+
+  {/*
+    The enhancement layer. Everything above works without it; this only removes
+    the full page load between a click and its answer. Each submit becomes a
+    `fetch` of the exact POST the browser would have made, and the response —
+    this same page, rendered by this same frontmatter — replaces the form's
+    contents in place. Typing in a search box, editing a quantity or switching
+    the delivery method re-renders the same way, without a button.
+
+    Kept deliberately dumb: no client-side state beyond four flags, no client
+    rendering, no diffing. The server stays the single source of truth for what
+    the draft looks like; script is transport, not logic. Any failure falls
+    back to a real submit of the same body, so the worst case is the page
+    reload this script exists to avoid.
+  */}
+  <script>
+    import { applyPhoneMask } from '@balier/lib/phone';
+
+    const form = document.getElementById('new-order-form');
+
+    if (form instanceof HTMLFormElement) {
+      /** Set once the fetch path has failed: submits go back to the browser. */
+      let bypass = false;
+      /** A create POST places a real order — never raced, never repeated. */
+      let creating = false;
+      /** Following a redirect (created, or session expired): stop everything. */
+      let navigating = false;
+      let inflight: AbortController | null = null;
+      let searchTimer: ReturnType<typeof setTimeout> | undefined;
+
+      form.addEventListener('submit', (event) => {
+        if (bypass) return;
+        event.preventDefault();
+        clearTimeout(searchTimer);
+        void post(event.submitter instanceof HTMLButtonElement ? event.submitter : null);
+      });
+
+      // Search-as-you-type, and totals that follow a quantity edit: the same
+      // re-render «Знайти» would have asked for, without the button.
+      form.addEventListener('input', (event) => {
+        const field = event.target;
+        if (!(field instanceof HTMLInputElement)) return;
+
+        // The phone mask, the one `/checkout` wears. Delegated rather than
+        // bound to the field, because every re-render replaces it; and it asks
+        // the server for nothing — the digits are already in the form.
+        if (field.hasAttribute('data-phone-input')) {
+          applyPhoneMask(field);
+          return;
+        }
+
+        if (field.type !== 'search' && field.type !== 'number') return;
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(() => void post(null), 300);
+      });
+
+      // A delivery-method switch changes which branches are listed, so it
+      // re-renders at once. Payment radios ride along harmlessly — their
+      // hints are already live via CSS.
+      form.addEventListener('change', (event) => {
+        const field = event.target;
+        if (field instanceof HTMLInputElement && field.type === 'radio') void post(null);
+      });
+
+      // Clicking away closes an open dropdown — the same dismissal `/checkout`
+      // has. Purely visual, and deliberately not state: the list is rendered by
+      // the server and comes back with the next render, so hiding it here can
+      // never disagree with what the draft actually holds. Without script the
+      // list simply stays until the next submit, which is the scriptless deal
+      // everywhere else on this page too.
+      document.addEventListener('pointerdown', (event) => {
+        for (const list of form.querySelectorAll('[role="listbox"]')) {
+          const box = list.parentElement;
+          if (event.target instanceof Node && !box?.contains(event.target)) {
+            list.classList.add('hidden');
+          }
+        }
+      });
+
+      async function post(submitter: HTMLButtonElement | null) {
+        if (creating || navigating || !(form instanceof HTMLFormElement)) return;
+
+        // Draft-state posts are pure functions of their body, so an in-flight
+        // one is safe to abandon for a newer one. Create is the exception,
+        // guarded by the flag above instead.
+        inflight?.abort();
+        const controller = new AbortController();
+        inflight = controller;
+
+        const body = new FormData(form);
+        if (submitter?.name) body.append(submitter.name, submitter.value);
+
+        const isCreate = submitter?.name === 'create';
+        if (isCreate) creating = true;
+        // Button presses dim the page while they work; the background
+        // re-renders typing causes stay silent.
+        if (submitter) form.setAttribute('aria-busy', 'true');
+
+        try {
+          const response = await fetch(form.action, {
+            method: 'POST',
+            body,
+            signal: controller.signal,
+          });
+
+          // A redirect is a decision, not a render: the created order's page,
+          // or the login form when the session ran out.
+          if (response.redirected) {
+            navigating = true;
+            window.location.assign(response.url);
+            return;
+          }
+
+          if (!response.ok) throw new Error(`POST ${response.status}`);
+
+          const html = await response.text();
+          if (inflight === controller) render(html, isCreate);
+        } catch (error) {
+          if (error instanceof DOMException && error.name === 'AbortError') return;
+          // The scriptless path still works; take it rather than strand the
+          // click behind a broken fetch.
+          bypass = true;
+          form.requestSubmit(submitter ?? undefined);
+        } finally {
+          creating = false;
+          if (inflight === controller && !navigating) {
+            inflight = null;
+            form.removeAttribute('aria-busy');
+          }
+        }
+      }
+
+      function render(html: string, fromCreate: boolean) {
+        if (!(form instanceof HTMLFormElement)) return;
+
+        const next = new DOMParser()
+          .parseFromString(html, 'text/html')
+          .getElementById('new-order-form');
+        if (!next) {
+          // Not this page — whatever it is, show it honestly.
+          window.location.reload();
+          return;
+        }
+
+        // What the manager is midway through typing must survive the swap:
+        // the focused field's value may be newer than what this response
+        // echoes back, so it wins.
+        const active = document.activeElement;
+        let keep: { id: string; value: string | null; start: number | null; end: number | null } | null =
+          null;
+        if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) {
+          const textual = active instanceof HTMLTextAreaElement || active.type !== 'radio';
+          let start: number | null = null;
+          let end: number | null = null;
+          try {
+            start = active.selectionStart;
+            end = active.selectionEnd;
+          } catch {
+            /* number inputs refuse selection access */
+          }
+          keep = { id: active.id, value: textual ? active.value : null, start, end };
+        }
+
+        form.innerHTML = next.innerHTML;
+
+        const el = keep?.id ? document.getElementById(keep.id) : null;
+        if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+          if (keep?.value != null) el.value = keep.value;
+          el.focus({ preventScroll: true });
+          if (keep?.start != null && keep.end != null) {
+            try {
+              el.setSelectionRange(keep.start, keep.end);
+            } catch {
+              /* not a text-entry field */
+            }
+          }
+        }
+
+        // A refused create explains itself in the banner at the top of the
+        // form; the manager who clicked at the bottom has to see it.
+        if (fromCreate) {
+          form.querySelector('[role="alert"]')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        }
+      }
+    }
+  </script>
+</AdminLayout>

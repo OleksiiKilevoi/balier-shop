@@ -1,0 +1,120 @@
+---
+import { env } from 'cloudflare:workers';
+import BaseLayout from '~/layouts/BaseLayout.astro';
+import Container from '~/components/Container.astro';
+import Breadcrumbs from '~/components/Breadcrumbs.astro';
+import Button from '~/components/Button.astro';
+import ProductCard from '~/components/ProductCard.astro';
+import { createDb } from '@balier/lib/db';
+import { searchProducts } from '@balier/lib/db/queries/products';
+import { pluralUk } from '@balier/lib/i18n/plural';
+import { MAX_SEARCH_QUERY, parseSearchQuery, searchTokens } from '@balier/lib/validation/search';
+
+export const prerender = false;
+
+const query = parseSearchQuery(Astro.url.searchParams.get('q'));
+const tokens = searchTokens(query);
+
+// No DB client at all for a bare `/search` — the page is then just the form.
+const products =
+  tokens.length > 0 ? await searchProducts(createDb(env.DATABASE_URL), tokens) : [];
+
+/** Matches the grid on `/products`: the first phone row is two cards. */
+const EAGER_CARDS = 2;
+
+// One string, not adjacent expressions in the markup: the whitespace between
+// those is collapsed away and the count runs into the noun. «Знайдено» itself is
+// impersonal and does not agree with the number, so only the noun is inflected.
+const countLabel = `Знайдено ${products.length} ${pluralUk(products.length, {
+  one: 'товар',
+  few: 'товари',
+  many: 'товарів',
+})}`;
+---
+
+{/* Result pages stay out of the index after launch too: they are an unbounded
+    URL space that adds nothing a crawler cannot reach through /products. */}
+<BaseLayout title={query ? `Пошук: ${query}` : 'Пошук'} noindex>
+  <Container class="py-8 sm:py-12">
+    <Breadcrumbs items={[{ label: 'Головна', href: '/' }, { label: 'Пошук' }]} />
+
+    <header class="mt-5 sm:mt-6">
+      <h1 class="text-3xl sm:text-4xl lg:text-5xl">Пошук</h1>
+    </header>
+
+    {/* A plain GET form: the URL carries the query, so a result page is
+        shareable, back-navigable and works before any script runs.
+
+        Stacked on a phone — sharing one row costs the field the characters it
+        needs to show a typed query and leaves the button a narrow target at the
+        far edge, under the thumb that is least likely to be there. Both go full
+        width instead, and the mockup's single row starts at `sm:`.
+
+        The row is capped: on a wide viewport a field stretched across the full
+        82rem gutter reads as a page-wide form, not as a search box. */}
+    <form
+      role="search"
+      method="get"
+      action="/search"
+      class="mt-5 flex max-w-xl flex-col gap-2 sm:mt-6 sm:flex-row"
+    >
+      <label for="search-q" class="sr-only">Що шукаємо?</label>
+      {/* `flex-1` waits for `sm:` on purpose: while the form is a column the main
+          axis is vertical, and a `0%` flex-basis would beat `h-touch`. */}
+      <input
+        id="search-q"
+        name="q"
+        type="search"
+        value={query}
+        placeholder="Сумка, гаманець, колір…"
+        maxlength={MAX_SEARCH_QUERY}
+        autocomplete="off"
+        enterkeyhint="search"
+        autofocus={query === ''}
+        class="border-line-strong bg-paper-raised text-ink placeholder:text-ink-muted rounded-btn h-touch w-full min-w-0 appearance-none border px-4 text-base sm:flex-1 sm:text-sm"
+      />
+      <Button type="submit" block class="shrink-0 sm:w-auto">Знайти</Button>
+    </form>
+
+    {
+      tokens.length === 0 ? (
+        <p class="text-ink-muted mt-6">
+          Введіть назву товару — наприклад, «сумка» або «гаманець».
+        </p>
+      ) : products.length === 0 ? (
+        <div class="mt-8">
+          <p class="text-ink">
+            За запитом «{query}» нічого не знайшлося.
+          </p>
+          <p class="text-ink-muted mt-2 text-sm">
+            Спробуйте одне слово замість кількох або перевірте розкладку.
+          </p>
+          <Button href="/products" variant="secondary" class="mt-6 w-full sm:w-auto">
+            Переглянути всі товари
+          </Button>
+        </div>
+      ) : (
+        <>
+          <p class="text-ink-muted mt-4 text-sm">{countLabel}</p>
+
+          <div class="mt-6 grid grid-cols-2 gap-3 sm:mt-8 sm:gap-5 md:grid-cols-3 lg:grid-cols-4 lg:gap-6">
+            {products.map((product, index) => (
+              <ProductCard
+                slug={product.slug}
+                title={product.title}
+                category={product.categoryTitle}
+                price={product.price}
+                compareAtPrice={product.compareAtPrice}
+                imageUrl={product.imageUrl}
+                imageAlt={product.imageAlt}
+                swatches={product.swatches}
+                soldOut={!product.inStock}
+                eager={index < EAGER_CARDS}
+              />
+            ))}
+          </div>
+        </>
+      )
+    }
+  </Container>
+</BaseLayout>

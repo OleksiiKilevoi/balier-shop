@@ -1,0 +1,1367 @@
+---
+import { env } from 'cloudflare:workers';
+import ColorField from '~/components/ColorField.astro';
+import ProductStatusBadge from '~/components/ProductStatusBadge.astro';
+import AdminLayout from '~/layouts/AdminLayout.astro';
+import { createDb, createTxDb } from '@balier/lib/db';
+import {
+  addProductImage,
+  addVariant,
+  findAdminProduct,
+  listCategoryOptions,
+  moveProductImage,
+  removeProductImage,
+  setVariantActive,
+  updateProduct,
+  updateProductImage,
+  updateVariant,
+} from '@balier/lib/db/queries/adminProducts';
+import type { CatalogFailure } from '@balier/lib/db/queries/adminProducts';
+import { productStatus } from '@balier/lib/db/schema';
+import {
+  ADMIN_CATALOG_ERRORS,
+  ADMIN_PRODUCT_MESSAGES,
+  ADMIN_STOREFRONT_NOTES,
+  ADMIN_UPLOAD_ERRORS,
+  ADMIN_UPLOAD_HINT,
+  PRODUCT_STATUS_HINTS,
+  PRODUCT_STATUS_LABELS,
+  formatAdminDateTime,
+  formatFileSize,
+} from '@balier/lib/i18n/admin';
+import type { AdminProductMessage } from '@balier/lib/i18n/admin';
+import { mediaKeyFromUrl, storeImage } from '@balier/lib/media';
+import { checkUploadedImage } from '@balier/lib/media/upload';
+import type { UploadIssue } from '@balier/lib/media/upload';
+import { formatPrice } from '@balier/lib/money';
+import { suggestSku } from '@balier/lib/products/slug';
+import { catalogFieldErrors, productActionSchema } from '@balier/lib/validation/catalog';
+import type { CatalogField } from '@balier/lib/validation/catalog';
+
+/**
+ * The product editor — where a product actually gets made.
+ *
+ * Four independent sections, each its own `<form>` carrying a hidden `intent`,
+ * each answered with a 303 back here. Every one of them is a plain form that
+ * works with no script at all: the panel's no-script rule is over, but that made
+ * script *allowed*, not required.
+ *
+ * A refusal re-renders with the submitted body instead of redirecting. The
+ * settings screen carries one number and can afford to throw it away; this one
+ * carries a description somebody wrote.
+ *
+ * NOTHING BELOW RELOADS THE PAGE. `enhanceAdminForms` from `~/lib/forms`
+ * does that for every panel screen made of plain forms, and it changed not a
+ * single server-side line here: every submit becomes a `fetch` of the exact POST
+ * the browser would have made, `fetch` follows the 303 itself, and what comes
+ * back replaces the editor in place. Saving one section therefore no longer
+ * discards what is half-typed in another, and the sections stay separate saves
+ * because they are separate decisions, not because a reload used to punish them.
+ * The answer moves with it, into the fixed toast host at the bottom of this
+ * file. Read that module for the whole of how it works.
+ */
+export const prerender = false;
+
+const productId = Astro.params.id!;
+const selfUrl = `/products/${encodeURIComponent(productId)}`;
+
+const db = createDb(env.DATABASE_URL);
+
+/* ------------------------------------------------------------- POST handling */
+
+let invalid = new Set<CatalogField>();
+let banner: AdminProductMessage | null = null;
+let uploadIssue: UploadIssue | null = null;
+/** Which form was refused, so only that one redraws from the body. */
+let failedIntent: string | null = null;
+let body: Record<string, string> = {};
+
+function done(message: AdminProductMessage): Response {
+  return Astro.redirect(`${selfUrl}?m=${message}`, 303);
+}
+
+/** Turns a query-layer refusal into the banner and, where it has one, a field. */
+function refuse(reason: CatalogFailure, intent: string) {
+  banner = reason;
+  failedIntent = intent;
+  if (reason === 'slug_taken') invalid.add('slug');
+  if (reason === 'sku_taken') invalid.add('sku');
+}
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+
+  /*
+   * The file is pulled out before `Object.fromEntries`, because it is a `File`
+   * rather than a string and its rules are about bytes and pixels, not shape.
+   * Zod strips it either way — `imageAddSchema` does not declare it.
+   */
+  const file = form.get('file');
+  const fields = Object.fromEntries(form) as Record<string, string>;
+  body = fields;
+
+  const parsed = productActionSchema.safeParse(fields);
+
+  if (!parsed.success) {
+    invalid = catalogFieldErrors(parsed.error);
+    failedIntent = String(form.get('intent') ?? '');
+    banner = 'bad_request';
+  } else {
+    const action = parsed.data;
+    const { db: txDb, close } = createTxDb(env.DATABASE_URL);
+
+    try {
+      switch (action.intent) {
+        case 'product_save': {
+          const result = await updateProduct(txDb, productId, action);
+          if (result.ok) return done('saved');
+          refuse(result.reason, action.intent);
+          break;
+        }
+
+        case 'variant_add': {
+          const result = await addVariant(txDb, productId, action);
+          if (result.ok) return done('variant_added');
+          refuse(result.reason, action.intent);
+          break;
+        }
+
+        case 'variant_save': {
+          const result = await updateVariant(txDb, productId, action.variantId, action);
+          if (result.ok) return done('variant_saved');
+          refuse(result.reason, action.intent);
+          break;
+        }
+
+        case 'variant_activate': {
+          const result = await setVariantActive(txDb, productId, action.variantId, action.active);
+          if (result.ok) return done(action.active ? 'variant_activated' : 'variant_deactivated');
+          refuse(result.reason, action.intent);
+          break;
+        }
+
+        case 'image_add': {
+          if (!(file instanceof File) || file.size === 0) {
+            uploadIssue = 'empty';
+            break;
+          }
+
+          const bytes = await file.arrayBuffer();
+
+          /*
+           * The *decoded* format, not what the browser declared. Those differ
+           * more often than they should — a `curl -F` upload arrives as
+           * `application/octet-stream` and is still a perfectly good WebP — and
+           * the binding throws outright on a file that is not an image at all,
+           * which is what leaves `format` null and is refused as «unreadable».
+           *
+           * Width and height decide nothing any more (see `~/lib/media/upload`);
+           * they are read here only to be stored, so the markup can reserve the
+           * space and the page does not shift as photos load.
+           */
+          let format: string | null = null;
+          let width: number | null = null;
+          let height: number | null = null;
+          try {
+            const info = await env.IMAGES.info(
+              new Response(bytes).body as ReadableStream<Uint8Array>,
+            );
+            format = info.format;
+            if ('width' in info) {
+              width = info.width;
+              height = info.height;
+            }
+          } catch {
+            // Left null; `checkUploadedImage` refuses on exactly that.
+          }
+
+          const issue = checkUploadedImage({ size: bytes.byteLength, format });
+          if (issue) {
+            uploadIssue = issue;
+            break;
+          }
+
+          /*
+           * `storeImage` reads the dimensions again for its own return value.
+           * Two `info()` calls per upload rather than one, accepted so the
+           * signature stays byte-identical to the one `pnpm media:ingest` calls
+           * — the whole point of sharing it is that the two paths cannot drift.
+           * `info()` is metadata, not a transformation, so it costs no quota.
+           */
+          const stored = await storeImage(
+            { bucket: env.MEDIA, images: env.IMAGES },
+            bytes,
+            format!,
+          );
+
+          await addProductImage(txDb, productId, {
+            url: stored.url,
+            alt: action.alt,
+            width: stored.width ?? width,
+            height: stored.height ?? height,
+            variantId: action.variantId,
+          });
+
+          return done('image_added');
+        }
+
+        case 'image_save': {
+          const result = await updateProductImage(txDb, productId, action.imageId, {
+            alt: action.alt,
+            variantId: action.variantId,
+          });
+          if (result.ok) return done('image_saved');
+          refuse(result.reason, action.intent);
+          break;
+        }
+
+        case 'image_move': {
+          const result = await moveProductImage(txDb, productId, action.imageId, action.direction);
+          if (result.ok) return done('image_moved');
+          refuse(result.reason, action.intent);
+          break;
+        }
+
+        case 'image_remove': {
+          const result = await removeProductImage(txDb, productId, action.imageId);
+          if (result.ok) return done('image_removed');
+          refuse(result.reason, action.intent);
+          break;
+        }
+      }
+    } finally {
+      Astro.locals.cfContext?.waitUntil?.(close());
+    }
+  }
+}
+
+/* -------------------------------------------------------------- GET / render */
+
+const [detail, categories] = await Promise.all([
+  findAdminProduct(db, productId),
+  listCategoryOptions(db),
+]);
+
+if (!detail) {
+  Astro.response.status = 404;
+}
+
+const messageParam = Astro.url.searchParams.get('m');
+const redirectMessage =
+  messageParam && messageParam in ADMIN_PRODUCT_MESSAGES
+    ? (messageParam as AdminProductMessage)
+    : null;
+
+const message = banner ?? redirectMessage;
+
+/** A refusal earns colour; a success does not — the saved value is on screen. */
+const FAILURES = new Set<AdminProductMessage>([
+  'slug_taken',
+  'sku_taken',
+  'last_active_variant',
+  'not_found',
+  'conflict',
+  'bad_request',
+]);
+const failed = message !== null && FAILURES.has(message);
+
+const product = detail?.product;
+const variants = detail?.variants ?? [];
+const images = detail?.images ?? [];
+
+/*
+ * File sizes come from the bucket rather than the database, because the database
+ * has never held them: `product_images` stores a url, an alt, and the width and
+ * height that reserve layout space. R2 is the only thing that knows how heavy a
+ * photo is — and since object names are content hashes, its answer for a given
+ * url cannot change, so there is nothing to keep in sync and nothing to backfill
+ * for the rows that predate this.
+ *
+ * One `head` per photo, all in flight together. `head` is metadata: it moves no
+ * bytes, costs a class-B operation, and this screen is one manager at a time. A
+ * failure is silence rather than an error — a size is a line of text, and the
+ * editor has to open even when the bucket does not answer.
+ */
+const imageSizes = new Map<string, number>();
+
+await Promise.all(
+  images.map(async (image) => {
+    const key = mediaKeyFromUrl(image.url);
+    if (key === null) return;
+
+    try {
+      const object = await env.MEDIA.head(key);
+      if (object) imageSizes.set(image.id, object.size);
+    } catch {
+      // Left out of the map; the row renders without it.
+    }
+  }),
+);
+
+/* --- what the storefront will actually do with this row -------------------- */
+
+const activeVariants = variants.filter((variant) => variant.isActive);
+const displayPrice =
+  activeVariants.length > 0 && product
+    ? Math.min(...activeVariants.map((variant) => variant.priceOverride ?? product.basePrice))
+    : (product?.basePrice ?? 0);
+const totalStock = activeVariants.reduce((sum, variant) => sum + variant.stock, 0);
+/** Resolvable on the storefront: `getProductBySlug` needs both of these. */
+const isLive = product?.status === 'active' && activeVariants.length > 0;
+
+/* --- redraw helpers -------------------------------------------------------- */
+
+function toHryvnias(kopiykas: number | null | undefined): string {
+  return kopiykas === null || kopiykas === undefined ? '' : String(Math.round(kopiykas / 100));
+}
+
+function text(value: string | number | null | undefined): string {
+  return value === null || value === undefined ? '' : String(value);
+}
+
+/** Submitted values win over stored ones, but only inside the form that failed. */
+function redraw(intent: string, name: string, stored: string | number | null | undefined): string {
+  if (failedIntent === intent) return body[name] ?? '';
+  return text(stored);
+}
+
+function redrawVariant(
+  variantId: string,
+  name: string,
+  stored: string | number | null | undefined,
+): string {
+  if (failedIntent === 'variant_save' && body.variantId === variantId) return body[name] ?? '';
+  return text(stored);
+}
+
+const variantRowFailed = (variantId: string) =>
+  failedIntent === 'variant_save' && body.variantId === variantId;
+
+const featured =
+  failedIntent === 'product_save' ? body.isFeatured === 'on' : (product?.isFeatured ?? false);
+const statusValue = redraw('product_save', 'status', product?.status) || 'draft';
+
+/** Suggested for the next variant, from the slug the product actually has. */
+const nextSku = product ? suggestSku(product.slug, body.colorName) : '';
+
+const variantLabel = (variant: (typeof variants)[number]) =>
+  variant.colorName ?? variant.sku;
+
+/**
+ * «1440×1920 px · 204 КБ» — the two facts about the file under its url, either
+ * of which can be missing on its own. Dimensions are absent on a row stored
+ * before they could be read; a size is absent when the object is not in the
+ * bucket, which is worth seeing as a gap rather than papering over.
+ */
+function imageMeta(image: (typeof images)[number]): string {
+  const parts: string[] = [];
+
+  if (image.width && image.height) parts.push(`${image.width}×${image.height} px`);
+
+  const size = imageSizes.get(image.id);
+  if (size !== undefined) parts.push(formatFileSize(size));
+
+  return parts.length > 0 ? parts.join(' · ') : 'розмір невідомий';
+}
+---
+
+<AdminLayout title={detail?.translation?.title ?? 'Товар'}>
+  {/*
+    Everything the server can change lives inside this one element, because
+    everything the server can change *does* change together: saving «Основне»
+    moves the price in «На вітрині», renaming a variant relabels every «Належить»
+    select, adding a photo rewrites which rows have «Вище» and «Нижче». So the
+    swap below is the whole editor rather than a section, and the id is the only
+    thing the script needs to find it in the response.
+  */}
+  <div
+    id="product-editor"
+    class="aria-busy:pointer-events-none aria-busy:opacity-60 transition-opacity"
+  >
+    {
+      !detail ? (
+        <>
+          <nav class="text-fg-subtle text-sm">
+            <a href="/products" class="underline-offset-2 hover:underline">
+              ← Товари
+            </a>
+          </nav>
+          <h1 class="text-fg mt-3 text-2xl font-semibold sm:text-3xl">Товар не знайдено</h1>
+          <p class="text-fg-muted mt-2">Можливо, його видалили або адреса неправильна.</p>
+        </>
+      ) : (
+        <>
+          <nav class="text-fg-subtle text-sm">
+            <a href="/products" class="underline-offset-2 hover:underline">
+              ← Товари
+            </a>
+          </nav>
+
+          <header class="mt-3 flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
+            <div class="min-w-0">
+              <h1 class="text-fg text-2xl font-semibold sm:text-3xl">
+                {detail.translation?.title ?? product!.slug}
+              </h1> 
+              <p class="text-fg-subtle mt-1 mb-2 font-mono text-sm">/products/{product!.slug}</p>
+              <ProductStatusBadge status={product!.status} />
+            </div>
+            <div class="flex flex-wrap items-center gap-2">
+              
+              {isLive && (
+                <a
+                  href={`/products/${product!.slug}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  class="admin-btn admin-btn-secondary"
+                >
+                  Переглянути
+                </a>
+              )}
+            </div>
+          </header>
+
+          {/* The id is what the script moves into the toast host; `data-tone` is
+              what tells it whether the sentence may expire. Both are inert
+              without script, and this stays a banner above the form. */}
+          {message && (
+            <p
+              id="editor-message"
+              data-tone={failed ? 'bad' : 'ok'}
+              role={failed ? 'alert' : 'status'}
+              class:list={[
+                'rounded-card mt-5 p-3 text-sm',
+                failed ? 'admin-tone-negative' : 'admin-card text-fg-muted',
+              ]}
+            >
+              {ADMIN_PRODUCT_MESSAGES[message]}
+            </p>
+          )}
+
+          {/* --------------------------------------------------- на вітрині --- */}
+          <section class="admin-card mt-6 p-5">
+            <h2 class="text-fg text-base font-semibold">На вітрині</h2>
+
+            <dl class="mt-3 grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-4">
+              <div>
+                <dt class="text-fg-subtle text-xs">Ціна на картці</dt>
+                <dd class="text-fg mt-0.5 font-medium tabular-nums">{formatPrice(displayPrice)}</dd>
+              </div>
+              <div>
+                <dt class="text-fg-subtle text-xs">У продажу</dt>
+                <dd class="text-fg mt-0.5 font-medium tabular-nums">
+                  {activeVariants.length} / {variants.length}
+                </dd>
+              </div>
+              <div>
+                <dt class="text-fg-subtle text-xs">Залишок</dt>
+                <dd class="text-fg mt-0.5 font-medium tabular-nums">{totalStock}</dd>
+              </div>
+              <div>
+                <dt class="text-fg-subtle text-xs">Оновлено</dt>
+                <dd class="text-fg-muted mt-0.5 text-sm">
+                  {formatAdminDateTime(product!.updatedAt)}
+                </dd>
+              </div>
+            </dl>
+
+            {/* The three facts the form itself cannot show, each shown only when
+                it currently applies to this product. */}
+            <ul class="text-fg-subtle mt-4 space-y-1.5 text-xs">
+              <li>{ADMIN_STOREFRONT_NOTES.price}</li>
+              {images.length > 0 && <li>{ADMIN_STOREFRONT_NOTES.leadImage}</li>}
+            </ul>
+
+            {product!.status === 'active' && activeVariants.length === 0 && (
+              <p role="alert" class="rounded-card admin-tone-negative mt-3 p-3 text-xs">
+                {ADMIN_STOREFRONT_NOTES.noVariants}
+              </p>
+            )}
+            {images.length === 0 && (
+              <p class="rounded-card admin-tone-attention mt-3 p-3 text-xs">
+                {ADMIN_STOREFRONT_NOTES.noImages}
+              </p>
+            )}
+          </section>
+
+          {/* ------------------------------------------------------ основне --- */}
+          <section class="admin-card mt-6 p-5">
+            <h2 class="text-fg text-base font-semibold">Основне</h2>
+
+            {/* `data-form` is a name for this form that survives the swap, so the
+                script can hand the keyboard back to the button that was pressed.
+                Anything unique will do; these read as what they are. */}
+            <form method="post" action={selfUrl} data-form="product" class="mt-4">
+              <input type="hidden" name="intent" value="product_save" />
+
+              <div>
+                <label for="title" class="text-fg-subtle text-xs">Назва</label>
+                <input
+                  id="title"
+                  name="title"
+                  type="text"
+                  value={redraw('product_save', 'title', detail.translation?.title)}
+                  maxlength={200}
+                  autocomplete="off"
+                  class:list={['admin-field mt-1', invalid.has('title') && 'border-danger']}
+                />
+                {invalid.has('title') && (
+                  <p class="text-danger mt-1 text-xs">{ADMIN_CATALOG_ERRORS.title}</p>
+                )}
+              </div>
+
+              <div class="mt-4">
+                <label for="slug" class="text-fg-subtle text-xs">Адреса сторінки</label>
+                <div class="mt-1 flex items-center gap-2">
+                  <span class="text-fg-subtle shrink-0 font-mono text-sm">/products/</span>
+                  <input
+                    id="slug"
+                    name="slug"
+                    type="text"
+                    value={redraw('product_save', 'slug', product!.slug)}
+                    maxlength={60}
+                    autocomplete="off"
+                    spellcheck="false"
+                    class:list={['admin-field font-mono', invalid.has('slug') && 'border-danger']}
+                  />
+                </div>
+                {invalid.has('slug') ? (
+                  <p class="text-danger mt-1 text-xs">{ADMIN_CATALOG_ERRORS.slug}</p>
+                ) : (
+                  product!.status === 'active' && (
+                    <p class="text-fg-subtle mt-1 text-xs">{ADMIN_STOREFRONT_NOTES.slugChange}</p>
+                  )
+                )}
+              </div>
+
+              <div class="mt-4">
+                <label for="description" class="text-fg-subtle text-xs">Опис</label>
+                <textarea
+                  id="description"
+                  name="description"
+                  rows="4"
+                  maxlength={4000}
+                  class:list={[
+                    'admin-field admin-textarea mt-1',
+                    invalid.has('description') && 'border-danger',
+                  ]}
+                  set:text={redraw('product_save', 'description', detail.translation?.description)}
+                />
+              </div>
+
+              <div class="mt-4">
+                <label for="details" class="text-fg-subtle text-xs">Деталі</label>
+                <textarea
+                  id="details"
+                  name="details"
+                  rows="4"
+                  maxlength={2000}
+                  class:list={[
+                    'admin-field admin-textarea mt-1',
+                    invalid.has('details') && 'border-danger',
+                  ]}
+                  set:text={redraw('product_save', 'details', detail.translation?.details)}
+                />
+                <p class="text-fg-subtle mt-1 text-xs">
+                  Один рядок — один пункт списку на сторінці товару.
+                </p>
+              </div>
+
+              <div class="mt-4 flex flex-wrap gap-4">
+                <div class="w-full sm:w-40">
+                  <label for="basePrice" class="text-fg-subtle text-xs">Ціна</label>
+                  <div class="relative mt-1">
+                    <input
+                      id="basePrice"
+                      name="basePrice"
+                      type="text"
+                      inputmode="numeric"
+                      value={redraw('product_save', 'basePrice', toHryvnias(product!.basePrice))}
+                      autocomplete="off"
+                      class:list={['admin-field pr-10', invalid.has('basePrice') && 'border-danger']}
+                    />
+                    <span
+                      class="text-fg-subtle pointer-events-none absolute inset-y-0 right-4.5 flex items-center text-base sm:text-sm"
+                      aria-hidden="true"
+                    >
+                      ₴
+                    </span>
+                  </div>
+                  {invalid.has('basePrice') && (
+                    <p class="text-danger mt-1 text-xs">{ADMIN_CATALOG_ERRORS.basePrice}</p>
+                  )}
+                </div>
+
+                <div class="w-full sm:w-40">
+                  <label for="compareAtPrice" class="text-fg-subtle text-xs">Стара ціна</label>
+                  <div class="relative mt-1">
+                    <input
+                      id="compareAtPrice"
+                      name="compareAtPrice"
+                      type="text"
+                      inputmode="numeric"
+                      value={redraw(
+                        'product_save',
+                        'compareAtPrice',
+                        toHryvnias(product!.compareAtPrice),
+                      )}
+                      autocomplete="off"
+                      class:list={[
+                        'admin-field pr-10',
+                        invalid.has('compareAtPrice') && 'border-danger',
+                      ]}
+                    />
+                    <span
+                      class="text-fg-subtle pointer-events-none absolute inset-y-0 right-4.5 flex items-center text-base sm:text-sm"
+                      aria-hidden="true"
+                    >
+                      ₴
+                    </span>
+                  </div>
+                  <p class="text-fg-subtle mt-1 text-xs">Закреслена. Порожньо — не показувати.</p>
+                </div>
+
+                <div class="w-full sm:w-44">
+                  <label for="dimensions" class="text-fg-subtle text-xs">Розміри</label>
+                  <input
+                    id="dimensions"
+                    name="dimensions"
+                    type="text"
+                    value={redraw('product_save', 'dimensions', product!.dimensions)}
+                    maxlength={100}
+                    autocomplete="off"
+                    placeholder="30х17х10 см"
+                    class:list={['admin-field mt-1', invalid.has('dimensions') && 'border-danger']}
+                  />
+                </div>
+              </div>
+
+              <div class="mt-4 flex flex-wrap gap-4">
+                <div class="w-full flex-1">
+                  <label for="categoryId" class="text-fg-subtle text-xs">Категорія</label>
+                  <div class="relative mt-1">
+                    <select id="categoryId" name="categoryId" class="admin-field admin-select">
+                      <option value="">Без категорії</option>
+                      {categories.map((category) => (
+                        <option
+                          value={category.id}
+                          selected={
+                            category.id ===
+                            redraw('product_save', 'categoryId', product!.categoryId)
+                          }
+                        >
+                          {category.title}
+                          {!category.isActive && ' (не опубліковано)'}
+                        </option>
+                      ))}
+                    </select>
+                    <svg
+                      class="text-fg-subtle pointer-events-none absolute top-1/2 right-4 h-4 w-4 -translate-y-1/2"
+                      viewBox="0 0 16 16"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.5"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      aria-hidden="true"
+                    >
+                      <path d="m4 6 4 4 4-4" />
+                    </svg>
+                  </div>
+                </div>
+
+                <div class="w-full sm:w-32">
+                  <label for="position" class="text-fg-subtle text-xs">Порядок</label>
+                  <input
+                    id="position"
+                    name="position"
+                    type="text"
+                    inputmode="numeric"
+                    value={redraw('product_save', 'position', product!.position)}
+                    autocomplete="off"
+                    class:list={['admin-field mt-1', invalid.has('position') && 'border-danger']}
+                  />
+                  <p class="text-fg-subtle mt-1 text-xs">Менше — вище в каталозі.</p>
+                </div>
+              </div>
+
+              <fieldset class="mt-5">
+                <legend class="text-fg-subtle text-xs">Статус</legend>
+                <div class="mt-2 flex flex-wrap gap-2">
+                  {productStatus.enumValues.map((value) => (
+                    <div>
+                      <input
+                        type="radio"
+                        id={`status-${value}`}
+                        name="status"
+                        value={value}
+                        checked={value === statusValue}
+                        class="peer sr-only"
+                      />
+                      <label
+                        for={`status-${value}`}
+                        class="admin-badge peer-checked:bg-accent peer-checked:text-accent-fg border-border-strong text-fg-muted min-h-9 w-auto max-w-none cursor-pointer border px-4"
+                      >
+                        {PRODUCT_STATUS_LABELS[value]}
+                      </label>
+                    </div>
+                  ))}
+                </div>
+                <p class="text-fg-subtle mt-2 text-xs">
+                  {PRODUCT_STATUS_HINTS[product!.status]}
+                </p>
+              </fieldset>
+
+              <label class="mt-4 flex items-center gap-2.5 text-sm">
+                <input type="checkbox" name="isFeatured" checked={featured} class="size-4" />
+                <span class="text-fg-muted">Показувати першим на головній</span>
+              </label>
+
+              {/* The id is how the swap finds it open and leaves it open —
+                  editing a meta description and saving must not fold it away. */}
+              <details id="seo-fields" class="admin-disclosure mt-5">
+                <summary>
+                  Для пошукових систем
+                  <svg
+                    class="h-4 w-4 shrink-0"
+                    viewBox="0 0 16 16"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.5"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="m4 6 4 4 4-4" />
+                  </svg>
+                </summary>
+                <div class="mt-3">
+                  <label for="metaTitle" class="text-fg-subtle text-xs">Заголовок</label>
+                  <input
+                    id="metaTitle"
+                    name="metaTitle"
+                    type="text"
+                    value={redraw('product_save', 'metaTitle', detail.translation?.metaTitle)}
+                    maxlength={200}
+                    autocomplete="off"
+                    class:list={['admin-field mt-1', invalid.has('metaTitle') && 'border-danger']}
+                  />
+                  <p class="text-fg-subtle mt-1 text-xs">Порожньо — береться назва товару.</p>
+                </div>
+                <div class="mt-3">
+                  <label for="metaDescription" class="text-fg-subtle text-xs">Опис</label>
+                  <textarea
+                    id="metaDescription"
+                    name="metaDescription"
+                    rows="2"
+                    maxlength={300}
+                    class:list={[
+                      'admin-field admin-textarea mt-1',
+                      invalid.has('metaDescription') && 'border-danger',
+                    ]}
+                    set:text={redraw(
+                      'product_save',
+                      'metaDescription',
+                      detail.translation?.metaDescription,
+                    )}
+                  />
+                </div>
+              </details>
+
+              <div class="mt-6">
+                <button type="submit" class="admin-btn admin-btn-primary">Зберегти</button>
+              </div>
+            </form>
+          </section>
+
+          {/* ----------------------------------------------------- варіанти --- */}
+          <section class="admin-card mt-6 p-5">
+            <h2 class="text-fg text-base font-semibold">Варіанти</h2>
+            <p class="text-fg-muted mt-1 text-sm">
+              Кожен варіант має свій артикул і залишок. Товар без кольорів — це один варіант із
+              порожньою назвою кольору.
+            </p>
+
+            <ul class="mt-4 space-y-3">
+              {variants.map((variant) => (
+                <li
+                  class:list={[
+                    'border-border rounded-card border p-4',
+                    !variant.isActive && 'opacity-40',
+                    variantRowFailed(variant.id) && 'border-danger',
+                  ]}
+                >
+                  <form method="post" action={selfUrl} data-form={`variant:${variant.id}`}>
+                    <input type="hidden" name="intent" value="variant_save" />
+                    <input type="hidden" name="variantId" value={variant.id} />
+
+                    <div class="flex flex-wrap gap-3">
+                      <div class="w-full sm:w-52">
+                        <label for={`sku-${variant.id}`} class="text-fg-subtle text-xs">
+                          Артикул
+                        </label>
+                        <input
+                          id={`sku-${variant.id}`}
+                          name="sku"
+                          type="text"
+                          value={redrawVariant(variant.id, 'sku', variant.sku)}
+                          maxlength={40}
+                          autocomplete="off"
+                          spellcheck="false"
+                          class:list={[
+                            'admin-field mt-1 font-mono',
+                            variantRowFailed(variant.id) && invalid.has('sku') && 'border-danger',
+                          ]}
+                        />
+                      </div>
+
+                      <div class="w-full sm:w-40">
+                        <label for={`colorName-${variant.id}`} class="text-fg-subtle text-xs">
+                          Колір
+                        </label>
+                        <input
+                          id={`colorName-${variant.id}`}
+                          name="colorName"
+                          type="text"
+                          value={redrawVariant(variant.id, 'colorName', variant.colorName)}
+                          maxlength={60}
+                          autocomplete="off"
+                          placeholder="Чорний"
+                          class="admin-field mt-1"
+                        />
+                      </div>
+
+                      <div class="w-full sm:w-36">
+                        <ColorField
+                          id={`colorHex-${variant.id}`}
+                          value={redrawVariant(variant.id, 'colorHex', variant.colorHex)}
+                          invalid={variantRowFailed(variant.id) && invalid.has('colorHex')}
+                        />
+                      </div>
+
+                      <div class="w-full sm:w-32">
+                        <label for={`stock-${variant.id}`} class="text-fg-subtle text-xs">
+                          Залишок
+                        </label>
+                        <input
+                          id={`stock-${variant.id}`}
+                          name="stock"
+                          type="text"
+                          inputmode="numeric"
+                          value={redrawVariant(variant.id, 'stock', variant.stock)}
+                          autocomplete="off"
+                          class:list={[
+                            'admin-field mt-1',
+                            variantRowFailed(variant.id) && invalid.has('stock') && 'border-danger',
+                          ]}
+                        />
+                      </div>
+
+                      <div class="w-full sm:w-36">
+                        <label for={`priceOverride-${variant.id}`} class="text-fg-subtle text-xs">
+                          Своя ціна
+                        </label>
+                        <div class="relative mt-1">
+                          <input
+                            id={`priceOverride-${variant.id}`}
+                            name="priceOverride"
+                            type="text"
+                            inputmode="numeric"
+                            value={redrawVariant(
+                              variant.id,
+                              'priceOverride',
+                              toHryvnias(variant.priceOverride),
+                            )}
+                            autocomplete="off"
+                            class:list={[
+                              'admin-field pr-10',
+                              variantRowFailed(variant.id) &&
+                                invalid.has('priceOverride') &&
+                                'border-danger',
+                            ]}
+                          />
+                          <span
+                            class="text-fg-subtle pointer-events-none absolute inset-y-0 right-4.5 flex items-center text-base sm:text-sm"
+                            aria-hidden="true"
+                          >
+                            ₴
+                          </span>
+                        </div>
+                      </div>
+
+                      <div class="w-full sm:w-24">
+                        <label for={`vposition-${variant.id}`} class="text-fg-subtle text-xs">
+                          Порядок
+                        </label>
+                        <input
+                          id={`vposition-${variant.id}`}
+                          name="position"
+                          type="text"
+                          inputmode="numeric"
+                          value={redrawVariant(variant.id, 'position', variant.position)}
+                          autocomplete="off"
+                          class="admin-field mt-1"
+                        />
+                      </div>
+                    </div>
+
+                    {variantRowFailed(variant.id) && invalid.size > 0 && (
+                      <ul class="text-danger mt-2 space-y-0.5 text-xs">
+                        {[...invalid].map((field) => (
+                          <li>{ADMIN_CATALOG_ERRORS[field]}</li>
+                        ))}
+                      </ul>
+                    )}
+
+                    <div class="mt-3 flex flex-wrap items-center gap-2">
+                      <button type="submit" class="admin-btn admin-btn-secondary">Зберегти</button>
+                      {variant.priceOverride !== null && (
+                        <span class="text-fg-subtle text-xs">
+                          На вітрині: {formatPrice(variant.priceOverride)}
+                        </span>
+                      )}
+                    </div>
+                  </form>
+
+                  {/* Its own form: activating is not a field of the row, it is a
+                      decision with a consequence for the whole product. */}
+                  <form
+                    method="post"
+                    action={selfUrl}
+                    data-form={`variant-active:${variant.id}`}
+                    class="mt-2"
+                  >
+                    <input type="hidden" name="intent" value="variant_activate" />
+                    <input type="hidden" name="variantId" value={variant.id} />
+                    <input type="hidden" name="active" value={variant.isActive ? '0' : '1'} />
+                    <button
+                      type="submit"
+                      class:list={[
+                        'admin-btn',
+                        variant.isActive ? 'admin-btn-danger' : 'admin-btn-secondary',
+                      ]}
+                    >
+                      {variant.isActive ? 'Зняти з продажу' : 'Повернути в продаж'}
+                    </button>
+                  </form>
+                </li>
+              ))}
+            </ul>
+
+            {/* Stays open across a swap the same way, which is what makes adding
+                a second colour straight after the first one one click. */}
+            <details
+              id="variant-add"
+              class="admin-disclosure mt-4"
+              open={failedIntent === 'variant_add'}
+            >
+              <summary>
+                Додати варіант
+                <svg
+                  class="h-4 w-4 shrink-0"
+                  viewBox="0 0 16 16"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.5"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="m4 6 4 4 4-4" />
+                </svg>
+              </summary>
+
+              <form method="post" action={selfUrl} data-form="variant-add" class="mt-3">
+                <input type="hidden" name="intent" value="variant_add" />
+
+                <div class="flex flex-wrap gap-3">
+                  <div class="w-full sm:w-52">
+                    <label for="new-sku" class="text-fg-subtle text-xs">Артикул</label>
+                    <input
+                      id="new-sku"
+                      name="sku"
+                      type="text"
+                      value={redraw('variant_add', 'sku', nextSku)}
+                      maxlength={40}
+                      autocomplete="off"
+                      spellcheck="false"
+                      class:list={[
+                        'admin-field mt-1 font-mono',
+                        failedIntent === 'variant_add' && invalid.has('sku') && 'border-danger',
+                      ]}
+                    />
+                  </div>
+
+                  <div class="w-full sm:w-40">
+                    <label for="new-colorName" class="text-fg-subtle text-xs">Колір</label>
+                    <input
+                      id="new-colorName"
+                      name="colorName"
+                      type="text"
+                      value={redraw('variant_add', 'colorName', '')}
+                      maxlength={60}
+                      autocomplete="off"
+                      placeholder="Чорний"
+                      class="admin-field mt-1"
+                    />
+                  </div>
+
+                  <div class="w-full sm:w-36">
+                    <ColorField
+                      id="new-colorHex"
+                      value={redraw('variant_add', 'colorHex', '')}
+                      invalid={failedIntent === 'variant_add' && invalid.has('colorHex')}
+                    />
+                  </div>
+
+                  <div class="w-full sm:w-32">
+                    <label for="new-stock" class="text-fg-subtle text-xs">Залишок</label>
+                    <input
+                      id="new-stock"
+                      name="stock"
+                      type="text"
+                      inputmode="numeric"
+                      value={redraw('variant_add', 'stock', '0')}
+                      autocomplete="off"
+                      class="admin-field mt-1"
+                    />
+                  </div>
+
+                  <div class="w-full sm:w-36">
+                    <label for="new-priceOverride" class="text-fg-subtle text-xs">Своя ціна</label>
+                    <input
+                      id="new-priceOverride"
+                      name="priceOverride"
+                      type="text"
+                      inputmode="numeric"
+                      value={redraw('variant_add', 'priceOverride', '')}
+                      autocomplete="off"
+                      class="admin-field mt-1"
+                    />
+                  </div>
+
+                  <div class="w-full sm:w-24">
+                    <label for="new-vposition" class="text-fg-subtle text-xs">Порядок</label>
+                    <input
+                      id="new-vposition"
+                      name="position"
+                      type="text"
+                      inputmode="numeric"
+                      value={redraw('variant_add', 'position', String(variants.length))}
+                      autocomplete="off"
+                      class="admin-field mt-1"
+                    />
+                  </div>
+                </div>
+
+                <div class="mt-3">
+                  <button type="submit" class="admin-btn admin-btn-primary">Додати варіант</button>
+                </div>
+              </form>
+            </details>
+          </section>
+
+          {/* --------------------------------------------------- зображення --- */}
+          <section class="admin-card mt-6 p-5">
+            <h2 class="text-fg text-base font-semibold">Зображення</h2>
+            <p class="text-fg-muted mt-1 text-sm">{ADMIN_UPLOAD_HINT}</p>
+
+            {/* `FormData` carries the file over `fetch` exactly as the browser
+                would have posted it, so the multipart encoding here is still what
+                reaches the server with the script running. */}
+            <form
+              method="post"
+              action={selfUrl}
+              enctype="multipart/form-data"
+              data-form="image-add"
+              class="border-border rounded-card mt-4 border p-4"
+            >
+              <input type="hidden" name="intent" value="image_add" />
+
+              <div class="flex flex-wrap items-end gap-3">
+                <div class="w-full sm:w-auto sm:flex-1">
+                  <label for="file" class="text-fg-subtle text-xs">Файл</label>
+                  <input
+                    id="file"
+                    name="file"
+                    type="file"
+                    accept="image/webp,image/avif,image/jpeg,image/png"
+                    class:list={['admin-field mt-1 py-2', uploadIssue && 'border-danger']}
+                  />
+                </div>
+
+                <div class="w-full sm:w-48">
+                  <label for="new-image-variant" class="text-fg-subtle text-xs">Належить</label>
+                  <div class="relative mt-1">
+                    <select id="new-image-variant" name="variantId" class="admin-field admin-select">
+                      <option value="">Спільне фото</option>
+                      {variants.map((variant) => (
+                        <option value={variant.id}>{variantLabel(variant)}</option>
+                      ))}
+                    </select>
+                    <svg
+                      class="text-fg-subtle pointer-events-none absolute top-1/2 right-4 h-4 w-4 -translate-y-1/2"
+                      viewBox="0 0 16 16"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.5"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      aria-hidden="true"
+                    >
+                      <path d="m4 6 4 4 4-4" />
+                    </svg>
+                  </div>
+                </div>
+
+                <button type="submit" class="admin-btn admin-btn-primary w-full shrink-0 sm:w-auto">
+                  Завантажити
+                </button>
+              </div>
+
+              {uploadIssue && (
+                <p role="alert" class="text-danger mt-2 text-xs">
+                  {ADMIN_UPLOAD_ERRORS[uploadIssue]}
+                </p>
+              )}
+            </form>
+
+            {images.length > 0 && (
+              <ul class="mt-4 space-y-3">
+                {images.map((image, index) => (
+                  <li class="border-border rounded-card border p-4">
+                    {/* Only the identity of the photo sits beside the thumbnail —
+                        a name tag, and it is all that column is wide enough for.
+                        The fields and the buttons below get the row's full width
+                        at every size, which on a phone is the difference between
+                        a 108px column that the danger button hangs out of and a
+                        form that fits. */}
+                    <div class="flex items-start gap-4">
+                      <span class="bg-surface-hover border-border h-28 w-21 shrink-0 overflow-hidden rounded-md border">
+                        <img
+                          src={image.url}
+                          alt={image.alt ?? ''}
+                          width={image.width ?? undefined}
+                          height={image.height ?? undefined}
+                          loading="lazy"
+                          class="h-full w-full object-cover"
+                        />
+                      </span>
+
+                      <div class="min-w-0 flex-1">
+                        {index === 0 && (
+                          <p class="admin-badge admin-tone-neutral w-auto max-w-none">
+                            Головне фото
+                          </p>
+                        )}
+                        <p class="text-fg-subtle mt-1 font-mono text-xs break-all">{image.url}</p>
+                        <p class="text-fg-subtle mt-0.5 text-xs">{imageMeta(image)}</p>
+                      </div>
+                    </div>
+
+                    <form
+                      method="post"
+                      action={selfUrl}
+                      data-form={`image:${image.id}`}
+                      class="mt-4 flex flex-wrap items-end gap-3"
+                    >
+                      <input type="hidden" name="intent" value="image_save" />
+                      <input type="hidden" name="imageId" value={image.id} />
+
+                      <div class="w-full sm:flex-1">
+                        <label for={`alt-${image.id}`} class="text-fg-subtle text-xs">
+                          Опис
+                        </label>
+                        <input
+                          id={`alt-${image.id}`}
+                          name="alt"
+                          type="text"
+                          value={image.alt ?? ''}
+                          maxlength={300}
+                          autocomplete="off"
+                          class="admin-field mt-1"
+                        />
+                      </div>
+
+                      <div class="w-full sm:w-44">
+                        <label for={`variant-${image.id}`} class="text-fg-subtle text-xs">
+                          Належить
+                        </label>
+                        <div class="relative mt-1">
+                          <select
+                            id={`variant-${image.id}`}
+                            name="variantId"
+                            class="admin-field admin-select"
+                          >
+                            <option value="" selected={image.variantId === null}>
+                              Спільне фото
+                            </option>
+                            {variants.map((variant) => (
+                              <option value={variant.id} selected={variant.id === image.variantId}>
+                                {variantLabel(variant)}
+                              </option>
+                            ))}
+                          </select>
+                          <svg
+                            class="text-fg-subtle pointer-events-none absolute top-1/2 right-4 h-4 w-4 -translate-y-1/2"
+                            viewBox="0 0 16 16"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="1.5"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            aria-hidden="true"
+                          >
+                            <path d="m4 6 4 4 4-4" />
+                          </svg>
+                        </div>
+                      </div>
+
+                      <button
+                        type="submit"
+                        class="admin-btn admin-btn-secondary w-full shrink-0 sm:w-auto"
+                      >
+                        Зберегти
+                      </button>
+                    </form>
+
+                    <div class="mt-3 flex flex-wrap items-center gap-2">
+                      {/* Keyed to the photo rather than to the row it is in, so
+                          reordering follows the photo: click «Вище» and the
+                          keyboard is on that same photo's «Вище» again, one
+                          place up the list, ready for the next press. */}
+                      {index > 0 && (
+                        <form
+                          method="post"
+                          action={selfUrl}
+                          data-form={`image-up:${image.id}`}
+                          class="flex-1 sm:flex-none"
+                        >
+                          <input type="hidden" name="intent" value="image_move" />
+                          <input type="hidden" name="imageId" value={image.id} />
+                          <input type="hidden" name="direction" value="up" />
+                          <button type="submit" class="admin-btn admin-btn-secondary w-full px-4 sm:w-auto sm:px-6">
+                            Вище
+                          </button>
+                        </form>
+                      )}
+                      {index < images.length - 1 && (
+                        <form
+                          method="post"
+                          action={selfUrl}
+                          data-form={`image-down:${image.id}`}
+                          class="flex-1 sm:flex-none"
+                        >
+                          <input type="hidden" name="intent" value="image_move" />
+                          <input type="hidden" name="imageId" value={image.id} />
+                          <input type="hidden" name="direction" value="down" />
+                          <button type="submit" class="admin-btn admin-btn-secondary w-full px-4 sm:w-auto sm:px-6">
+                            Нижче
+                          </button>
+                        </form>
+                      )}
+
+                      {/* The one control here that destroys a row rather than
+                          editing one — outlined red, and the only thing between
+                          it and the click is that it sits apart from the two
+                          above. On a phone that separation is the line break the
+                          `basis-full` forces, rather than the gap. Unlike the
+                          order screen's exits it is not behind a disclosure yet. */}
+                      <form
+                        method="post"
+                        action={selfUrl}
+                        data-form={`image-remove:${image.id}`}
+                        class="basis-full sm:basis-auto"
+                      >
+                        <input type="hidden" name="intent" value="image_remove" />
+                        <input type="hidden" name="imageId" value={image.id} />
+                        <button type="submit" class="admin-btn admin-btn-danger w-full sm:w-auto">
+                          Прибрати фото
+                        </button>
+                      </form>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        </>
+      )
+    }
+  </div>
+
+  {/*
+    Empty until script has something to put in it, and hidden the rest of the
+    time by having nothing to lay out. Styled in `admin.css`; the message it
+    receives is the one rendered above, moved rather than rebuilt.
+  */}
+  <div id="product-toast" class="admin-toast-host" aria-live="polite" aria-atomic="true"></div>
+
+  {/*
+    The enhancement layer lives in `~/lib/forms` and is shared with
+    `/categories` — every panel screen made of plain forms gets the same
+    swap-in-place and the same toast from it. What stays here is the one thing
+    that is only about *this* page: the colour swatches.
+  */}
+  <script>
+    import { enhanceAdminForms } from '@balier/lib/admin/forms';
+
+    const editor = document.getElementById('product-editor');
+    const toastHost = document.getElementById('product-toast');
+
+    if (editor && toastHost) {
+      /** The only value a swatch can paint — same shape the schema accepts. */
+      const HEX = /^#[0-9a-f]{6}$/;
+
+      /*
+       * The colour swatches, both directions. Delegated because every save
+       * replaces the editor's contents, so a listener bound to a field would be
+       * holding a detached node one click later. Nothing is initialised here
+       * either — the server renders each swatch already painted, and this only
+       * keeps it honest as it is typed in.
+       *
+       * Neither control is the truth. The text field is what gets submitted;
+       * the circle is what gets read. A value that is not a hex paints nothing
+       * rather than guessing at one, which is the same answer the server gives.
+       */
+      editor.addEventListener('input', (event) => {
+        const target = event.target;
+        if (!(target instanceof HTMLInputElement) || !editor) return;
+
+        // The picker moved: write its answer into the field that is submitted.
+        const fieldId = target.dataset.swatchFor;
+        if (fieldId !== undefined) {
+          const field = document.getElementById(fieldId);
+          if (!(field instanceof HTMLInputElement)) return;
+          field.value = target.value.toLowerCase();
+          paint(target.parentElement, field.value);
+          return;
+        }
+
+        // Somebody typed a hex: move the circle, and the picker with it, so it
+        // opens on the colour that is in the field rather than the last one.
+        if (target.dataset.swatchInput === undefined) return;
+        const swatch = editor.querySelector(`[data-swatch-for="${CSS.escape(target.id)}"]`);
+        if (!(swatch instanceof HTMLInputElement)) return;
+        const value = target.value.trim().toLowerCase();
+        if (HEX.test(value)) swatch.value = value;
+        paint(swatch.parentElement, value);
+      });
+
+      // The rest of it — the swap in place, the toast, the focus and the
+      // fallback to a real submit — is the same on every screen made of forms.
+      enhanceAdminForms({ root: editor, toastHost, messageId: 'editor-message' });
+
+      /** Fills the circle, or marks it empty — `admin.css` draws both states. */
+      function paint(swatch: HTMLElement | null, value: string) {
+        if (!swatch) return;
+        if (HEX.test(value)) {
+          swatch.style.setProperty('--swatch', value);
+          swatch.removeAttribute('data-empty');
+        } else {
+          swatch.style.removeProperty('--swatch');
+          swatch.setAttribute('data-empty', '');
+        }
+      }
+    }
+  </script>
+</AdminLayout>

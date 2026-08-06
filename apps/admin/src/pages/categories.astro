@@ -1,0 +1,444 @@
+---
+import { env } from 'cloudflare:workers';
+import AdminLayout from '~/layouts/AdminLayout.astro';
+import { createDb, createTxDb } from '@balier/lib/db';
+import { createCategory, listAdminCategories, updateCategory } from '@balier/lib/db/queries/adminCategories';
+import {
+  ADMIN_CATALOG_ERRORS,
+  ADMIN_CATEGORY_HINT,
+  ADMIN_CATEGORY_MESSAGES,
+} from '@balier/lib/i18n/admin';
+import type { AdminCategoryMessage } from '@balier/lib/i18n/admin';
+import { pluralUk } from '@balier/lib/i18n/plural';
+import { slugify } from '@balier/lib/products/slug';
+import { catalogFieldErrors, categoryActionSchema } from '@balier/lib/validation/catalog';
+import type { CatalogField } from '@balier/lib/validation/catalog';
+
+/**
+ * Categories.
+ *
+ * One screen, because a category is four fields and there will never be many of
+ * them. It exists so the product form has something to point at and so «Рюкзаки»
+ * can be added without a deploy — not as a second content system.
+ *
+ * Reached from the product list rather than from the header nav: a fourth nav
+ * row starts wrapping the header at 320px, and this is a page somebody opens
+ * twice a year.
+ *
+ * Every row is its own plain `<form>` answered with a 303 back here, and works
+ * with no script at all. `enhanceAdminForms` (`~/lib/forms`) then takes
+ * the reload out of it, exactly as on the product editor: the POST goes by
+ * `fetch`, the response replaces `#categories-editor` in place, and the banner
+ * the server rendered is moved into the fixed toast host. Saving the last
+ * category in a long list no longer throws the manager back to the top of the
+ * page to read an answer.
+ */
+export const prerender = false;
+
+const SELF = '/categories';
+
+const db = createDb(env.DATABASE_URL);
+
+let invalid = new Set<CatalogField>();
+let banner: AdminCategoryMessage | null = null;
+let failedIntent: string | null = null;
+let failedCategoryId: string | null = null;
+let body: Record<string, string> = {};
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const fields = Object.fromEntries(form) as Record<string, string>;
+  body = fields;
+
+  // Same server-side slug fallback as `/products/new`: an empty field is
+  // filled from the title, so the suggestion holds with the script blocked.
+  const parsed = categoryActionSchema.safeParse({
+    ...fields,
+    slug: (fields.slug ?? '').trim() === '' ? slugify(fields.title ?? '') : fields.slug,
+  });
+
+  if (!parsed.success) {
+    invalid = catalogFieldErrors(parsed.error);
+    failedIntent = String(form.get('intent') ?? '');
+    failedCategoryId = String(form.get('categoryId') ?? '') || null;
+    banner = 'bad_request';
+  } else {
+    const action = parsed.data;
+    const { db: txDb, close } = createTxDb(env.DATABASE_URL);
+
+    try {
+      const result =
+        action.intent === 'category_create'
+          ? await createCategory(txDb, action)
+          : await updateCategory(txDb, action.categoryId, action);
+
+      if (result.ok) {
+        return Astro.redirect(
+          `${SELF}?m=${action.intent === 'category_create' ? 'created' : 'saved'}`,
+          303,
+        );
+      }
+
+      banner = result.reason;
+      failedIntent = action.intent;
+      failedCategoryId = action.intent === 'category_save' ? action.categoryId : null;
+      if (result.reason === 'slug_taken') invalid.add('slug');
+    } finally {
+      Astro.locals.cfContext?.waitUntil?.(close());
+    }
+  }
+}
+
+const categories = await listAdminCategories(db);
+
+const messageParam = Astro.url.searchParams.get('m');
+const redirectMessage =
+  messageParam && messageParam in ADMIN_CATEGORY_MESSAGES
+    ? (messageParam as AdminCategoryMessage)
+    : null;
+
+const message = banner ?? redirectMessage;
+const FAILURES = new Set<AdminCategoryMessage>(['slug_taken', 'not_found', 'bad_request']);
+const failed = message !== null && FAILURES.has(message);
+
+const rowFailed = (categoryId: string) =>
+  failedIntent === 'category_save' && failedCategoryId === categoryId;
+
+function redraw(matches: boolean, name: string, stored: string | number | null): string {
+  if (matches) return body[name] ?? '';
+  return stored === null ? '' : String(stored);
+}
+
+const creating = failedIntent === 'category_create';
+---
+
+<AdminLayout title="Категорії">
+  <nav class="text-fg-subtle text-sm">
+    <a href="/products" class="underline-offset-2 hover:underline">← Товари</a>
+  </nav>
+
+  {/*
+    Everything the server can change on a save lives inside this element, and it
+    is what the enhancement layer swaps: the count in the heading moves when a
+    category is created, so it is in here too. `id` is how the same element is
+    found again in the response.
+  */}
+  <div
+    id="categories-editor"
+    class="aria-busy:pointer-events-none aria-busy:opacity-60 transition-opacity"
+  >
+    <header class="mt-3 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+      <h1 class="text-fg text-2xl font-semibold sm:text-3xl">Категорії</h1>
+      <p class="text-fg-muted text-sm">
+        {categories.length}{' '}
+        {pluralUk(categories.length, { one: 'категорія', few: 'категорії', many: 'категорій' })}
+      </p>
+    </header>
+
+    <p class="text-fg-muted mt-2 max-w-2xl text-sm">{ADMIN_CATEGORY_HINT}</p>
+
+    {/* The id is what the script moves into the toast host; `data-tone` is what
+        tells it whether the sentence may expire. Both are inert without script,
+        and this stays a banner above the list. */}
+    {
+      message && (
+        <p
+          id="category-message"
+          data-tone={failed ? 'bad' : 'ok'}
+          role={failed ? 'alert' : 'status'}
+          class:list={[
+            'rounded-card mt-5 p-3 text-sm',
+            failed ? 'admin-tone-negative' : 'admin-card text-fg-muted',
+          ]}
+        >
+          {ADMIN_CATEGORY_MESSAGES[message]}
+        </p>
+      )
+    }
+
+    {
+      categories.length > 0 && (
+        <ul class="mt-6 space-y-3">
+          {categories.map((category) => (
+            <li
+              class:list={[
+                'admin-card p-5',
+                !category.isActive && 'opacity-70',
+                rowFailed(category.id) && 'border-danger',
+              ]}
+            >
+              {/* `data-form` is a name for this form that survives the swap, so
+                  the script can hand the keyboard back to the button that was
+                  pressed. Anything unique will do; this reads as what it is. */}
+              <form method="post" action={SELF} data-form={`category:${category.id}`}>
+                <input type="hidden" name="intent" value="category_save" />
+                <input type="hidden" name="categoryId" value={category.id} />
+
+                <div class="flex flex-wrap gap-3">
+                  <div class="w-full sm:w-56">
+                    <label for={`title-${category.id}`} class="text-fg-subtle text-xs">
+                      Назва
+                    </label>
+                    <input
+                      id={`title-${category.id}`}
+                      name="title"
+                      type="text"
+                      value={redraw(rowFailed(category.id), 'title', category.title)}
+                      maxlength={200}
+                      autocomplete="off"
+                      class:list={[
+                        'admin-field mt-1',
+                        rowFailed(category.id) && invalid.has('title') && 'border-danger',
+                      ]}
+                    />
+                  </div>
+
+                  <div class="w-full sm:w-56">
+                    <label for={`slug-${category.id}`} class="text-fg-subtle text-xs">
+                      Адреса
+                    </label>
+                    <input
+                      id={`slug-${category.id}`}
+                      name="slug"
+                      type="text"
+                      value={redraw(rowFailed(category.id), 'slug', category.slug)}
+                      maxlength={60}
+                      autocomplete="off"
+                      spellcheck="false"
+                      class:list={[
+                        'admin-field mt-1 font-mono',
+                        rowFailed(category.id) && invalid.has('slug') && 'border-danger',
+                      ]}
+                    />
+                  </div>
+
+                  <div class="w-full sm:w-24">
+                    <label for={`position-${category.id}`} class="text-fg-subtle text-xs">
+                      Порядок
+                    </label>
+                    <input
+                      id={`position-${category.id}`}
+                      name="position"
+                      type="text"
+                      inputmode="numeric"
+                      value={redraw(rowFailed(category.id), 'position', category.position)}
+                      autocomplete="off"
+                      class:list={[
+                        'admin-field mt-1',
+                        rowFailed(category.id) && invalid.has('position') && 'border-danger',
+                      ]}
+                    />
+                  </div>
+                </div>
+
+                <div class="mt-3">
+                  <label for={`description-${category.id}`} class="text-fg-subtle text-xs">
+                    Опис
+                  </label>
+                  <textarea
+                    id={`description-${category.id}`}
+                    name="description"
+                    rows="2"
+                    maxlength={4000}
+                    class="admin-field admin-textarea mt-1"
+                    set:text={redraw(rowFailed(category.id), 'description', category.description)}
+                  />
+                </div>
+
+                {rowFailed(category.id) && invalid.size > 0 && (
+                  <ul class="text-danger mt-2 space-y-0.5 text-xs">
+                    {[...invalid].map((field) => (
+                      <li>{ADMIN_CATALOG_ERRORS[field]}</li>
+                    ))}
+                  </ul>
+                )}
+
+                <div class="mt-4 flex flex-wrap items-center gap-4">
+                  <button type="submit" class="admin-btn admin-btn-secondary">Зберегти</button>
+
+                  <label class="flex items-center gap-2.5 text-sm">
+                    <input
+                      type="checkbox"
+                      name="isActive"
+                      checked={
+                        rowFailed(category.id) ? body.isActive === 'on' : category.isActive
+                      }
+                      class="size-4"
+                    />
+                    <span class="text-fg-muted">Показувати в каталозі</span>
+                  </label>
+
+                  <span class="text-fg-subtle text-xs">
+                    {category.productCount}{' '}
+                    {pluralUk(category.productCount, {
+                      one: 'товар',
+                      few: 'товари',
+                      many: 'товарів',
+                    })}
+                    {category.productCount > 0 && (
+                      <>
+                        {' · '}
+                        <a
+                          href={`/products?category=${category.id}`}
+                          class="underline underline-offset-2"
+                        >
+                          показати
+                        </a>
+                      </>
+                    )}
+                  </span>
+                </div>
+              </form>
+            </li>
+          ))}
+        </ul>
+      )
+    }
+
+    <section class="admin-card mt-6 p-5">
+      <h2 class="text-fg text-base font-semibold">Нова категорія</h2>
+
+      <form
+        method="post"
+        action={SELF}
+        id="new-category-form"
+        data-form="category-new"
+        class="mt-4"
+      >
+        <input type="hidden" name="intent" value="category_create" />
+
+        <div class="flex flex-wrap gap-3">
+          <div class="w-full sm:w-56">
+            <label for="new-title" class="text-fg-subtle text-xs">Назва</label>
+            <input
+              id="new-title"
+              name="title"
+              type="text"
+              value={redraw(creating, 'title', '')}
+              maxlength={200}
+              autocomplete="off"
+              class:list={['admin-field mt-1', creating && invalid.has('title') && 'border-danger']}
+            />
+          </div>
+
+          <div class="w-full sm:w-56">
+            <label for="new-slug" class="text-fg-subtle text-xs">Адреса</label>
+            <input
+              id="new-slug"
+              name="slug"
+              type="text"
+              value={redraw(creating, 'slug', '')}
+              maxlength={60}
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="sumky"
+              class:list={[
+                'admin-field mt-1 font-mono',
+                creating && invalid.has('slug') && 'border-danger',
+              ]}
+            />
+          </div>
+
+          <div class="w-full sm:w-24">
+            <label for="new-position" class="text-fg-subtle text-xs">Порядок</label>
+            <input
+              id="new-position"
+              name="position"
+              type="text"
+              inputmode="numeric"
+              value={redraw(creating, 'position', String(categories.length))}
+              autocomplete="off"
+              class="admin-field mt-1"
+            />
+          </div>
+        </div>
+
+        <p class="text-fg-subtle mt-1 text-xs">
+          Адресу можна лишити порожньою — вона складеться з назви.
+        </p>
+
+        <div class="mt-3">
+          <label for="new-description" class="text-fg-subtle text-xs">Опис</label>
+          <textarea
+            id="new-description"
+            name="description"
+            rows="2"
+            maxlength={4000}
+            class="admin-field admin-textarea mt-1"
+            set:text={redraw(creating, 'description', '')}
+          />
+        </div>
+
+        <div class="mt-4 flex flex-wrap items-center gap-4">
+          <button type="submit" class="admin-btn admin-btn-primary">Створити</button>
+          <label class="flex items-center gap-2.5 text-sm">
+            <input
+              type="checkbox"
+              name="isActive"
+              checked={creating ? body.isActive === 'on' : true}
+              class="size-4"
+            />
+            <span class="text-fg-muted">Показувати в каталозі</span>
+          </label>
+        </div>
+      </form>
+    </section>
+  </div>
+
+  {/*
+    Empty until script has something to put in it, and hidden the rest of the
+    time by having nothing to lay out. Styled in `admin.css`; the message it
+    receives is the one rendered above, moved rather than rebuilt.
+  */}
+  <div id="category-toast" class="admin-toast-host" aria-live="polite" aria-atomic="true"></div>
+
+  <script>
+    import { enhanceAdminForms } from '@balier/lib/admin/forms';
+    /* Enhancement only — the server fills an empty slug from the title with the
+       same function. See `/products/new` for the reasoning. */
+    import { slugify } from '@balier/lib/products/slug';
+
+    const editor = document.getElementById('categories-editor');
+    const toastHost = document.getElementById('category-toast');
+
+    if (editor && toastHost) {
+      /** Whether the address was typed by hand, and so must not be overwritten. */
+      let manual = false;
+      readManual();
+
+      /* Delegated, because every save replaces the editor's contents: a listener
+         bound to the field itself would be holding a detached node one click
+         later. */
+      editor.addEventListener('input', (event) => {
+        const target = event.target;
+        if (!(target instanceof HTMLInputElement)) return;
+
+        if (target.id === 'new-slug') {
+          manual = target.value.trim() !== '';
+          return;
+        }
+
+        if (target.id !== 'new-title' || manual) return;
+        const slugField = document.getElementById('new-slug');
+        if (slugField instanceof HTMLInputElement) slugField.value = slugify(target.value);
+      });
+
+      enhanceAdminForms({
+        root: editor,
+        toastHost,
+        messageId: 'category-message',
+        /* A created category comes back as an empty «Нова категорія» form, and a
+           refused one comes back with what was typed. Either way the flag has to
+           be read off the field the server just rendered rather than remembered
+           from the field that has been replaced. */
+        onRender: readManual,
+      });
+
+      /** The flag, as the currently rendered field answers it. */
+      function readManual() {
+        const slugField = document.getElementById('new-slug');
+        manual = slugField instanceof HTMLInputElement && slugField.value.trim() !== '';
+      }
+    }
+  </script>
+</AdminLayout>

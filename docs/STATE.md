@@ -4,22 +4,25 @@
 
 ## 📍 CURRENT STATE (overwrite this block; keep tight)
 
-- **Last done:** **order confirmation emails deliver now** (2026-08-06). The request was «build
-  email notifications» — exploration showed all four paths were already built and tested in Phase 3
-  (COD → email at creation in `create.ts`; card → email on the webhook's `paid` transition + cron
-  fallback; admin `/admin/orders/new` goes through the same `createOrder`; no email → silent skip).
-  The only thing missing was operational: the six Email Sending DNS records for `mail.mlosko.dev`.
-  They were added via the dashboard's auto-onboard, all six confirmed resolving on 1.1.1.1, a
-  `wrangler email sending send` smoke test reported **Delivered**, and a real COD order
-  (`B260806-A9AYA`, with an email address) was placed through the deployed `/api/checkout` to fire
-  the real path. Zero code changed. Categories-fix and image-session details are in the log below.
-- **In progress:** nothing. All of the above is **uncommitted** — see «Active branch».
-- **Next step:** finish the **browser pass** this session started. `/admin/products` and its editor
-  have been driven for real; `/admin/categories` has now been rewritten but *not* driven, and
-  `/admin/settings` is still a screen nobody has ever looked at — both need a real browser, and the
-  upload bug is the standing evidence for what that distinction is worth. `/admin/settings` is also
-  the last screen still on the reload-and-scroll-to-top path the new convention forbids. Then
-  commit + deploy, then Phase 5.
+- **Last done:** **the repo is a pnpm workspace and the admin panel is its own Worker**
+  (2026-08-06). Four packages: `apps/site` (storefront, Worker `balier-dev`, `balier.mlosko.dev`),
+  `apps/admin` (panel, **new Worker `balier-admin-dev`**, **`admin.balier.mlosko.dev`**, admin URLs
+  lost the `/admin` prefix — it is `/orders`, `/products`, `/login` at the root of that host),
+  `packages/lib` (`@balier/lib`, all of old `src/lib` + `stores/cart.ts` as TS source, all 221
+  tests), `workers/cron` (`@balier/cron`, unchanged Worker name). Both apps are **deployed and
+  verified over HTTPS**: gate → login → deep-link `next` chain, media on both origins, panel
+  screens 200 with a session, storefront APIs and `/admin/**` → 301 to the admin host. Card
+  invoices minted in the panel point webhook + redirect at the **site** origin via the new
+  `SITE_ORIGIN` var — `/orders/new` no longer derives it from its own request URL.
+- **In progress:** nothing. Everything is merged to `main`.
+- **Next step:** **the Workers Builds dashboard configs — before the next push to `main`** (the
+  push-to-deploy pipeline still runs the old root build and will fail until then, fail-safe):
+  update `balier-dev`'s build to `pnpm install --frozen-lockfile && pnpm --filter @balier/site run
+  build` with deploy `npx wrangler deploy -c apps/site/wrangler.jsonc` (or root dir `apps/site`),
+  and create the analogous second config for `balier-admin-dev`. Then the standing **browser
+  pass**: `/categories` (rewritten, never driven) and `/settings` (never looked at) — both now on
+  `admin.balier.mlosko.dev` — plus the panel flows curl cannot drive (image upload preview,
+  `/orders/new` card order confirming the Monobank invoice's URLs). Then Phase 5.
 - **Rules that bind any future panel screen** (now written up in `docs/CONVENTIONS.md` → «Admin
   panel»: the `admin.css` utilities, `src/components/admin/`, and the no-reload/toast contract):
   - **A schema is only verified against the body the form actually sends.** `curl -F` composes a
@@ -32,9 +35,13 @@
     the plain-PRG end of that; `/admin/orders/new` takes the reload-free end. Requiring script is
     not legitimate. (`docs/CONVENTIONS.md` may still word the old rule.)
 - **Still worth carrying:**
-  - **`pnpm dev` writes to the real R2 bucket now** — `wrangler.jsonc`'s MEDIA binding carries
-    `"remote": true` (2026-08-06). Before that, dev bound MEDIA to Miniflare's simulated bucket
-    under `.wrangler/state/v3/r2/`, so a photo uploaded through the panel was written to disk while
+  - **Admin sessions did not survive the split** — `balier-admin-dev` got a **fresh
+    `ADMIN_SESSION_SECRET`** at deploy (the `__Host-` cookie could not cross hostnames anyway).
+    Log in again on `admin.balier.mlosko.dev`. The old secret is still set on `balier-dev` where
+    nothing reads it now — cleanup item below.
+  - **Dev writes to the real R2 bucket** — both apps' MEDIA bindings carry `"remote": true`
+    (2026-08-06). Before that, dev bound MEDIA to Miniflare's simulated bucket under
+    `.wrangler/state/v3/r2/`, so a photo uploaded through the panel was written to disk while
     its `product_images` row went to the *real* Neon database — local R2 against remote Postgres is
     the one combination that produces broken data rather than a broken screen. Two consequences:
     dev needs Cloudflare auth to read or serve media at all, and an upload made while testing is a
@@ -64,23 +71,20 @@
   - Phase 0 externals unchanged: Monobank Acquiring registration, Nova Poshta business account +
     cash-on-delivery setup, Telegram manager account / bot / chat.
   - `PUBLIC_TELEGRAM_MANAGER` in `wrangler.jsonc` is a **placeholder handle**.
-  - Small cleanup: `wrangler secret delete CF_ACCESS_TEAM_DOMAIN` / `CF_ACCESS_AUD` — both are still
-    set on the Worker and read by nothing since the auth switch.
+  - Small cleanup on `balier-dev` (run from `apps/site`): `wrangler secret delete
+    CF_ACCESS_TEAM_DOMAIN` / `CF_ACCESS_AUD` (dead since the auth switch), and now also
+    `ADMIN_SESSION_SECRET` / `NOVAPOSHTA_API_KEY` (moved to the admin and cron Workers
+    respectively — nothing on the site Worker reads either).
   - Dormant, not resolved: the Turnstile widget (`0x4AAAAAAEF8vF0-cXNWdOOY`) was created when
     `localhost` and the `workers.dev` URL were the only allowed hosts, so its hostname allowlist may
     not include `balier.mlosko.dev`. Never tested either way; it matters again the moment Turnstile
     is uncommented.
-- **Active branch:** `main` (only branch; tracks `origin/main`), clean up to `c6608d4` and level
-  with `origin/main`. **Phase 4 is deployed** — `wrangler deployments list` shows the live version
-  created 2026-08-05T19:10:58Z, one minute after `c6608d4`, so the whole panel (order creation,
-  settings, the catalog screens, migration `0005`) is on `balier.mlosko.dev`. Earlier copies of this
-  block said none of it was pushed; that was stale, and the deploy was verified rather than assumed.
-  **Uncommitted right now: this session's image work and the categories fix** — `catalog.ts`,
-  `media/index.ts`, `media/upload.ts`, `i18n/admin.ts`, `products/[id].astro`, `categories.astro`,
-  the new `lib/admin/forms.ts`, `wrangler.jsonc`, `docs/CONVENTIONS.md`, and three test files.
-  A push to `main` deploys (Workers Builds on `mykhailoshulezhko/balier`, production branch `main`,
-  `pnpm run build` → `npx wrangler deploy`) and it is **not instant** — `npx wrangler deployments
-  list` shows when a version actually landed.
+- **Active branch:** `main`, clean, with the `workspace-split` branch merged in. (The previous
+  block's «uncommitted image work» was stale — all of it was committed and deployed as
+  `5a8bfae`…`04adb85` before this session started; verified against `wrangler deployments list`,
+  the deploy landed one minute after `04adb85`.) **A push to `main` currently deploys nothing but
+  a failed build** — Workers Builds still runs the old root `pnpm run build`; see «Next step».
+  Both Workers were deployed manually from the merge commit and verified.
 - **Dev DB state (real rows, harmless, deliberately not cleaned up):** ten orders. From the Phase 3
   and admin passes: `B260805-XVFYQ` (COD, placed by curl with no captcha token — the proof Turnstile
   is off), `B260804-6DN8Q` (card, paid through the real webhook), `B260804-BYP3K` / `B260804-S86Y7`
@@ -117,9 +121,9 @@
       pass remains)
 - [x] Phase 4 — Admin panel (its own login form — PBKDF2 + signed session cookie, fail-closed,
       verified on the deployed Worker; orders list, detail, transitions, TTN and manual order
-      creation; `/admin/settings` for the COD limit; and the catalog — `/admin/products`, its
-      editor, `/admin/categories` and image upload. **Nothing in the phase is deployed yet** — see
-      «Active branch»)
+      creation; `/settings` for the COD limit; and the catalog — `/products`, its editor,
+      `/categories` and image upload. Deployed; since the split the whole phase lives on
+      `admin.balier.mlosko.dev`)
 - [ ] Phase 5 — Launch (incl. migrating off the dev Neon/Cloudflare accounts)
 - [ ] Phase 6 — Improvements
 
@@ -130,6 +134,19 @@
 > Empty by design. Everything through the end of Phase 4 was moved to **`docs/history.md`** on
 > 2026-08-05, not rewritten — this file is read in full at every session start and had reached
 > 852 lines. New session entries go here; move a phase's entries across once the phase is done.
+
+**2026-08-06 (workspace split).** Asked whether the site and the panel could be two Workers —
+planned and built the full split in one session. pnpm workspace: `@balier/lib` (old `src/lib`
+verbatim + `stores/cart.ts` + the extracted `media/serve.ts`; internal imports made relative, all
+221 tests moved with it), `@balier/site`, `@balier/admin`, `@balier/cron`. Panel serves root paths
+on `admin.balier.mlosko.dev` (`safeNext` reduced to "any local path", gate inverted to
+allowlist `/login`, `/logout`, `/media/**`), site keeps a 301 `/admin/**` → admin host. New
+`SITE_ORIGIN` var: panel-minted Monobank invoices point webhook/redirect at the storefront.
+Secrets split per Worker (`balier-admin-dev` got a fresh session secret); `.dev.vars` split
+four ways; lib types via `workers-types/experimental` aliases so its DOM-side modules coexist.
+Both Workers deployed and verified over HTTPS; Workers Builds dashboard configs are the one
+thing code cannot fix — see «Next step». CLAUDE.md command block updated (no root `deploy`
+script — pnpm builtin shadows it; `deploy:site` / `deploy:admin`).
 
 **2026-08-06 (email DNS session).** Asked to «build order confirmation emails» — they were already
 built (Phase 3: `notify/email.ts` routes COD→`orderCreated`, card→`orderPaid`; checkout, webhook,

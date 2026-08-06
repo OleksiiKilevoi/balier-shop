@@ -1,0 +1,225 @@
+---
+import { env } from 'cloudflare:workers';
+import AdminLayout from '~/layouts/AdminLayout.astro';
+import {
+  SESSION_COOKIE,
+  equalizeVerifyTiming,
+  needsRehash,
+  hashPassword,
+  sessionCookieOptions,
+  signSession,
+  verifyPassword,
+  verifySession,
+} from '@balier/lib/auth';
+import { createDb } from '@balier/lib/db';
+import {
+  findActiveAdminByEmail,
+  recordAdminLogin,
+  updateAdminPasswordHash,
+} from '@balier/lib/db/queries/adminUsers';
+import { ADMIN_AUTH_MESSAGES, type AdminAuthMessage } from '@balier/lib/i18n/admin';
+import { peekRateLimit, recordRateLimitHit } from '@balier/lib/rateLimit';
+import { adminLoginSchema, PASSWORD_MAX_LENGTH } from '@balier/lib/validation/admin';
+
+/**
+ * The panel's front door — one of the two routes the gate lets through
+ * unauthenticated (`src/middleware.ts`), because a form nobody can reach cannot
+ * hand out the session everything else requires.
+ *
+ * Same shape as the rest of the panel: a plain form posting to itself, no
+ * script, and a 303 on success so a refresh after signing in re-reads the page
+ * it landed on instead of re-posting a password.
+ */
+export const prerender = false;
+
+/**
+ * Per-IP, and the reason it lives here rather than in the middleware's own
+ * table: hitting the limit should answer with this form and an explanation, not
+ * a bare 429 in front of somebody who mistyped their own password.
+ *
+ * **Only wrong passwords are counted.** A successful sign-in spends nothing, so
+ * the budget is entirely the guesser's to burn and an operator can never lock
+ * themselves out by logging in — which is why the check and the increment are
+ * two calls (`peekRateLimit` / `recordRateLimitHit`) rather than one.
+ *
+ * Sized to be invisible to a person having a bad morning and pointless for a
+ * guesser: forty wrong answers an hour will not find a real password.
+ */
+const LOGIN_LIMIT = 10;
+const LOGIN_WINDOW_SECONDS = 900;
+
+/** Never cache a page that is either a login form or a fresh `Set-Cookie`. */
+Astro.response.headers.set('cache-control', 'no-store');
+
+/**
+ * Where to go after signing in. Anything that is not a path inside the panel is
+ * discarded rather than followed: `next` arrives in a URL, so an unchecked
+ * value here is an open redirect — a link to our own login page that lands the
+ * operator, freshly authenticated, on someone else's.
+ */
+function safeNext(value: string | null): string {
+  if (!value) return '/';
+
+  // Every path on this hostname is inside the panel now, so "a local path" is
+  // the whole test: one leading `/`, not two — `//host` and `/\host` are
+  // protocol-relative URLs to another host rather than local paths at all.
+  if (!value.startsWith('/') || value.startsWith('//') || value.startsWith('/\\')) return '/';
+
+  return value;
+}
+
+const next = safeNext(Astro.url.searchParams.get('next'));
+
+// Already signed in? Then this page is a dead end — send them where they were
+// going. The gate cannot do this for us: it lets this route through untouched.
+const existing = await verifySession(
+  env.ADMIN_SESSION_SECRET,
+  Astro.cookies.get(SESSION_COOKIE)?.value,
+);
+if (existing && Astro.request.method === 'GET') return Astro.redirect(next, 303);
+
+const queryMessage = Astro.url.searchParams.get('message');
+let message: AdminAuthMessage | null =
+  queryMessage && queryMessage in ADMIN_AUTH_MESSAGES ? (queryMessage as AdminAuthMessage) : null;
+
+/** Kept across a failed POST so only the password has to be retyped. */
+let email = '';
+
+/** Minutes left on the lockout, so the message can name a number. */
+let retryAfterMinutes = 0;
+
+if (Astro.request.method === 'POST') {
+  message = null;
+
+  const budgetKey = `admin-login:${Astro.request.headers.get('cf-connecting-ip') ?? 'unknown'}`;
+  const limit = await peekRateLimit(env.RATE_LIMIT, budgetKey, LOGIN_LIMIT, LOGIN_WINDOW_SECONDS);
+
+  /** A wrong answer, and the only thing that costs budget. */
+  const reject = async (reason: AdminAuthMessage) => {
+    await recordRateLimitHit(env.RATE_LIMIT, budgetKey, LOGIN_WINDOW_SECONDS);
+    message = reason;
+  };
+
+  if (!limit.allowed) {
+    message = 'too_many_attempts';
+    retryAfterMinutes = Math.max(1, Math.ceil(limit.retryAfterSeconds / 60));
+  } else {
+    const form = await Astro.request.formData();
+    const parsed = adminLoginSchema.safeParse({
+      email: form.get('email'),
+      password: form.get('password'),
+    });
+
+    if (!parsed.success) {
+      await reject('invalid_credentials');
+    } else {
+      email = parsed.data.email;
+
+      const db = createDb(env.DATABASE_URL);
+      const user = await findActiveAdminByEmail(db, parsed.data.email);
+
+      if (!user) {
+        // Burn the same CPU a real verification would, so "no such admin" and
+        // "wrong password" take the same time to say no. Without it the form
+        // is a way to enumerate who the admins are.
+        await equalizeVerifyTiming(parsed.data.password);
+        await reject('invalid_credentials');
+      } else if (!(await verifyPassword(parsed.data.password, user.passwordHash))) {
+        await reject('invalid_credentials');
+      } else {
+        const token = await signSession(env.ADMIN_SESSION_SECRET, {
+          sub: user.id,
+          email: user.email,
+        });
+
+        if (!token) {
+          // The secret is missing. Say so plainly rather than «невірний
+          // пароль» — the password was right, and sending the operator to
+          // retype it would waste an afternoon.
+          message = 'unavailable';
+        } else {
+          Astro.cookies.set(SESSION_COOKIE, token, sessionCookieOptions());
+
+          // Neither of these may delay the redirect or fail it: the login has
+          // already succeeded, and a bookkeeping write is not a reason to
+          // refuse someone their session.
+          const after = (async () => {
+            await recordAdminLogin(db, user.id).catch(() => {});
+            // The one moment the plaintext exists to re-derive from, so a hash
+            // written at a lower cost is quietly brought up to the current one.
+            if (needsRehash(user.passwordHash)) {
+              await hashPassword(parsed.data.password)
+                .then((fresh) => updateAdminPasswordHash(db, user.id, fresh))
+                .catch(() => {});
+            }
+          })();
+          Astro.locals.cfContext?.waitUntil?.(after);
+
+          return Astro.redirect(next, 303);
+        }
+      }
+    }
+  }
+}
+---
+
+<AdminLayout title="Вхід" bare>
+  <div class="mx-auto w-full max-w-sm py-8 sm:py-16">
+    <h1 class="text-fg text-center text-2xl font-semibold">Вхід до панелі</h1>
+    <p class="text-fg-muted mt-2 text-center text-sm">
+      Введіть пошту й пароль адміністратора.
+    </p>
+
+    {
+      message && (
+        <p
+          class:list={[
+            'admin-card mt-6 px-4 py-3 text-sm',
+            message === 'signed_out' ? 'admin-tone-neutral' : 'admin-tone-negative',
+          ]}
+          role={message === 'signed_out' ? undefined : 'alert'}
+        >
+          {ADMIN_AUTH_MESSAGES[message]}
+          {/* "A few minutes" is not information when the window is fifteen of
+              them — say the number, so the wait is a known one. */}
+          {retryAfterMinutes > 0 && ` Спробуйте за ${retryAfterMinutes} хв.`}
+        </p>
+      )
+    }
+
+    {/* No `action`: posting to the current URL keeps `?next=` attached without a
+        hidden field carrying it through the page a second time. */}
+    <form method="post" class="mt-6 space-y-4">
+      <div>
+        <label for="login-email" class="text-fg mb-1.5 block text-sm font-medium">Пошта</label>
+        <input
+          id="login-email"
+          name="email"
+          type="email"
+          value={email}
+          required
+          autocomplete="username"
+          autocapitalize="none"
+          spellcheck="false"
+          maxlength={320}
+          class="admin-field"
+        />
+      </div>
+
+      <div>
+        <label for="login-password" class="text-fg mb-1.5 block text-sm font-medium">Пароль</label>
+        <input
+          id="login-password"
+          name="password"
+          type="password"
+          required
+          autocomplete="current-password"
+          maxlength={PASSWORD_MAX_LENGTH}
+          class="admin-field"
+        />
+      </div>
+
+      <button type="submit" class="admin-btn admin-btn-primary w-full">Увійти</button>
+    </form>
+  </div>
+</AdminLayout>

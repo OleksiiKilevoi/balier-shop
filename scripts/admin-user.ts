@@ -4,8 +4,8 @@ import { config as loadEnv } from 'dotenv';
 import { neon } from '@neondatabase/serverless';
 import { drizzle } from 'drizzle-orm/neon-http';
 import { eq } from 'drizzle-orm';
-import * as schema from '../src/lib/db/schema';
-import { hashPassword, normalizeEmail } from '../src/lib/auth/password';
+import * as schema from '@balier/lib/db/schema';
+import { hashPassword, normalizeEmail } from '@balier/lib/auth/password';
 
 /**
  * Create an admin, reset an admin's password, or switch one off.

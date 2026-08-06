@@ -1,0 +1,52 @@
+---
+import AdminLayout from '~/layouts/AdminLayout.astro';
+
+/**
+ * Home of the panel. Orders and settings are built; products and images are the
+ * remaining Phase 4 items.
+ */
+export const prerender = false;
+
+const admin = Astro.locals.admin;
+
+/** Each becomes a card as it lands; `href: null` is "not built yet". */
+const SECTIONS: { label: string; hint: string; href: string | null }[] = [
+  { label: 'Замовлення', hint: 'Статуси, накладні, пошук', href: '/orders' },
+  { label: 'Товари', hint: 'Каталог, варіанти, фото', href: '/products' },
+  { label: 'Налаштування', hint: 'Ліміт післяплати', href: '/settings' },
+];
+---
+
+<AdminLayout title="Панель">
+  <h1 class="text-fg text-2xl font-semibold sm:text-3xl">Панель керування</h1>
+
+  <p class="text-fg-muted mt-2 text-sm">
+    Ви увійшли як <strong class="text-fg font-medium">{admin?.email}</strong>.
+  </p>
+
+  <ul class="mt-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+    {
+      SECTIONS.map((section) => (
+        <li>
+          {section.href ? (
+            <a
+              href={section.href}
+              class="admin-card hover:border-border-strong hover:bg-surface-hover block h-full p-5 transition-colors"
+            >
+              <span class="text-fg font-medium">{section.label}</span>
+              <span class="text-fg-muted mt-1 block text-sm">{section.hint}</span>
+            </a>
+          ) : (
+            /* Rendered rather than hidden: the panel says what it will hold, so
+               a section that is missing reads as "not yet" instead of "lost". */
+            <div class="admin-card h-full border-dashed p-5">
+              <span class="text-fg-subtle font-medium">{section.label}</span>
+              <span class="text-fg-subtle mt-1 block text-sm">{section.hint}</span>
+              <span class="admin-badge admin-tone-neutral mt-3">Скоро</span>
+            </div>
+          )}
+        </li>
+      ))
+    }
+  </ul>
+</AdminLayout>

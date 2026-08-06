@@ -1,0 +1,58 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  // The admin panel's own Worker — split out of the app Worker so the store's
+  // public origin carries no admin surface at all. Like `balier-dev`, the name
+  // is dev-scoped: Phase 5 stands the panel up again on the client's account
+  // and that Worker gets its own name.
+  "name": "balier-admin-dev",
+  // Custom domain on the same `mlosko.dev` zone as the storefront. Cloudflare
+  // creates the DNS record and certificate itself once the zone is Active.
+  "routes": [{ "pattern": "admin.balier.mlosko.dev", "custom_domain": true }],
+  // One hostname on purpose, same reasoning as the site Worker: a
+  // `workers.dev` URL would be a second public surface. The in-app session
+  // gate (`src/middleware.ts`) holds anywhere the Worker is reachable anyway.
+  "workers_dev": false,
+  "compatibility_date": "2026-07-30",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true
+  },
+  // Reads image dimensions in the upload pipeline (`@balier/lib/media`).
+  "images": {
+    "binding": "IMAGES"
+  },
+  // Same bucket as the storefront: the panel uploads what the store serves.
+  // `remote: true` is local-development only and points `pnpm dev:admin` at the
+  // real bucket — the full story of why (and the cost: dev uploads are real
+  // writes) is in `apps/site/wrangler.jsonc` on its MEDIA binding.
+  "r2_buckets": [
+    {
+      "binding": "MEDIA",
+      "bucket_name": "balier-media",
+      "remote": true
+    }
+  ],
+  // `/orders/new` sends the same order-confirmation email as checkout.
+  "send_email": [{ "name": "EMAIL" }],
+  // Same KV namespace as the storefront, shared deliberately: the login form's
+  // brute-force budget (`src/pages/login.astro`) keeps counting in one place.
+  "kv_namespaces": [{ "binding": "RATE_LIMIT", "id": "8ef01313c48a4dcea67fc75f2b50129f" }],
+  // Secrets are NOT set here. Locally they live in `.dev.vars`; in production
+  // they are set with `wrangler secret put <NAME>` from this directory.
+  //   DATABASE_URL, ADMIN_SESSION_SECRET, MONOBANK_TOKEN,
+  //   TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+  //
+  // ADMIN_SESSION_SECRET signs the session cookie and so gates every route
+  // (`src/middleware.ts`). It IS a credential: anyone holding it can mint a
+  // session for any admin. While it is unset, every request is turned away,
+  // which is the intended failure direction. Rotating it signs everyone out.
+  "vars": {
+    // Where the *storefront* lives. `/orders/new` mints Monobank invoices, and
+    // both the webhook and the customer's success/failure redirect must land on
+    // that origin, never this one. `.dev.vars` overrides it for local dev.
+    "SITE_ORIGIN": "https://balier.mlosko.dev",
+    // `from` address for order-confirmation emails, same value as the site
+    // Worker's — the customer cannot tell which Worker created their order.
+    "ORDER_EMAIL_FROM": "noreply@mail.mlosko.dev"
+  }
+}
