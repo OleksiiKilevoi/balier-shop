@@ -3,21 +3,43 @@
 // To restore, uncomment every block marked `Turnstile:` in this file, plus
 // `turnstileToken` in `src/lib/validation/checkout.ts` and the captcha check
 // in `src/pages/api/checkout.ts`. `src/lib/turnstile/` is untouched.
-// Turnstile: import { env } from 'cloudflare:workers';
+// Turnstile: (this import is no longer commented out — the settlement
+// suggestions below need `env` too, so restoring Turnstile only has to add
+// `PUBLIC_TURNSTILE_SITE_KEY` back, not the import.)
+import { env } from 'cloudflare:workers';
 import BaseLayout from '~/layouts/BaseLayout.astro';
 import Container from '~/components/Container.astro';
 import Breadcrumbs from '~/components/Breadcrumbs.astro';
 import Button from '~/components/Button.astro';
-import {
-  MAX_ADDRESS_LENGTH,
-  MAX_COMMENT_LENGTH,
-  MAX_CUSTOMER_NAME,
-  MIN_ADDRESS_LENGTH,
-} from '@balier/lib/validation/checkout';
+import { visitorCity } from '~/lib/geo';
+import { createDb } from '@balier/lib/db';
+import { settlementSuggestions } from '@balier/lib/db/queries/novaposhta';
+import { settlementLabel } from '@balier/lib/i18n/checkout';
+import { MAX_COMMENT_LENGTH, MAX_CUSTOMER_NAME } from '@balier/lib/validation/checkout';
 
 export const prerender = false;
 
 // Turnstile: const turnstileSiteKey = env.PUBLIC_TURNSTILE_SITE_KEY;
+
+/**
+ * The one-tap chips under the settlement input. Rendered server-side rather
+ * than fetched: they are the same for nearly everyone, they must be on screen
+ * before the customer touches the field to be worth anything, and the geo one
+ * needs the request that only exists here.
+ *
+ * A failure here must not take the checkout page down — an empty chip row is a
+ * missing convenience, while an unreachable database on this page is a lost
+ * order. Everything the form actually needs is loaded client-side.
+ */
+let suggestions: Awaited<ReturnType<typeof settlementSuggestions>> = [];
+try {
+  suggestions = await settlementSuggestions(
+    createDb(env.DATABASE_URL),
+    visitorCity(Astro.request),
+  );
+} catch (error) {
+  console.error('Settlement suggestions unavailable:', error);
+}
 
 const inputClass =
   'border-line-strong bg-paper-raised text-ink placeholder:text-ink-muted rounded-btn h-touch w-full min-w-0 appearance-none border px-4 text-base sm:h-11 sm:text-sm';
@@ -124,10 +146,6 @@ const phoneInputClass = inputClass.replace('px-4', 'pl-16 pr-4');
                   <input type="radio" name="deliveryMethod" value="np_postomat" data-delivery-method />
                   Поштомат
                 </label>
-                <label class="border-line-strong has-checked:border-brand has-checked:bg-brand/5 rounded-btn flex min-h-touch flex-1 cursor-pointer items-center gap-2 border px-4 text-sm">
-                  <input type="radio" name="deliveryMethod" value="np_courier" data-delivery-method />
-                  Курʼєром
-                </label>
               </div>
 
               <div class="relative">
@@ -148,10 +166,56 @@ const phoneInputClass = inputClass.replace('px-4', 'pl-16 pr-4');
                   class="border-line bg-paper-raised rounded-card absolute inset-x-0 top-full z-10 mt-1 max-h-64 overflow-y-auto border shadow-lg"
                   hidden
                 ></ul>
+
+                {
+                  suggestions.length > 0 && (
+                    <div
+                      data-settlement-suggestions
+                      class="mt-2 flex flex-wrap gap-1.5"
+                      aria-label="Популярні міста"
+                    >
+                      {suggestions.map((suggestion) => (
+                        <button
+                          type="button"
+                          data-settlement-suggestion
+                          data-ref={suggestion.ref}
+                          data-name={suggestion.name}
+                          data-area={suggestion.area ?? ''}
+                          data-region={suggestion.region ?? ''}
+                          data-type={suggestion.type ?? ''}
+                          title={settlementLabel(suggestion)}
+                          class="border-line-strong bg-paper-raised text-ink-soft hover:border-brand hover:text-brand inline-flex cursor-pointer items-center gap-1 rounded-full border px-3 py-1.5 text-xs transition-colors"
+                        >
+                          {suggestion.fromLocation && (
+                            <svg
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              stroke-width="2"
+                              aria-hidden="true"
+                              class="size-3.5 shrink-0"
+                            >
+                              <path d="M12 21s-7-6.2-7-11a7 7 0 1 1 14 0c0 4.8-7 11-7 11Z" />
+                              <circle cx="12" cy="10" r="2.5" />
+                            </svg>
+                          )}
+                          {suggestion.name}
+                        </button>
+                      ))}
+                    </div>
+                  )
+                }
               </div>
 
-              <div data-warehouse-field hidden class="relative">
-                <label for="warehouseQuery" class="text-ink-soft mb-1.5 block text-sm">Відділення / поштомат</label>
+              <div data-warehouse-field class="relative">
+                {/* Both the label and the dropdown's accessible name follow the
+                    selected method — see `applyDeliveryMethod`. The markup
+                    carries the branch wording because that radio ships checked. */}
+                <label
+                  for="warehouseQuery"
+                  class="text-ink-soft mb-1.5 block text-sm"
+                  data-warehouse-label>Відділення</label
+                >
                 <input
                   id="warehouseQuery"
                   type="text"
@@ -169,19 +233,6 @@ const phoneInputClass = inputClass.replace('px-4', 'pl-16 pr-4');
                   class="border-line bg-paper-raised rounded-card absolute inset-x-0 top-full z-10 mt-1 max-h-64 overflow-y-auto border shadow-lg"
                   hidden
                 ></ul>
-              </div>
-
-              <div data-address-field hidden>
-                <label for="npAddress" class="text-ink-soft mb-1.5 block text-sm">Вулиця, будинок, квартира</label>
-                <input
-                  id="npAddress"
-                  name="npAddress"
-                  type="text"
-                  minlength={MIN_ADDRESS_LENGTH}
-                  maxlength={MAX_ADDRESS_LENGTH}
-                  class={inputClass}
-                  data-np-address
-                />
               </div>
 
               <p class="text-ink-muted text-xs">Вартість доставки оплачує отримувач за тарифами Нової Пошти.</p>
@@ -305,11 +356,10 @@ const phoneInputClass = inputClass.replace('px-4', 'pl-16 pr-4');
 
     const settlementQuery = form.querySelector<HTMLInputElement>('[data-settlement-query]');
     const settlementResults = form.querySelector<HTMLUListElement>('[data-settlement-results]');
-    const warehouseField = form.querySelector<HTMLElement>('[data-warehouse-field]');
+    const suggestionChips = form.querySelector<HTMLElement>('[data-settlement-suggestions]');
+    const warehouseLabel = form.querySelector<HTMLLabelElement>('[data-warehouse-label]');
     const warehouseQuery = form.querySelector<HTMLInputElement>('[data-warehouse-query]');
     const warehouseResultsList = form.querySelector<HTMLUListElement>('[data-warehouse-results]');
-    const addressField = form.querySelector<HTMLElement>('[data-address-field]');
-    const npAddress = form.querySelector<HTMLInputElement>('[data-np-address]');
     const codLabel = form.querySelector<HTMLElement>('[data-cod-label]');
     const codOverLimitNote = form.querySelector<HTMLElement>('[data-cod-over-limit]');
 
@@ -319,6 +369,55 @@ const phoneInputClass = inputClass.replace('px-4', 'pl-16 pr-4');
     let selectedWarehouse: WarehouseResult | null = null;
     let settlementSearchDebounce: number | undefined;
     let warehouseSearchDebounce: number | undefined;
+
+    /**
+     * Short, because the lookups behind it are edge-cached now and usually
+     * answer in a few milliseconds — the old 300 ms was sized for a query that
+     * always went to the database.
+     */
+    const SEARCH_DEBOUNCE_MS = 150;
+
+    /**
+     * At most one request in flight per picker. Without this the responses
+     * race: type «київ» quickly and the reply for «ки» can land *after* the one
+     * for «київ», leaving the dropdown showing results for a prefix the
+     * customer has already finished typing past.
+     */
+    const inFlight: { settlement?: AbortController; warehouse?: AbortController } = {};
+
+    /**
+     * Answers already received this session. Backspacing through a query walks
+     * back over prefixes we just asked about, and those cannot have changed
+     * while the customer was typing.
+     */
+    const lookupCache = new Map<string, unknown>();
+
+    /** Resolves to `null` whenever the result should not be painted. */
+    async function lookup<T>(picker: 'settlement' | 'warehouse', url: string): Promise<T | null> {
+      // Anything still in flight is answering a question the customer has
+      // already moved on from — including when this call is a cache hit.
+      inFlight[picker]?.abort();
+      inFlight[picker] = undefined;
+
+      const cached = lookupCache.get(url);
+      if (cached !== undefined) return cached as T;
+
+      const controller = new AbortController();
+      inFlight[picker] = controller;
+
+      try {
+        const response = await fetch(url, { signal: controller.signal });
+        if (!response.ok) return null;
+
+        const body = (await response.json()) as T;
+        lookupCache.set(url, body);
+        return body;
+      } catch {
+        // Aborted, offline, or malformed — leave the list as it is rather than
+        // blanking it. The customer can keep typing.
+        return null;
+      }
+    }
 
     const currentDeliveryMethod = () =>
       form.querySelector<HTMLInputElement>('[data-delivery-method]:checked')?.value ?? 'np_warehouse';
@@ -382,13 +481,22 @@ const phoneInputClass = inputClass.replace('px-4', 'pl-16 pr-4');
       }
     };
 
-    const updateDeliveryFieldVisibility = () => {
-      const method = currentDeliveryMethod();
-      const isCourier = method === 'np_courier';
-      if (warehouseField) warehouseField.hidden = isCourier;
-      if (warehouseQuery) warehouseQuery.required = !isCourier;
-      if (addressField) addressField.hidden = !isCourier;
-      if (npAddress) npAddress.required = isCourier;
+    /**
+     * A branch and a parcel locker are picked from the same field, so the only
+     * thing telling the customer which one they are about to choose is this
+     * label — «Відділення / поштомат» named both at once and neither in
+     * particular. The dropdown's accessible name follows it, since a screen
+     * reader gets no help from the visible label alone.
+     */
+    const applyDeliveryMethod = () => {
+      const isPostomat = currentDeliveryMethod() === 'np_postomat';
+      if (warehouseLabel) warehouseLabel.textContent = isPostomat ? 'Поштомат' : 'Відділення';
+      if (warehouseResultsList) {
+        warehouseResultsList.setAttribute(
+          'aria-label',
+          isPostomat ? 'Знайдені поштомати' : 'Знайдені відділення',
+        );
+      }
     };
 
     const clearWarehouses = () => {
@@ -439,15 +547,12 @@ const phoneInputClass = inputClass.replace('px-4', 'pl-16 pr-4');
 
       window.clearTimeout(warehouseSearchDebounce);
       warehouseSearchDebounce = window.setTimeout(async () => {
-        try {
-          const response = await fetch(
-            `/api/checkout/np-warehouses?settlementRef=${encodeURIComponent(selectedSettlement!.ref)}&kind=${method}&q=${encodeURIComponent(query)}`,
-          );
-          paintWarehouseResults((await response.json()) as WarehouseResult[]);
-        } catch {
-          // A failed lookup just leaves the list empty — the customer can retype.
-        }
-      }, 300);
+        const results = await lookup<WarehouseResult[]>(
+          'warehouse',
+          `/api/checkout/np-warehouses?settlementRef=${encodeURIComponent(selectedSettlement!.ref)}&kind=${method}&q=${encodeURIComponent(query)}`,
+        );
+        if (results) paintWarehouseResults(results);
+      }, SEARCH_DEBOUNCE_MS);
     };
 
     warehouseQuery?.addEventListener('focus', () => {
@@ -460,6 +565,35 @@ const phoneInputClass = inputClass.replace('px-4', 'pl-16 pr-4');
       loadWarehouses(warehouseQuery.value.trim());
     });
 
+    /**
+     * The one way a settlement gets chosen — by the dropdown and by the
+     * suggestion chips alike, so the two can never drift into settling
+     * different amounts of state.
+     */
+    const selectSettlement = (settlement: SettlementResult) => {
+      selectedSettlement = settlement;
+      if (settlementQuery) settlementQuery.value = settlementLabel(settlement);
+      if (settlementResults) settlementResults.hidden = true;
+      if (suggestionChips) suggestionChips.hidden = true;
+      clearWarehouses();
+    };
+
+    for (const chip of form.querySelectorAll<HTMLButtonElement>('[data-settlement-suggestion]')) {
+      chip.addEventListener('click', () => {
+        selectSettlement({
+          ref: chip.dataset.ref ?? '',
+          name: chip.dataset.name ?? '',
+          // Rendered as '' when the column is NULL; the label builder wants null.
+          area: chip.dataset.area || null,
+          region: chip.dataset.region || null,
+          type: chip.dataset.type || null,
+        });
+        // Straight on to the branch picker — choosing the city was the point
+        // of the chip, so making them tap the next field too would waste it.
+        warehouseQuery?.focus();
+      });
+    }
+
     const paintSettlementResults = (results: SettlementResult[]) => {
       if (!settlementResults) return;
       settlementResults.replaceChildren(
@@ -470,12 +604,7 @@ const phoneInputClass = inputClass.replace('px-4', 'pl-16 pr-4');
           button.type = 'button';
           button.className = 'hover:bg-tag w-full px-4 py-2.5 text-left text-sm';
           button.textContent = settlementLabel(settlement);
-          button.addEventListener('click', () => {
-            selectedSettlement = settlement;
-            if (settlementQuery) settlementQuery.value = settlementLabel(settlement);
-            settlementResults.hidden = true;
-            clearWarehouses();
-          });
+          button.addEventListener('click', () => selectSettlement(settlement));
           item.appendChild(button);
           return item;
         }),
@@ -488,23 +617,25 @@ const phoneInputClass = inputClass.replace('px-4', 'pl-16 pr-4');
       clearWarehouses();
       window.clearTimeout(settlementSearchDebounce);
       const value = settlementQuery.value.trim();
+      // Back to an empty field is back to the starting position, chips and
+      // all — clearing it is how someone changes their mind about the city.
+      if (suggestionChips) suggestionChips.hidden = value.length > 0;
       if (value.length < 2) {
         if (settlementResults) settlementResults.hidden = true;
         return;
       }
       settlementSearchDebounce = window.setTimeout(async () => {
-        try {
-          const response = await fetch(`/api/checkout/np-settlements?q=${encodeURIComponent(value)}`);
-          paintSettlementResults((await response.json()) as SettlementResult[]);
-        } catch {
-          // A failed lookup just leaves the list empty — the customer can retype.
-        }
-      }, 300);
+        const results = await lookup<SettlementResult[]>(
+          'settlement',
+          `/api/checkout/np-settlements?q=${encodeURIComponent(value)}`,
+        );
+        if (results) paintSettlementResults(results);
+      }, SEARCH_DEBOUNCE_MS);
     });
 
     for (const radio of form.querySelectorAll<HTMLInputElement>('[data-delivery-method]')) {
       radio.addEventListener('change', () => {
-        updateDeliveryFieldVisibility();
+        applyDeliveryMethod();
         clearWarehouses();
       });
     }
@@ -544,7 +675,7 @@ const phoneInputClass = inputClass.replace('px-4', 'pl-16 pr-4');
         codLimitKopiykas = limit;
         paintSummary(summary);
         paintCodAvailability();
-        updateDeliveryFieldVisibility();
+        applyDeliveryMethod();
         showState('form');
       } catch (error) {
         console.error(error);
@@ -568,16 +699,12 @@ const phoneInputClass = inputClass.replace('px-4', 'pl-16 pr-4');
       }
 
       const deliveryMethod = currentDeliveryMethod();
-      if (deliveryMethod === 'np_courier' && !selectedSettlement) {
+      if (!selectedSettlement || !selectedWarehouse) {
         if (submitError) {
-          submitError.textContent = 'Оберіть населений пункт.';
-          submitError.hidden = false;
-        }
-        return;
-      }
-      if (deliveryMethod !== 'np_courier' && (!selectedSettlement || !selectedWarehouse)) {
-        if (submitError) {
-          submitError.textContent = 'Оберіть населений пункт і відділення.';
+          submitError.textContent =
+            deliveryMethod === 'np_postomat'
+              ? 'Оберіть населений пункт і поштомат.'
+              : 'Оберіть населений пункт і відділення.';
           submitError.hidden = false;
         }
         return;
@@ -595,21 +722,13 @@ const phoneInputClass = inputClass.replace('px-4', 'pl-16 pr-4');
       //   return;
       // }
 
-      const delivery =
-        deliveryMethod === 'np_courier'
-          ? {
-              deliveryMethod,
-              npSettlementRef: selectedSettlement!.ref,
-              npSettlementName: selectedSettlement!.name,
-              npAddress: String(data.get('npAddress') ?? ''),
-            }
-          : {
-              deliveryMethod,
-              npSettlementRef: selectedSettlement!.ref,
-              npSettlementName: selectedSettlement!.name,
-              npWarehouseRef: selectedWarehouse!.ref,
-              npWarehouseName: selectedWarehouse!.description,
-            };
+      const delivery = {
+        deliveryMethod,
+        npSettlementRef: selectedSettlement.ref,
+        npSettlementName: selectedSettlement.name,
+        npWarehouseRef: selectedWarehouse.ref,
+        npWarehouseName: selectedWarehouse.description,
+      };
 
       const payload = {
         customerName: String(data.get('customerName') ?? ''),

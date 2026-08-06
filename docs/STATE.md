@@ -4,25 +4,54 @@
 
 ## 📍 CURRENT STATE (overwrite this block; keep tight)
 
-- **Last done:** **the repo is a pnpm workspace and the admin panel is its own Worker**
-  (2026-08-06). Four packages: `apps/site` (storefront, Worker `balier-dev`, `balier.mlosko.dev`),
-  `apps/admin` (panel, **new Worker `balier-admin-dev`**, **`admin.balier.mlosko.dev`**, admin URLs
-  lost the `/admin` prefix — it is `/orders`, `/products`, `/login` at the root of that host),
-  `packages/lib` (`@balier/lib`, all of old `src/lib` + `stores/cart.ts` as TS source, all 221
-  tests), `workers/cron` (`@balier/cron`, unchanged Worker name). Both apps are **deployed and
-  verified over HTTPS**: gate → login → deep-link `next` chain, media on both origins, panel
-  screens 200 with a session, storefront APIs and `/admin/**` → 301 to the admin host. Card
-  invoices minted in the panel point webhook + redirect at the **site** origin via the new
-  `SITE_ORIGIN` var — `/orders/new` no longer derives it from its own request URL.
-- **In progress:** nothing. Everything is merged to `main`.
-- **Next step:** **the Workers Builds dashboard configs — before the next push to `main`** (the
-  push-to-deploy pipeline still runs the old root build and will fail until then, fail-safe):
-  update `balier-dev`'s build to `pnpm install --frozen-lockfile && pnpm --filter @balier/site run
-  build` with deploy `npx wrangler deploy -c apps/site/wrangler.jsonc` (or root dir `apps/site`),
-  and create the analogous second config for `balier-admin-dev`. Then the standing **browser
-  pass**: `/categories` (rewritten, never driven) and `/settings` (never looked at) — both now on
-  `admin.balier.mlosko.dev` — plus the panel flows curl cannot drive (image upload preview,
+- **Last done:** **the `/checkout` Nova Poshta pickers got faster and stopped depending on
+  perfect Ukrainian spelling** (2026-08-06, migration `0006`). Search now matches a folded
+  `search_text` column carrying NP's Ukrainian, **Russian (`DescriptionRu`) and Latin
+  (`DescriptionTranslit`)** spellings — all three were in every API response and the sync had been
+  discarding them. `packages/lib/src/novaposhta/normalize.ts` folds `і/ї/ы/й→и`, `є/э/ё→е`, `ґ→г`
+  and drops soft signs and apostrophes, so a Russian keyboard («Днипро», «Харкив», «мыколаив»)
+  finds the Ukrainian name — verified against real data. `pg_trgm` + a GIN index took the
+  settlement query from a **8.9 ms seq scan to 0.14 ms**; the two endpoints are **edge-cached**
+  (`apps/site/src/lib/edgeCache.ts`, 1 h `s-maxage`), which is the real win since the query was
+  never the cost — the ~45 ms Worker→Neon round trip was. Typo fallback is pg_trgm `<%` at its
+  default 0.6, indexed; a more forgiving 0.4 was tried and **rejected on measurement** (78 ms seq
+  scan and the answers turn to noise). **Three bugs fixed on the way:** branch lists were ordered
+  lexicographically (Kyiv opened 1, 10, 10063, … — now `number_sort`), `is_active` was hardcoded
+  `true` by the sync so closed branches stayed selectable (now from `WarehouseStatus`/
+  `DenyToSelect`, plus branches that vanish from the feed are retired), and the checkout client
+  had no `AbortController`, so a slow reply for «ки» could repaint over «київ».
+  Under the settlement input there is now a row of **one-tap suggestion chips**: the four
+  settlements with the most NP branches (Київ, Львів, Дніпро, Одеса — `warehouse_count`, not a
+  hardcoded list), plus the visitor's own city first when Cloudflare's `request.cf.city` resolves
+  to one. That geo lookup is free of any new dependency — `cf` is workerd's per-request bag, and
+  it resolves because `name_translit` ("Kyiv", "Lviv") is now in `search_text`. It is a
+  suggestion, never a prefill: Cloudflare geolocates the ISP's egress, so it can name a nearby
+  city rather than the customer's, and the chip still has to be tapped.
+  Also this session: **courier delivery is withdrawn**, and the branch field's label is now
+  dynamic («Відділення» / «Поштомат», with the dropdown's `aria-label` following it) instead of
+  the ambiguous «Відділення / поштомат». `np_courier` is gone from the storefront, the admin
+  order form and `deliverySchema` — `POST /api/checkout` answers a courier payload with 400,
+  verified. **The `delivery_method` enum keeps `np_courier`** so the 6 existing courier orders
+  still load and render; `readDraft` now accepts only the *selectable* methods
+  (`SELECTABLE_DELIVERY_METHODS`), so a stale or forged form naming courier falls back to
+  «відділення» rather than producing a draft nothing can render. The dead address plumbing went
+  with it (`np_address` stays on the row and in the notification formatter, for those same
+  historical orders).
+- **In progress:** nothing. The gate is green (`pnpm check && pnpm build`, 232 tests). Migration
+  `0006` and a full `pnpm np:sync` have been run against the **dev** database: all 26 791
+  settlements carry `name_ru`/`name_translit`, 53 511 of 53 556 warehouses carry `description_ru`,
+  and the first run of the new retirement step deactivated **45** branches no longer in NP's feed.
+  Spot-checked live afterwards: «Киев»→Київ, «Львов»→Львів, «Николаев»→Миколаїв,
+  «Запорожье»→Запоріжжя, «Кривой Рог»→Кривий Ріг, «Kyiv»/«Lviv», and the typo «хркив»→Харків
+  through the fuzzy tier.
+- **Next step:** the standing **browser pass** — `/checkout`'s delivery step is the one to drive
+  first, since this session changed it and only curl/DB-level checks have been run against it;
+  then `/categories` (rewritten, never driven) and `/settings` (never looked at) on
+  `admin.balier.mlosko.dev`, plus the panel flows curl cannot drive (image upload preview,
   `/orders/new` card order confirming the Monobank invoice's URLs). Then Phase 5.
+  **Not yet deployed** — the two Workers need a push/deploy to pick this up, and **`balier-cron`
+  needs a redeploy too** this time: the sync changes live in `@balier/lib`, so the note below
+  about the split not requiring one no longer applies to this change.
 - **Rules that bind any future panel screen** (now written up in `docs/CONVENTIONS.md` → «Admin
   panel»: the `admin.css` utilities, `src/components/admin/`, and the no-reload/toast contract):
   - **A schema is only verified against the body the form actually sends.** `curl -F` composes a
@@ -35,6 +64,14 @@
     the plain-PRG end of that; `/admin/orders/new` takes the reload-free end. Requiring script is
     not legitimate. (`docs/CONVENTIONS.md` may still word the old rule.)
 - **Still worth carrying:**
+  - **`balier-cron` is fully provisioned and its reconciliation is live** (verified 2026-08-06, not
+    assumed): all five secrets present per `wrangler secret list` — `DATABASE_URL`,
+    `NOVAPOSHTA_API_KEY`, `MONOBANK_TOKEN`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` — and the
+    deployed code has the sweep, since version `27405ec5` (2026-08-05 16:46 UTC) postdates commit
+    `e8d8447` (16:43 UTC) by three minutes. Everything after that commit is the `~/lib` →
+    `@balier/lib` import rewrite and comments, so **the workspace split does not require a cron
+    redeploy**. `send_email` / `ORDER_EMAIL_FROM` were already in that deploy and the DNS records
+    now exist, so the sweep's order-paid email delivers too.
   - **Admin sessions did not survive the split** — `balier-admin-dev` got a **fresh
     `ADMIN_SESSION_SECRET`** at deploy (the `__Host-` cookie could not cross hostnames anyway).
     Log in again on `admin.balier.mlosko.dev`. The old secret is still set on `balier-dev` where
@@ -63,11 +100,6 @@
   - Deliberately not built and unasked-for: any customer-facing notification on an admin status
     change. Telegram and email stay wired to order creation and payment only.
 - **Blockers (waiting on me):**
-  - **`balier-cron` needs three new secrets before its next deploy** — the reconciliation sweep
-    calls Monobank and Telegram now: `wrangler secret put MONOBANK_TOKEN -c
-    workers/cron/wrangler.jsonc`, likewise `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` (same values as
-    the app Worker; secrets are per-Worker). Until set, the sweep fails closed: expired stock is
-    still freed, `awaiting_payment` orders are left untouched rather than cancelled on a guess.
   - Phase 0 externals unchanged: Monobank Acquiring registration, Nova Poshta business account +
     cash-on-delivery setup, Telegram manager account / bot / chat.
   - `PUBLIC_TELEGRAM_MANAGER` in `wrangler.jsonc` is a **placeholder handle**.
@@ -134,6 +166,16 @@
 > Empty by design. Everything through the end of Phase 4 was moved to **`docs/history.md`** on
 > 2026-08-05, not rewritten — this file is read in full at every session start and had reached
 > 852 lines. New session entries go here; move a phase's entries across once the phase is done.
+
+**2026-08-06 (checkout search).** Asked how the NP city/branch pickers could be faster and forgiving
+of Russian input and typos. Measured first: the SQL was never the cost (8.9 ms) — the ~45 ms
+Worker→Neon round trip on every keystroke was, and `no-store` meant everyone paid it. So: edge
+caching (1 h), `pg_trgm` + GIN (8.9 ms → 0.14 ms), and a `search_text` column folding NP's
+Ukrainian/Russian/translit spellings, all three of which the API already returned and the sync
+threw away. Fuzzy fallback is `<%` at the indexed default 0.6 — 0.4 was measured and rejected
+(78 ms, noisy). Fixed alongside: lexicographic branch order, `is_active` hardcoded `true`, and a
+missing `AbortController` that let stale responses repaint the dropdown. Migration `0006`, new
+`normalize.ts` (+11 tests, 232 total), gate green.
 
 **2026-08-06 (workspace split).** Asked whether the site and the panel could be two Workers —
 planned and built the full split in one session. pnpm workspace: `@balier/lib` (old `src/lib`

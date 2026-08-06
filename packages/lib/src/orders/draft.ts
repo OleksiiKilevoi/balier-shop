@@ -1,13 +1,9 @@
-import { deliveryMethod, paymentMethod } from '../db/schema';
+import { paymentMethod } from '../db/schema';
 import type { DeliveryMethod, PaymentMethod } from '../db/schema';
 import { phoneDigitsFromInput } from '../phone';
 import { MAX_CART_LINES, MAX_ITEM_QUANTITY } from '../validation/cart';
 import type { CartItemInput } from '../validation/cart';
-import {
-  MAX_ADDRESS_LENGTH,
-  MAX_COMMENT_LENGTH,
-  MAX_CUSTOMER_NAME,
-} from '../validation/checkout';
+import { MAX_COMMENT_LENGTH, MAX_CUSTOMER_NAME } from '../validation/checkout';
 
 /**
  * The order a manager is composing at `/admin/orders/new`, and the two pure
@@ -59,10 +55,8 @@ export interface OrderDraft {
 
   /** Nova Poshta settlement ref. NULL until one is picked. */
   settlementRef: string | null;
-  /** Warehouse/postomat ref. NULL until one is picked; never set for courier. */
+  /** Warehouse/postomat ref. NULL until one is picked. */
   warehouseRef: string | null;
-  /** Street address, courier delivery only. */
-  address: string;
 
   items: DraftItem[];
 
@@ -82,7 +76,6 @@ export const DRAFT_FIELDS = {
   deliveryMethod: 'dm',
   settlement: 'city',
   warehouse: 'wh',
-  address: 'addr',
   /** Repeated once per basket line, holding the variant id. */
   item: 'i',
   /** Prefix for a line's quantity input — `q:<variantId>`. */
@@ -111,7 +104,21 @@ export const DRAFT_ACTIONS = {
 } as const;
 
 const PAYMENT_METHODS = new Set<string>(paymentMethod.enumValues);
-const DELIVERY_METHODS = new Set<string>(deliveryMethod.enumValues);
+
+/**
+ * The delivery methods a form may still choose — deliberately narrower than
+ * `delivery_method`'s enum.
+ *
+ * `np_courier` is still a valid *stored* value, because orders placed before
+ * courier was withdrawn (2026-08-06) have to keep loading and rendering. It is
+ * not a valid *incoming* one: a form naming it now is stale or forged, and
+ * accepting it would produce a draft with no radio to check and a delivery
+ * shape `adminNewOrderSchema` rejects. It falls back to the default instead.
+ */
+export const SELECTABLE_DELIVERY_METHODS = ['np_warehouse', 'np_postomat'] as const;
+export type SelectableDeliveryMethod = (typeof SELECTABLE_DELIVERY_METHODS)[number];
+
+const DELIVERY_METHODS = new Set<string>(SELECTABLE_DELIVERY_METHODS);
 
 /** Cash on delivery is what a Telegram order usually is; card is the deliberate choice. */
 const DEFAULT_PAYMENT_METHOD: PaymentMethod = 'cod';
@@ -195,15 +202,12 @@ export function readDraft(form: FormData): OrderDraft {
     deliveryMethod: method,
 
     settlementRef: ref(form, DRAFT_FIELDS.settlement),
-    // Both are kept whatever the delivery method currently is, so switching to
-    // «кур'єр» to check something and back does not throw away the branch that
-    // was already picked, or the address that was already typed. Which of the
-    // two an order actually uses is decided by `adminNewOrderSchema`, and
-    // whether the branch is still a *valid* one for the chosen method is
+    // Kept whatever the delivery method currently is, so toggling «відділення»
+    // ⇄ «поштомат» to check something does not throw away the branch already
+    // picked. Whether it is still a *valid* branch for the chosen method is
     // decided by resolving the ref against `np_warehouses` at render time —
-    // switching «відділення» → «поштомат» leaves a ref that no longer matches.
+    // switching leaves a ref that no longer matches.
     warehouseRef: ref(form, DRAFT_FIELDS.warehouse),
-    address: text(form, DRAFT_FIELDS.address, MAX_ADDRESS_LENGTH),
 
     items: items(form),
 

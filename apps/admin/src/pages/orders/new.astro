@@ -40,11 +40,7 @@ import { formatPhoneDigits } from '@balier/lib/phone';
 import { adminNewOrderSchema, adminOrderFieldErrors } from '@balier/lib/validation/admin';
 import type { AdminNewOrder, AdminOrderField } from '@balier/lib/validation/admin';
 import { MAX_ITEM_QUANTITY } from '@balier/lib/validation/cart';
-import {
-  MAX_ADDRESS_LENGTH,
-  MAX_COMMENT_LENGTH,
-  MAX_CUSTOMER_NAME,
-} from '@balier/lib/validation/checkout';
+import { MAX_COMMENT_LENGTH, MAX_CUSTOMER_NAME } from '@balier/lib/validation/checkout';
 import { parseSearchQuery, searchTokens } from '@balier/lib/validation/search';
 
 /**
@@ -169,21 +165,13 @@ const warehouseValue = warehouseSearching
  * so the union fails with a *path* — which is what tells the form whether to
  * mark the settlement, the branch or the address.
  */
-const deliveryInput =
-  draft.deliveryMethod === 'np_courier'
-    ? {
-        deliveryMethod: 'np_courier' as const,
-        npSettlementRef: settlement?.ref ?? '',
-        npSettlementName: settlement?.name ?? '',
-        npAddress: draft.address,
-      }
-    : {
-        deliveryMethod: draft.deliveryMethod,
-        npSettlementRef: settlement?.ref ?? '',
-        npSettlementName: settlement?.name ?? '',
-        npWarehouseRef: warehouse?.ref ?? '',
-        npWarehouseName: warehouse?.description ?? '',
-      };
+const deliveryInput = {
+  deliveryMethod: draft.deliveryMethod,
+  npSettlementRef: settlement?.ref ?? '',
+  npSettlementName: settlement?.name ?? '',
+  npWarehouseRef: warehouse?.ref ?? '',
+  npWarehouseName: warehouse?.description ?? '',
+};
 
 if (form && isCreateSubmit(form)) {
   const parsed = adminNewOrderSchema.safeParse({
@@ -253,7 +241,7 @@ const [basketVariants, productResults, settlementResults, warehouseResults] = aw
      query nobody asked. It is the dropdown's *visibility* that then waits for
      the field to be focused (CSS, below), which is the same thing `/checkout`
      gets from its focus handler. */
-  settlement && draft.deliveryMethod !== 'np_courier'
+  settlement
     ? listWarehouses(
         db,
         settlement.ref,
@@ -327,10 +315,14 @@ function createOrderFromPanel(txDb: TxDb, input: AdminNewOrder, origin: string) 
   );
 }
 
+/**
+ * Courier was withdrawn on 2026-08-06 and is not offered here either — a
+ * manager taking a phone order gets the same two methods the storefront does.
+ * Orders already placed with it keep rendering everywhere they are read.
+ */
 const DELIVERY_CHOICES = [
   { value: 'np_warehouse', id: 'dm-warehouse' },
   { value: 'np_postomat', id: 'dm-postomat' },
-  { value: 'np_courier', id: 'dm-courier' },
 ] as const;
 ---
 
@@ -725,7 +717,7 @@ const DELIVERY_CHOICES = [
         }
       </div>
 
-      {/* ---------------------------------------------- branch, or an address
+      {/* ------------------------------------------------------------ branch
           Same single-box-plus-dropdown as the settlement above, with one
           difference it inherits from `/checkout`: the list is already scoped to
           one city, so an empty box lists the first branches rather than
@@ -733,7 +725,7 @@ const DELIVERY_CHOICES = [
           otherwise every render after picking a city would drop an open
           dropdown over the payment section. `:focus-within` does it in CSS, so
           it needs no script and a keyboard tab into the list keeps it open. */}
-      <div class="border-border mt-5 border-t pt-5 group-has-[#dm-courier:checked]:hidden">
+      <div class="border-border mt-5 border-t pt-5">
         <label for="warehouse-q" class="text-fg-subtle text-xs">Відділення або поштомат</label>
 
         <input type="hidden" name={DRAFT_FIELDS.warehouse} value={warehouse?.ref ?? ''} />
@@ -806,27 +798,6 @@ const DELIVERY_CHOICES = [
         }
       </div>
 
-      {/* Rendered always and revealed by the radio above, so an address that is
-          typed, then reconsidered, then chosen again is still there. */}
-      <div class="border-border mt-5 hidden border-t pt-5 group-has-[#dm-courier:checked]:block">
-        <label for="courier-address" class="text-fg-subtle text-xs">
-          Адреса — вулиця, будинок, квартира
-        </label>
-        <input
-          id="courier-address"
-          name={DRAFT_FIELDS.address}
-          type="text"
-          value={draft.address}
-          maxlength={MAX_ADDRESS_LENGTH}
-          autocomplete="off"
-          class="admin-field mt-1"
-        />
-        {
-          invalid.has('address') && (
-            <p class="text-danger mt-1 text-xs">{ADMIN_NEW_ORDER_ERRORS.address}</p>
-          )
-        }
-      </div>
     </section>
 
     {/* ------------------------------------------------------------- payment */}

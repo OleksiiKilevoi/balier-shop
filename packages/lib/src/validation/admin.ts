@@ -138,17 +138,16 @@ export type AdminOrderField =
   | 'customerEmail'
   | 'settlement'
   | 'warehouse'
-  | 'address'
   | 'items';
 
 /**
  * Sorts Zod's issues into the fields the form actually renders.
  *
- * The delivery union is the awkward part: a missing settlement, a missing
- * branch and a too-short courier address all fail as `delivery`, and each one
- * needs its message under a different control — so the issue's *path* decides,
- * and anything unrecognised falls back to the settlement, which is the first
- * step of that section and the one that gates the rest.
+ * The delivery union is the awkward part: a missing settlement and a missing
+ * branch both fail as `delivery`, and each one needs its message under a
+ * different control — so the issue's *path* decides, and anything unrecognised
+ * falls back to the settlement, which is the first step of that section and the
+ * one that gates the rest.
  */
 export function adminOrderFieldErrors(error: z.ZodError): Set<AdminOrderField> {
   const fields = new Set<AdminOrderField>();
@@ -164,8 +163,7 @@ export function adminOrderFieldErrors(error: z.ZodError): Set<AdminOrderField> {
         fields.add(head);
         break;
       case 'delivery':
-        if (next === 'npAddress') fields.add('address');
-        else if (next === 'npWarehouseRef' || next === 'npWarehouseName') fields.add('warehouse');
+        if (next === 'npWarehouseRef' || next === 'npWarehouseName') fields.add('warehouse');
         else fields.add('settlement');
         break;
       default:

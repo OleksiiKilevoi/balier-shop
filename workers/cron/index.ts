@@ -160,5 +160,8 @@ async function syncNovaPoshta(env: Env): Promise<void> {
   const db = createDb(env.DATABASE_URL);
   const client = createNovaPoshtaClient(env.NOVAPOSHTA_API_KEY);
   const result = await syncNovaPoshtaReferenceData(client, db);
-  console.log(`Nova Poshta sync: ${result.settlements} settlements, ${result.warehouses} warehouses.`);
+  console.log(
+    `Nova Poshta sync: ${result.settlements} settlements, ${result.warehouses} warehouses, ` +
+      `${result.retired} retired.`,
+  );
 }

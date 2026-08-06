@@ -51,17 +51,19 @@ const npPostomatDeliverySchema = npWarehouseDeliverySchema.extend({
   deliveryMethod: z.literal('np_postomat'),
 });
 
-const npCourierDeliverySchema = z.object({
-  deliveryMethod: z.literal('np_courier'),
-  npSettlementRef: z.string().min(1),
-  npSettlementName: z.string().min(1),
-  npAddress: z.string().trim().min(MIN_ADDRESS_LENGTH).max(MAX_ADDRESS_LENGTH),
-});
-
+/**
+ * Courier delivery was withdrawn on 2026-08-06: it is no longer offered on
+ * `/checkout` or in the admin panel, and a request naming it is rejected here.
+ *
+ * `delivery_method`'s `np_courier` enum value deliberately stays in the
+ * database — orders placed while it was on the menu still have to load and
+ * render, in the panel and in the notification formatter. Dropping the value
+ * would mean recreating the type and rewriting their delivery method to
+ * something the customer never chose.
+ */
 export const deliverySchema = z.discriminatedUnion('deliveryMethod', [
   npWarehouseDeliverySchema,
   npPostomatDeliverySchema,
-  npCourierDeliverySchema,
 ]);
 
 export const paymentMethodSchema = z.enum(['card', 'cod']);

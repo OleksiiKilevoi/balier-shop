@@ -33,7 +33,10 @@ async function main() {
 
   console.log('Syncing Nova Poshta reference data — this can take a few minutes…');
   const result = await syncNovaPoshtaReferenceData(client, db);
-  console.log(`Synced ${result.settlements} settlements and ${result.warehouses} warehouses.`);
+  console.log(
+    `Synced ${result.settlements} settlements and ${result.warehouses} warehouses ` +
+      `(${result.retired} no longer in the feed, retired).`,
+  );
 }
 
 main().catch((error) => {

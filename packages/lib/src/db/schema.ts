@@ -315,9 +315,34 @@ export const npSettlements = pgTable(
      * search so "Київ" surfaces before an obscure village whose name also matches.
      */
     warehouseCount: integer('warehouse_count').notNull().default(0),
+    /**
+     * `DescriptionRu` / `DescriptionTranslit` straight from NP's
+     * `getSettlements` — both are in every response and were simply being
+     * discarded before. They matter because the hard cases are not typos but
+     * different words: «Львів»/«Львов», «Миколаїв»/«Николаев». Kept as their
+     * own columns (rather than only folded into `search_text`) so a result can
+     * one day be *labelled* in the language the customer typed.
+     */
+    nameRu: text('name_ru'),
+    nameTranslit: text('name_translit'),
+    /**
+     * All spellings above, folded by `src/novaposhta/normalize.ts` into one
+     * blob — this is what `/checkout`'s settlement search actually matches
+     * against, via the GIN trigram index below. Never rendered.
+     */
+    searchText: text('search_text').notNull().default(''),
     updatedAt,
   },
-  (t) => [index('np_settlements_name_idx').on(t.name)],
+  (t) => [
+    index('np_settlements_name_idx').on(t.name),
+    /**
+     * A leading-wildcard `ilike '%q%'` cannot use a btree, so the search was a
+     * seq scan over all 26 791 rows on every keystroke (8.9 ms, measured).
+     * `gin_trgm_ops` indexes it, and is also what makes the typo-tolerant
+     * `word_similarity` fallback in `db/queries/novaposhta.ts` affordable.
+     */
+    index('np_settlements_search_idx').using('gin', t.searchText.op('gin_trgm_ops')),
+  ],
 );
 
 export const npWarehouses = pgTable(
@@ -326,16 +351,44 @@ export const npWarehouses = pgTable(
     ref: text('ref').primaryKey(),
     settlementRef: text('settlement_ref').notNull(),
     number: text('number'),
+    /**
+     * `number` is what NP prints on the branch, and it is text because a few
+     * are not plain integers. Ordering by it lexicographically listed Kyiv as
+     * 1, 10, 10063, 10064, …, 101 — so the numeric value gets its own column
+     * to sort on, NULL for the handful that have no number at all.
+     */
+    numberSort: integer('number_sort'),
     description: text('description').notNull(),
+    /** Ukrainian branch description; `descriptionRu` is NP's `DescriptionRu`. */
+    descriptionRu: text('description_ru'),
+    /** Both descriptions folded for search — see `np_settlements.search_text`. */
+    searchText: text('search_text').notNull().default(''),
     /** Branch vs parcel locker, from `TypeOfWarehouse`. */
     typeRef: text('type_ref'),
+    /**
+     * Resolved once at sync time from `type_ref`'s description. The pickers
+     * used to re-derive this per query with `type_ref ilike '%поштомат%'`,
+     * which no index can serve — Kyiv scanned 7 767 rows to return 50.
+     */
+    isPostomat: boolean('is_postomat').notNull().default(false),
     maxWeightKg: integer('max_weight_kg'),
     latitude: text('latitude'),
     longitude: text('longitude'),
+    /**
+     * From NP's `WarehouseStatus` and `DenyToSelect`. The sync used to hardcode
+     * this to `true` for every row, so closed branches stayed selectable at
+     * checkout and the `is_active` filter below was decorative.
+     */
     isActive: boolean('is_active').notNull().default(true),
     updatedAt,
   },
-  (t) => [index('np_warehouses_settlement_idx').on(t.settlementRef)],
+  (t) => [
+    /**
+     * Covers the picker's whole WHERE and its ORDER BY in one index: every
+     * warehouse lookup is scoped to a settlement, a kind, and active-only.
+     */
+    index('np_warehouses_lookup_idx').on(t.settlementRef, t.isPostomat, t.isActive, t.numberSort),
+  ],
 );
 
 /* -------------------------------------------------------- content & config */

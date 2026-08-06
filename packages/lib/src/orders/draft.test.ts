@@ -50,7 +50,6 @@ describe('readDraft', () => {
       deliveryMethod: 'np_warehouse',
       settlementRef: null,
       warehouseRef: null,
-      address: '',
       items: [],
       productQuery: '',
       settlementQuery: '',
@@ -106,19 +105,27 @@ describe('readDraft', () => {
     expect(digits('телефон')).toBe('');
   });
 
-  it('keeps the branch and the address whichever delivery method is chosen', () => {
-    // Switching to «кур'єр» to check something and back must not silently drop
-    // the branch that was already picked — see the comment in `readDraft`.
+  it('keeps the branch whichever delivery method is chosen', () => {
+    // Toggling «відділення» ⇄ «поштомат» to check something and back must not
+    // silently drop the branch already picked — see the comment in `readDraft`.
     const draft = readDraft(
       body([
-        [DRAFT_FIELDS.deliveryMethod, 'np_courier'],
+        [DRAFT_FIELDS.deliveryMethod, 'np_postomat'],
         [DRAFT_FIELDS.warehouse, 'wh-ref'],
-        [DRAFT_FIELDS.address, 'вул. Хрещатик, 1'],
       ]),
     );
 
+    expect(draft.deliveryMethod).toBe('np_postomat');
     expect(draft.warehouseRef).toBe('wh-ref');
-    expect(draft.address).toBe('вул. Хрещатик, 1');
+  });
+
+  it('falls back to a branch for the withdrawn courier method', () => {
+    // `np_courier` is still a `delivery_method` enum value, because orders
+    // placed while it was offered still have to load — but a form naming it
+    // now is stale or forged, and must not produce a courier draft.
+    const draft = readDraft(body([[DRAFT_FIELDS.deliveryMethod, 'np_courier']]));
+
+    expect(draft.deliveryMethod).toBe('np_warehouse');
   });
 
   it('falls back to the defaults for an unknown payment or delivery method', () => {

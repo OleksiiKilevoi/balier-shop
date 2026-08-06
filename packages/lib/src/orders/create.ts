@@ -130,14 +130,13 @@ export async function createOrder(
         }
 
         const delivery = input.delivery;
-        const deliveryFields =
-          delivery.deliveryMethod === 'np_courier'
-            ? { npWarehouseRef: null, npWarehouseName: null, npAddress: delivery.npAddress }
-            : {
-                npWarehouseRef: delivery.npWarehouseRef,
-                npWarehouseName: delivery.npWarehouseName,
-                npAddress: null,
-              };
+        // `np_address` stays on the row for the orders placed while courier
+        // delivery was still offered; nothing written from here fills it.
+        const deliveryFields = {
+          npWarehouseRef: delivery.npWarehouseRef,
+          npWarehouseName: delivery.npWarehouseName,
+          npAddress: null,
+        };
 
         const [order] = await tx
           .insert(orders)

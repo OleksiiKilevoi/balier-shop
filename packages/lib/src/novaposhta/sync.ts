@@ -1,7 +1,8 @@
-import { sql } from 'drizzle-orm';
+import { and, eq, lt, sql } from 'drizzle-orm';
 import type { Db } from '../db';
 import { npSettlements, npWarehouses } from '../db/schema';
 import type { NovaPoshtaClient } from './client';
+import { searchText } from './normalize';
 
 /**
  * Full-country settlement + warehouse sync, run by the daily cron
@@ -21,6 +22,13 @@ import type { NovaPoshtaClient } from './client';
 interface RawSettlement {
   Ref: string;
   Description: string;
+  /**
+   * The Russian and Latin spellings, present on every row of `getSettlements`
+   * and ignored by this sync until now. They are what lets «Львов» and «Lviv»
+   * find «Львів» at checkout — see `src/novaposhta/normalize.ts`.
+   */
+  DescriptionRu?: string;
+  DescriptionTranslit?: string;
   AreaDescription?: string;
   RegionsDescription?: string;
   /** Ukrainian settlement-type label — "місто" | "село" | "селище" | "селище міського типу". */
@@ -36,6 +44,7 @@ interface RawWarehouseType {
 interface RawWarehouse {
   Ref: string;
   Description: string;
+  DescriptionRu?: string;
   Number?: string;
   SettlementRef?: string;
   CityRef?: string;
@@ -43,6 +52,10 @@ interface RawWarehouse {
   TotalMaxWeightAllowed?: string;
   Longitude?: string;
   Latitude?: string;
+  /** "Working" on every one of 1 500 rows sampled live; see `isSelectable`. */
+  WarehouseStatus?: string;
+  /** "1" when NP itself says this branch must not be offered as a choice. */
+  DenyToSelect?: string;
 }
 
 const SETTLEMENTS_PAGE_SIZE = 150;
@@ -117,6 +130,9 @@ async function upsertSettlements(db: Db, rows: RawSettlement[]): Promise<void> {
       rows.map((s) => ({
         ref: s.Ref,
         name: s.Description,
+        nameRu: s.DescriptionRu ?? null,
+        nameTranslit: s.DescriptionTranslit ?? null,
+        searchText: searchText(s.Description, s.DescriptionRu, s.DescriptionTranslit),
         area: s.AreaDescription ?? null,
         region: s.RegionsDescription ?? null,
         type: s.SettlementTypeDescription ?? null,
@@ -127,6 +143,9 @@ async function upsertSettlements(db: Db, rows: RawSettlement[]): Promise<void> {
       target: npSettlements.ref,
       set: {
         name: sql`excluded.name`,
+        nameRu: sql`excluded.name_ru`,
+        nameTranslit: sql`excluded.name_translit`,
+        searchText: sql`excluded.search_text`,
         area: sql`excluded.area`,
         region: sql`excluded.region`,
         type: sql`excluded.type`,
@@ -150,15 +169,39 @@ async function syncSettlements(client: NovaPoshtaClient, db: Db): Promise<number
 }
 
 /**
+ * Whether a branch may be offered at checkout. This used to be hardcoded
+ * `true` for every row, which made the `is_active` filter in the pickers
+ * decorative and kept closed branches selectable.
+ *
+ * `WarehouseStatus` read "Working" on all 1 500 rows sampled live against the
+ * real API, so this changes nothing today and starts being correct the moment
+ * NP closes one. A *missing* status counts as active on purpose: if NP ever
+ * drops the field, the fail-safe is a stale-open branch someone has to reroute,
+ * not a nationwide empty dropdown at checkout.
+ */
+function isSelectable(w: RawWarehouse): boolean {
+  return (w.WarehouseStatus ?? 'Working') === 'Working' && w.DenyToSelect !== '1';
+}
+
+/**
+ * NP's branch numbers are text because a few are not plain integers, but
+ * ordering the picker by that text listed Kyiv as 1, 10, 10063, …, 101.
+ * Bounded to 9 digits so nothing can overflow int4; anything else sorts last.
+ */
+function branchNumberSort(number: string | undefined): number | null {
+  return number && /^\d{1,9}$/.test(number) ? Number(number) : null;
+}
+
+/**
  * `TypeOfWarehouse` on a warehouse row is a reference-book GUID; resolving it
  * to its Ukrainian description here (via NP's own `getWarehouseTypes`, live-
  * verified against the real API while building this: it returns 5 rows,
  * including both `Поштомат` and `Поштомат ПриватБанку`) means
  * `np_warehouses.type_ref` ends up holding a human-readable label
  * (`Поштове(ий)`, `Поштомат`, …) instead of an opaque ref — which is what
- * `src/lib/db/queries/novaposhta.ts` filters on to tell a `np_warehouse`
- * pickup from a `np_postomat` one, without this codebase ever having to
- * hardcode a NP type-ref constant it couldn't independently verify.
+ * `is_postomat` is resolved from once here, instead of by an unindexable
+ * `ilike` on every request, and without this codebase ever having to hardcode
+ * a NP type-ref constant it couldn't independently verify.
  */
 async function syncWarehouses(client: NovaPoshtaClient, db: Db): Promise<number> {
   const warehouseTypes = await client.call<RawWarehouseType>({
@@ -173,27 +216,43 @@ async function syncWarehouses(client: NovaPoshtaClient, db: Db): Promise<number>
       .values(
         rows
           .filter((w) => w.SettlementRef ?? w.CityRef)
-          .map((w) => ({
-            ref: w.Ref,
-            settlementRef: (w.SettlementRef ?? w.CityRef)!,
-            number: w.Number ?? null,
-            description: w.Description,
-            typeRef: w.TypeOfWarehouse ? (typeNameByRef.get(w.TypeOfWarehouse) ?? null) : null,
-            maxWeightKg: w.TotalMaxWeightAllowed
-              ? Math.trunc(Number(w.TotalMaxWeightAllowed)) || null
-              : null,
-            latitude: w.Latitude ?? null,
-            longitude: w.Longitude ?? null,
-            isActive: true,
-          })),
+          .map((w) => {
+            const typeName = w.TypeOfWarehouse
+              ? (typeNameByRef.get(w.TypeOfWarehouse) ?? null)
+              : null;
+
+            return {
+              ref: w.Ref,
+              settlementRef: (w.SettlementRef ?? w.CityRef)!,
+              number: w.Number ?? null,
+              numberSort: branchNumberSort(w.Number),
+              description: w.Description,
+              descriptionRu: w.DescriptionRu ?? null,
+              searchText: searchText(w.Description, w.DescriptionRu),
+              typeRef: typeName,
+              // Decided once here instead of by `ilike '%поштомат%'` on every
+              // request, so the pickers can index the column.
+              isPostomat: typeName ? /поштомат/i.test(typeName) : false,
+              maxWeightKg: w.TotalMaxWeightAllowed
+                ? Math.trunc(Number(w.TotalMaxWeightAllowed)) || null
+                : null,
+              latitude: w.Latitude ?? null,
+              longitude: w.Longitude ?? null,
+              isActive: isSelectable(w),
+            };
+          }),
       )
       .onConflictDoUpdate({
         target: npWarehouses.ref,
         set: {
           settlementRef: sql`excluded.settlement_ref`,
           number: sql`excluded.number`,
+          numberSort: sql`excluded.number_sort`,
           description: sql`excluded.description`,
+          descriptionRu: sql`excluded.description_ru`,
+          searchText: sql`excluded.search_text`,
           typeRef: sql`excluded.type_ref`,
+          isPostomat: sql`excluded.is_postomat`,
           maxWeightKg: sql`excluded.max_weight_kg`,
           latitude: sql`excluded.latitude`,
           longitude: sql`excluded.longitude`,
@@ -232,12 +291,66 @@ async function refreshSettlementWarehouseCounts(db: Db): Promise<void> {
   `);
 }
 
+/**
+ * A branch NP has removed from the feed entirely is never visited by the
+ * upsert loop above, so before this it stayed in our table — active and
+ * selectable — forever. Anything the run did not touch gets retired.
+ *
+ * Two guards, because the failure mode here is deactivating the country:
+ *
+ *  - The caller only reaches this after the warehouse pagination *finished*.
+ *    A run that throws partway (NP rate-limiting is a documented real risk
+ *    here) has touched a fraction of the table and must not retire the rest.
+ *  - Even then, a run that saw implausibly few rows is treated as a truncated
+ *    feed rather than as 40 000 closures, and retires nothing.
+ *
+ * The cutoff is deliberately slack: rows are refreshed daily, so the mark only
+ * has to separate "touched minutes ago" from "touched yesterday", and backing
+ * it off five minutes puts it far outside any Worker-vs-Postgres clock skew.
+ */
+const RETIRE_MIN_SEEN_RATIO = 0.5;
+const RETIRE_CLOCK_SKEW_MS = 5 * 60 * 1000;
+
+async function retireUnseenWarehouses(db: Db, startedAt: Date, seen: number): Promise<number> {
+  const [row] = await db
+    .select({ total: sql<number>`count(*)::int` })
+    .from(npWarehouses)
+    .where(eq(npWarehouses.isActive, true));
+  const total = row?.total ?? 0;
+
+  if (total === 0) return 0;
+  if (seen < total * RETIRE_MIN_SEEN_RATIO) {
+    console.warn(
+      `Nova Poshta sync saw ${seen} warehouses against ${total} active rows — ` +
+        'treating the feed as truncated and retiring nothing.',
+    );
+    return 0;
+  }
+
+  const retired = await db
+    .update(npWarehouses)
+    .set({ isActive: false, updatedAt: sql`now()` })
+    .where(
+      and(
+        eq(npWarehouses.isActive, true),
+        lt(npWarehouses.updatedAt, new Date(startedAt.getTime() - RETIRE_CLOCK_SKEW_MS)),
+      ),
+    )
+    .returning({ ref: npWarehouses.ref });
+
+  return retired.length;
+}
+
 export async function syncNovaPoshtaReferenceData(
   client: NovaPoshtaClient,
   db: Db,
-): Promise<{ settlements: number; warehouses: number }> {
+): Promise<{ settlements: number; warehouses: number; retired: number }> {
   const settlements = await syncSettlements(client, db);
+
+  const warehousesStartedAt = new Date();
   const warehouses = await syncWarehouses(client, db);
+  const retired = await retireUnseenWarehouses(db, warehousesStartedAt, warehouses);
+
   await refreshSettlementWarehouseCounts(db);
-  return { settlements, warehouses };
+  return { settlements, warehouses, retired };
 }
