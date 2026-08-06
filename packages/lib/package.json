@@ -1,0 +1,35 @@
+{
+  "name": "@balier/lib",
+  "type": "module",
+  "version": "0.1.0",
+  "private": true,
+  "exports": {
+    "./*": "./src/*.ts",
+    "./auth": "./src/auth/index.ts",
+    "./cart": "./src/cart/index.ts",
+    "./db": "./src/db/index.ts",
+    "./media": "./src/media/index.ts",
+    "./monobank": "./src/monobank/index.ts",
+    "./rateLimit": "./src/rateLimit/index.ts",
+    "./telegram": "./src/telegram/index.ts",
+    "./turnstile": "./src/turnstile/index.ts"
+  },
+  "scripts": {
+    "check": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@nanostores/persistent": "^1.3.5",
+    "@neondatabase/serverless": "^1.1.0",
+    "drizzle-orm": "^0.45.2",
+    "nanostores": "^1.4.2",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260730.1",
+    "@types/node": "^26.1.2",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
+  }
+}
