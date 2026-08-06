@@ -28,11 +28,14 @@ import type { MediaExtension } from './index';
  */
 
 /**
- * Roughly twice the largest file in the seeded catalog (713 KB), and the only
- * hard bound left. It is bandwidth, not layout: `object-cover` crops a photo to
- * fit but still downloads every byte of it.
+ * The only hard bound left, and it is bandwidth, not layout: `object-cover`
+ * crops a photo to fit but still downloads every byte of it. Tightened from
+ * 5 MB (2026-08-06) because nothing resizes server-side yet, so whatever the
+ * manager uploads is what every phone on `/products` downloads — this cap is
+ * the interim substitute for real resizing. The largest seeded catalog file
+ * (713 KB) still clears it.
  */
-export const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
+export const MAX_UPLOAD_BYTES = 1 * 1024 * 1024;
 
 /**
  * What `test-products/` was shot and exported at. No longer enforced — quoted to
