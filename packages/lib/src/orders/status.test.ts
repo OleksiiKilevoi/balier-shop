@@ -27,6 +27,7 @@ const STOCK_COMMITTED_STATUSES: OrderStatus[] = [
   'paid',
   'packed',
   'shipped',
+  'arrived',
   'delivered',
 ];
 
@@ -169,16 +170,23 @@ describe('canTransition', () => {
 });
 
 describe('carrierCanAdvance', () => {
-  it('moves strictly forward along packed → shipped → delivered, skipping allowed', () => {
+  it('moves strictly forward along packed → shipped → arrived → delivered, skipping allowed', () => {
     expect(carrierCanAdvance('packed', 'shipped')).toBe(true);
-    expect(carrierCanAdvance('shipped', 'delivered')).toBe(true);
-    // A 15-minute tick can miss the branch-arrival code and first see «отримано».
+    expect(carrierCanAdvance('shipped', 'arrived')).toBe(true);
+    expect(carrierCanAdvance('arrived', 'delivered')).toBe(true);
+    // A 15-minute tick can miss the in-transit and branch-arrival codes and
+    // first see «отримано».
+    expect(carrierCanAdvance('packed', 'arrived')).toBe(true);
     expect(carrierCanAdvance('packed', 'delivered')).toBe(true);
+    expect(carrierCanAdvance('shipped', 'delivered')).toBe(true);
   });
 
   it('never moves backward or in place', () => {
     expect(carrierCanAdvance('shipped', 'shipped')).toBe(false);
+    expect(carrierCanAdvance('arrived', 'shipped')).toBe(false);
+    expect(carrierCanAdvance('arrived', 'arrived')).toBe(false);
     expect(carrierCanAdvance('delivered', 'shipped')).toBe(false);
+    expect(carrierCanAdvance('delivered', 'arrived')).toBe(false);
     expect(carrierCanAdvance('delivered', 'delivered')).toBe(false);
   });
 
@@ -186,8 +194,9 @@ describe('carrierCanAdvance', () => {
     // Hard rule 2 (`paid` is webhook-only) and the NP-4 decision that
     // `cancelled`/`refunded` stay human-only, asserted over every status.
     for (const status of ALL_STATUSES) {
-      if (status === 'packed' || status === 'shipped') continue;
+      if (status === 'packed' || status === 'shipped' || status === 'arrived') continue;
       expect(carrierCanAdvance(status, 'shipped'), status).toBe(false);
+      expect(carrierCanAdvance(status, 'arrived'), status).toBe(false);
       expect(carrierCanAdvance(status, 'delivered'), status).toBe(false);
     }
   });
@@ -199,16 +208,18 @@ describe('revertTarget', () => {
     expect(revertTarget(order('packed', 'cod'))).toBe('confirmed');
   });
 
-  it('goes back exactly one step from `shipped` and `delivered`, independent of payment method', () => {
+  it('goes back exactly one step along the carrier tail, independent of payment method', () => {
     for (const method of METHODS) {
       expect(revertTarget(order('shipped', method))).toBe('packed');
-      expect(revertTarget(order('delivered', method))).toBe('shipped');
+      expect(revertTarget(order('arrived', method))).toBe('shipped');
+      expect(revertTarget(order('delivered', method))).toBe('arrived');
     }
   });
 
-  it('has no target for `packed`/`shipped`/`delivered`’s siblings', () => {
+  it('has no target for the carrier chain’s siblings', () => {
     for (const status of ALL_STATUSES) {
-      if (['packed', 'shipped', 'delivered', 'cancelled', 'refunded'].includes(status)) continue;
+      if (['packed', 'shipped', 'arrived', 'delivered', 'cancelled', 'refunded'].includes(status))
+        continue;
       for (const method of METHODS) {
         expect(revertTarget(order(status, method))).toBeNull();
       }
@@ -238,6 +249,7 @@ describe('isStockCommitted', () => {
     expect(isStockCommitted('paid')).toBe(true);
     expect(isStockCommitted('packed')).toBe(true);
     expect(isStockCommitted('shipped')).toBe(true);
+    expect(isStockCommitted('arrived')).toBe(true);
     expect(isStockCommitted('delivered')).toBe(true);
   });
 

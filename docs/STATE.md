@@ -4,8 +4,17 @@
 
 ## 📍 CURRENT STATE (overwrite this block; keep tight)
 
-- **Last done:** **NP-5 whole — the register of shipments — built and driven live end to end**
-  (2026-08-07). Migration `0013` (`np_scan_sheets`: ref PK, number, created_at; applied to dev);
+- **Last done:** **the `arrived` status — «Доставлено» vs «Отримано» split** (2026-08-07, asked
+  for after NP-5). Migration `0014` adds `arrived` between `shipped` and `delivered`; codes 7/8/14
+  now land there, `delivered` is relabelled «Отримано» (9/10/11 — the handover, and for COD the
+  money). The carrier chain is `packed → shipped → arrived → delivered` (skips allowed, tracked by
+  the cron as long as it lasts); COD `moneyCollected` stays `delivered`-only, so an `arrived` COD
+  order offers «Скасувати». Badge tone `attention` (waiting on the customer). Verified against the
+  dev server by flipping a test order to `arrived` and back: badge, carrier hint, correct exit,
+  list filter. 313 tests, gate green. **Uncommitted; the eventual deploy needs `pnpm cron:deploy`
+  too** — the tracking table and chain live in `@balier/lib` and the cron bundles them.
+- **Before that:** **NP-5 whole — the register of shipments — built and driven live end to end**
+  (2026-08-07, committed as `e29e9bd`). Migration `0013` (`np_scan_sheets`: ref PK, number, created_at; applied to dev);
   `orders/register.ts` (`registerEligible` — strictly `packed` + panel-made waybill + no register
   yet, property-tested; `attachRegister` re-checking each order **and its `np_ttn_ref`** under
   `FOR UPDATE`; `removeFromRegister`/`deleteRegister`); `db/queries/scanSheets.ts`; checkbox
@@ -26,9 +35,11 @@
   `manager@balier.com` (both on).
 - **In progress:** nothing. The gate is green (`pnpm check && pnpm build`, **312 tests**).
   Migrations `0006`–`0013` are all applied to the **dev** database.
-- **Next step:** **commit + push** — Workers Builds auto-deploys `balier-dev`/`balier-admin-dev`
-  on push; `0013` is already applied ahead of it, and `balier-cron` needs nothing (it imports none
-  of the register modules). That push closes `docs/plans/novaposhta.md` whole. Then, in the
+- **Next step:** **commit + push, then `pnpm cron:deploy`** — Workers Builds auto-deploys
+  `balier-dev`/`balier-admin-dev` on push; migrations `0013`/`0014` are already applied ahead of
+  it; the cron redeploy is required by the `arrived` change (the tracking table and status chain
+  are bundled into it — until then the deployed cron still maps 7/8/14 to `shipped`, which
+  `carrierCanAdvance` happily applies). That closes `docs/plans/novaposhta.md` whole. Then, in the
   browser on `admin.balier.mlosko.dev`: the register flow end to end once with real parcels
   (create → print at the branch), and the still-standing browser passes — `/checkout`'s delivery
   step, `/categories`, `/settings`, `/users` — plus the flows curl cannot drive (image upload
@@ -178,6 +189,18 @@
 > Empty by design. Everything through the end of Phase 4 was moved to **`docs/history.md`** on
 > 2026-08-05, not rewritten — this file is read in full at every session start and had reached
 > 852 lines. New session entries go here; move a phase's entries across once the phase is done.
+
+**2026-08-07 (the `arrived` status: «Доставлено» ≠ «Отримано»).** Asked to make the panel
+distinguish a parcel at the branch from a parcel handed over. Migration `0014` adds enum value
+`arrived` (BEFORE `delivered`); `tracking.ts` splits codes 7/8 — and 14, «на огляді» — into an
+`ARRIVED` set; `status.ts` grows the link in `CARRIER_CHAIN`, `STOCK_COMMITTED`, `revertTarget`
+(`arrived → shipped`, `delivered → arrived`) and keeps COD `moneyCollected` at `delivered` only;
+`listWaybillOrdersToTrack` tracks `arrived` too; labels — `arrived`: «Доставлено», `delivered`:
+«Отримано»; badge tone `attention`; the order page counts `arrived` as carrier-driven. Tests
+updated with it (313). Verified on the dev server by flipping `B260804-CHDCK` to `arrived` and
+back: badge, hint, «Скасувати» (not refund) for COD-at-branch, `?status=arrived` filter. Gate
+green; uncommitted; deploy will need `pnpm cron:deploy` this time (lib's tracking table is
+bundled into the cron).
 
 **2026-08-07 (NP-5: the register of shipments, driven live).** Opened on «нам что-то осталось по
 novaposhta.md?» — NP-4 turned out already client-verified live (cabinet deletion detached by the

@@ -5,8 +5,8 @@ import type { OrderStatus, PaymentMethod } from '../db/schema';
  * what, and about what that costs inventory, lives here and is unit-tested,
  * while `./updateStatus.ts` stays thin plumbing around it. The shape:
  *
- *   pending → awaiting_payment → paid → packed → shipped → delivered
- *   pending → confirmed → packed → shipped → delivered     (cash on delivery)
+ *   pending → awaiting_payment → paid → packed → shipped → arrived → delivered
+ *   pending → confirmed → packed → shipped → arrived → delivered   (cash on delivery)
  *
  * **The forward chain is not the panel's to drive** (`docs/plans/novaposhta.md`,
  * NP-4). Each forward step has exactly one owner, and none of them is a status
@@ -56,6 +56,7 @@ const STOCK_COMMITTED: ReadonlySet<OrderStatus> = new Set<OrderStatus>([
   'paid',
   'packed',
   'shipped',
+  'arrived',
   'delivered',
 ]);
 
@@ -73,16 +74,19 @@ const TERMINAL: ReadonlySet<OrderStatus> = new Set<OrderStatus>(['cancelled', 'r
  * 2), not the terminal statuses (human-only, by the same NP-4 decision that
  * removed the forward buttons).
  */
-const CARRIER_CHAIN: readonly OrderStatus[] = ['packed', 'shipped', 'delivered'];
+const CARRIER_CHAIN: readonly OrderStatus[] = ['packed', 'shipped', 'arrived', 'delivered'];
+
+/** The statuses only tracking ever produces — `CARRIER_CHAIN` minus its start. */
+export type CarrierMove = 'shipped' | 'arrived' | 'delivered';
 
 /**
  * May tracking move this order to `next`? Strictly forward along
- * `packed → shipped → delivered`, and skipping is allowed on purpose: a
- * 15-minute tick can easily miss the branch-arrival code and first see
- * «отримано», and the parcel being handed over is better evidence of
- * `delivered` than our having witnessed every hop on the way.
+ * `packed → shipped → arrived → delivered`, and skipping is allowed on
+ * purpose: a 15-minute tick can easily miss the in-transit or branch-arrival
+ * code and first see «отримано», and the parcel being handed over is better
+ * evidence of `delivered` than our having witnessed every hop on the way.
  */
-export function carrierCanAdvance(current: OrderStatus, next: 'shipped' | 'delivered'): boolean {
+export function carrierCanAdvance(current: OrderStatus, next: CarrierMove): boolean {
   const from = CARRIER_CHAIN.indexOf(current);
   return from !== -1 && CARRIER_CHAIN.indexOf(next) > from;
 }
@@ -92,12 +96,19 @@ export function carrierCanAdvance(current: OrderStatus, next: 'shipped' | 'deliv
  *
  * Card is taken up front, so it has from `paid` onward. Cash on delivery is
  * collected by the carrier when the parcel is handed over, so it has only at
- * `delivered` — which is why a cash order in transit is *cancelled*, not
- * refunded: there is nothing to refund.
+ * `delivered` («Отримано») — not at `arrived`: a COD parcel sitting at the
+ * branch is still just a parcel, which is why a cash order anywhere short of
+ * the handover is *cancelled*, not refunded: there is nothing to refund.
  */
 function moneyCollected(status: OrderStatus, paymentMethod: PaymentMethod): boolean {
   if (paymentMethod === 'cod') return status === 'delivered';
-  return status === 'paid' || status === 'packed' || status === 'shipped' || status === 'delivered';
+  return (
+    status === 'paid' ||
+    status === 'packed' ||
+    status === 'shipped' ||
+    status === 'arrived' ||
+    status === 'delivered'
+  );
 }
 
 /**
@@ -118,9 +129,9 @@ export interface OrderStateInput {
  * `packed`'s target depends on `paymentMethod` — see the module doc: a card
  * order's only path to `packed` was through the webhook's `paid`, a cash
  * order's only path was through `create.ts`'s `confirmed`, and reverting
- * restores whichever one actually happened rather than guessing. `shipped`
- * and `delivered` don't need the split — both payment methods reach them
- * through the same last two links of the chain. `cancelled`/`refunded` revert
+ * restores whichever one actually happened rather than guessing. `shipped`,
+ * `arrived` and `delivered` don't need the split — both payment methods reach
+ * them through the same tail of the chain. `cancelled`/`refunded` revert
  * to whatever `statusBeforeExit` recorded, but only when that recording is
  * itself a `STOCK_COMMITTED` status — the same eligibility rule that keeps
  * `pending`/`awaiting_payment` unreachable everywhere else in this module.
@@ -131,8 +142,10 @@ export function revertTarget(order: OrderStateInput): OrderStatus | null {
       return order.paymentMethod === 'cod' ? 'confirmed' : 'paid';
     case 'shipped':
       return 'packed';
-    case 'delivered':
+    case 'arrived':
       return 'shipped';
+    case 'delivered':
+      return 'arrived';
     case 'cancelled':
     case 'refunded': {
       const prior = order.statusBeforeExit;

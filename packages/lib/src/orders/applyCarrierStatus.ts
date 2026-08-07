@@ -21,7 +21,7 @@ import { waybillDetachPatch } from './waybill';
 
 export interface CarrierDecision {
   /** The forward move tracking testifies to, already checked against the chain. */
-  move: 'shipped' | 'delivered' | null;
+  move: 'shipped' | 'arrived' | 'delivered' | null;
   /** Code 2 — clear the waybill columns and revert `packed`, like «Видалити ТТН». */
   detach: boolean;
   /** Code 11 seen for the first time — stamp `npMoneyTransferAt`. */

@@ -52,15 +52,22 @@ describe('carrierStatusIntent', () => {
   });
 
   it('maps the in-transit family to shipped', () => {
-    for (const code of ['4', '41', '5', '6', '7', '8', '12', '14', '101', '104', '112']) {
+    for (const code of ['4', '41', '5', '6', '12', '101', '104', '112']) {
       expect(carrierStatusIntent(code).move, code).toBe('shipped');
     }
   });
 
-  it('treats inspection (14) as shipped, never delivered', () => {
-    // The recipient is holding the parcel but has not accepted it — money has
-    // not changed hands, so `delivered` (which for COD *means* money) is wrong.
-    expect(carrierStatusIntent('14').move).toBe('shipped');
+  it('maps branch/locker arrival to arrived — «Доставлено», not yet «Отримано»', () => {
+    for (const code of ['7', '8']) {
+      expect(carrierStatusIntent(code).move, code).toBe('arrived');
+    }
+  });
+
+  it('treats inspection (14) as arrived, never delivered', () => {
+    // The recipient is holding the parcel at the branch but has not accepted
+    // it — money has not changed hands, so `delivered` (which for COD *means*
+    // money) is wrong.
+    expect(carrierStatusIntent('14').move).toBe('arrived');
   });
 
   it('maps receipt to delivered, and code 11 additionally stamps the transfer', () => {

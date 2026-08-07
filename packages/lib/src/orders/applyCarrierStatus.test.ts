@@ -32,11 +32,13 @@ describe('decideCarrierStatus', () => {
     });
   });
 
-  it('moves shipped to delivered on receipt, and can skip shipped entirely', () => {
-    expect(decideCarrierStatus(order('shipped', '4'), tracked('9')).move).toBe('delivered');
-    // A 15-minute tick that never saw the in-transit code — the handover is
+  it('moves shipped to arrived on branch arrival, and on to delivered on receipt', () => {
+    expect(decideCarrierStatus(order('shipped', '4'), tracked('7')).move).toBe('arrived');
+    expect(decideCarrierStatus(order('arrived', '7'), tracked('9')).move).toBe('delivered');
+    // A 15-minute tick that never saw the intermediate codes — the handover is
     // better evidence of `delivered` than our having witnessed every hop.
     expect(decideCarrierStatus(order('packed'), tracked('9')).move).toBe('delivered');
+    expect(decideCarrierStatus(order('packed'), tracked('7')).move).toBe('arrived');
   });
 
   it('never moves backward — a late in-transit code after delivery changes nothing but the record', () => {

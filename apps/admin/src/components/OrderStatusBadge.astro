@@ -28,6 +28,8 @@ const TONES: Record<OrderStatus, string> = {
   // Waiting on us, or on the carrier.
   packed: 'admin-tone-progress',
   shipped: 'admin-tone-progress',
+  // At the branch — waiting on the customer to come and pick it up.
+  arrived: 'admin-tone-attention',
   // Finished.
   delivered: 'admin-tone-neutral',
   // Dead ends.

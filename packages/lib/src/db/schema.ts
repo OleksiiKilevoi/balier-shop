@@ -28,6 +28,14 @@ export const orderStatus = pgEnum('order_status', [
   'confirmed',
   'packed',
   'shipped',
+  /**
+   * The parcel is at the destination branch or locker, waiting to be picked up
+   * (NP codes 7/8, panel label «Доставлено»). Split out of `shipped` on
+   * 2026-08-07 at the client's request; `delivered` stays the *handover*
+   * («Отримано») — the distinction matters exactly because a COD parcel at the
+   * branch is not yet money.
+   */
+  'arrived',
   'delivered',
   'cancelled',
   'refunded',

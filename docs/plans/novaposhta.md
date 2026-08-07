@@ -58,6 +58,14 @@ rather than in a commit message.
   (the waybill was created in the Nova Poshta cabinet). Without it, an order whose waybill was made
   outside the panel could never be tracked.
 
+- **«Доставлено» and «Отримано» are two different statuses** (asked for 2026-08-07, after NP-5):
+  `arrived` — the parcel is at the destination branch/locker, waiting for the customer (codes 7/8,
+  and 14 «на огляді») — was split out of `shipped`, and `delivered` was relabelled «Отримано» (the
+  handover, codes 9/10/11). The chain is `packed → shipped → arrived → delivered`, still
+  carrier-only and forward-only with skips. COD money still exists only at `delivered`, so a COD
+  order sitting at the branch offers «Скасувати», not «Повернути кошти». Migration `0014` adds the
+  enum value.
+
 ## Constraints
 
 - **No business account.** The client has no access to one and will register a personal Nova Poshta
@@ -253,8 +261,9 @@ intent, the code is the truth:
 | 1 | waybill created, parcel not handed over | stays `packed` |
 | 2 | deleted (in the NP cabinet — panel deletions clear our record themselves) | **detach**: clear the waybill columns and revert `packed` the way «Видалити ТТН» does; alert so the deletion is noticed. Asked for 2026-08-07 after a cabinet deletion left a dead record behind |
 | 3 | number not found | no move, alert |
-| 12, 4, 5, 6, 7, 8, 101, 104, 112 | in transit, arrived at branch or locker | `shipped` |
-| 9, 10 | received | `delivered` |
+| 12, 4, 41, 5, 6, 101, 104, 112 | in transit | `shipped` |
+| 7, 8, 14 | at the destination branch or locker (14 — «на огляді», still not received) | `arrived` («Доставлено» — split out of `shipped` 2026-08-07, see «Decisions») |
+| 9, 10 | received | `delivered` («Отримано») |
 | 11 | received, money transfer credited | `delivered` + `np_money_transfer_at` |
 | 102, 103, 105, 106, 111 | refusal, storage ended, return, failed attempt | no move, alert |
 

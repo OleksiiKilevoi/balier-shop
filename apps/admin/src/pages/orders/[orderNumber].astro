@@ -406,7 +406,8 @@ const revertFromRefundedWarning =
   order && revert && order.status === 'refunded' ? ORDER_REVERT_FROM_REFUNDED_WARNING : null;
 /** Statuses whose next movement belongs to the carrier — say so, since the
  * buttons that used to imply otherwise are gone. */
-const carrierDriven = order?.status === 'packed' || order?.status === 'shipped';
+const carrierDriven =
+  order?.status === 'packed' || order?.status === 'shipped' || order?.status === 'arrived';
 ---
 
 <AdminLayout title={order ? `Замовлення ${order.orderNumber}` : 'Замовлення не знайдено'}>

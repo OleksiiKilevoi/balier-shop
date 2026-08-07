@@ -21,7 +21,10 @@ export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
   confirmed: 'Підтверджено',
   packed: 'ТТН створено',
   shipped: 'Відправлено',
-  delivered: 'Доставлено',
+  /* NP codes 7/8/14 — at the branch or locker, waiting for the customer. */
+  arrived: 'Доставлено',
+  /* NP codes 9/10/11 — the handover; for COD also the moment the money exists. */
+  delivered: 'Отримано',
   cancelled: 'Скасовано',
   refunded: 'Повернено',
 };
@@ -30,8 +33,9 @@ export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
  * The button that produces each status — a verb, not the status name, because
  * the operator is recording something they did, not choosing a state.
  * Only the two exits carry a verb since NP-4: the forward chain has no
- * buttons at all — `packed` is «Створити ТТН»'s to set, `shipped`/`delivered`
- * are the tracking cron's (`docs/plans/novaposhta.md`). The rest of the map
+ * buttons at all — `packed` is «Створити ТТН»'s to set,
+ * `shipped`/`arrived`/`delivered` are the tracking cron's
+ * (`docs/plans/novaposhta.md`). The rest of the map
  * is the plain status labels, kept complete so an unexpected key still
  * renders words rather than nothing.
  */
@@ -75,7 +79,8 @@ export const ORDER_REVERT_LABELS: Partial<Record<OrderStatus, string>> = {
   confirmed: 'Повернути до «Підтверджено»',
   packed: 'Повернути до «ТТН створено»',
   shipped: 'Повернути до «Відправлено»',
-  delivered: 'Повернути до «Доставлено»',
+  arrived: 'Повернути до «Доставлено»',
+  delivered: 'Повернути до «Отримано»',
 };
 
 /**

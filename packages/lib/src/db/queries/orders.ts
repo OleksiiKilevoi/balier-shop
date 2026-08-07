@@ -80,8 +80,9 @@ export async function getOrderItemWeights(db: Db, orderId: string): Promise<Orde
 /**
  * The orders whose waybill NP-4's tracking tick asks the carrier about.
  *
- * `packed` and `shipped` are tracked as long as they last — each needs the
- * carrier (or a human, alerted) to resolve it, so there is no honest cutoff.
+ * `packed`, `shipped` and `arrived` are tracked as long as they last — each
+ * needs the carrier (or a human, alerted) to resolve it, so there is no honest
+ * cutoff.
  * A *delivered* COD order is tracked only for its code 11 (the money transfer
  * credited, `npMoneyTransferAt`), and only for 30 days past its last movement:
  * a credit that has not arrived a month after handover is not going to be
@@ -101,7 +102,7 @@ export async function listWaybillOrdersToTrack(db: Db): Promise<TrackedWaybillOr
       and(
         isNotNull(orders.npTtn),
         or(
-          inArray(orders.status, ['packed', 'shipped']),
+          inArray(orders.status, ['packed', 'shipped', 'arrived']),
           and(
             eq(orders.status, 'delivered'),
             eq(orders.paymentMethod, 'cod'),

@@ -6,9 +6,9 @@ import type { NovaPoshtaClient } from './client';
  * table that NP-4's `applyCarrierStatus` will read.
  *
  * The table encodes one hard rule from the plan: **automation may only move an
- * order forward along `packed → shipped → delivered`; every unhappy code is an
- * alert and never a transition.** Automation that cancels an order on a
- * carrier code will eventually cancel a paid one.
+ * order forward along `packed → shipped → arrived → delivered`; every unhappy
+ * code is an alert and never a transition.** Automation that cancels an order
+ * on a carrier code will eventually cancel a paid one.
  */
 
 /* ----------------------------------------------------------------- tracking */
@@ -71,7 +71,7 @@ export interface CarrierStatusIntent {
    * nothing. `packed` never appears: code 1 (created, not handed over) means
    * the order simply *stays* `packed`, and staying is not a move.
    */
-  move: 'shipped' | 'delivered' | null;
+  move: 'shipped' | 'arrived' | 'delivered' | null;
   /**
    * Code 2 — the document no longer exists at the carrier, because someone
    * deleted it in the NP cabinet (panel deletions clear our record before the
@@ -97,17 +97,25 @@ export interface CarrierStatusIntent {
  *   1              created, parcel not handed over          stays `packed`
  *   2              deleted in the NP cabinet                 detach, silent
  *   3              number not found                          alert
- *   4, 41, 5, 6,   in transit / arrived / with recipient     `shipped`
- *   7, 8, 12, 14,    for inspection (14 is NOT received)
- *   101, 104, 112
+ *   4, 41, 5, 6,   in transit                                `shipped`
+ *   12, 101, 104,
+ *   112
+ *   7, 8           at the destination branch / locker        `arrived`
+ *   14             with the recipient for inspection —       `arrived`
+ *                    at the branch, NOT received
  *   9, 10          received                                  `delivered`
  *   11             received + money transfer credited        `delivered` + stamp
  *   102, 103, 108  refusal                                   alert
  *   105            storage ended                             alert
  *   106            return waybill created                    alert
  *   111            failed delivery attempt                   alert
+ *
+ * `arrived` was split out of `shipped` on 2026-08-07 at the client's request:
+ * the panel now distinguishes «Доставлено» (at the branch, codes 7/8/14) from
+ * «Отримано» (the handover, 9/10/11).
  */
-const SHIPPED = new Set(['4', '41', '5', '6', '7', '8', '12', '14', '101', '104', '112']);
+const SHIPPED = new Set(['4', '41', '5', '6', '12', '101', '104', '112']);
+const ARRIVED = new Set(['7', '8', '14']);
 const DELIVERED = new Set(['9', '10', '11']);
 
 const ALERTS: Record<string, CarrierAlert> = {
@@ -125,6 +133,9 @@ export function carrierStatusIntent(statusCode: string): CarrierStatusIntent {
 
   if (SHIPPED.has(code)) {
     return { move: 'shipped', detach: false, moneyTransfer: false, alert: null, known: true };
+  }
+  if (ARRIVED.has(code)) {
+    return { move: 'arrived', detach: false, moneyTransfer: false, alert: null, known: true };
   }
   if (DELIVERED.has(code)) {
     return {
