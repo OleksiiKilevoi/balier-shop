@@ -9,6 +9,7 @@ import { getNpSenderSettings, getReservationTtlMinutes } from '@balier/lib/db/qu
 import {
   ADMIN_CARD_LINK_EXPIRED,
   ADMIN_ORDER_MESSAGES,
+  ADMIN_STATUS_CARRIER_HINT,
   ADMIN_WAYBILL_BLOCKERS,
   ADMIN_WAYBILL_ERRORS,
   ADMIN_WAYBILL_MANUAL_NOTE,
@@ -16,7 +17,6 @@ import {
   ORDER_REVERT_FROM_REFUNDED_WARNING,
   ORDER_REVERT_HINTS,
   ORDER_REVERT_LABELS,
-  ORDER_REVERT_PAYMENT_WARNING,
   ORDER_STATUS_LABELS,
   ORDER_TRANSITION_HINTS,
   ORDER_TRANSITION_LABELS,
@@ -30,12 +30,7 @@ import { createMonobankPayment } from '@balier/lib/monobank';
 import { DELIVERY_METHOD_LABELS, PAYMENT_METHOD_LABELS, deliveryDestination } from '@balier/lib/notify/format';
 import { createNovaPoshtaShipping } from '@balier/lib/novaposhta/shipping';
 import { splitRecipientName } from '@balier/lib/novaposhta/waybill';
-import {
-  allowedTransitions,
-  orderDetailsLock,
-  revertCrossesPayment,
-  revertTarget,
-} from '@balier/lib/orders/status';
+import { allowedTransitions, orderDetailsLock, revertTarget } from '@balier/lib/orders/status';
 import { removeCancelledOrderInvoices, updateOrderStatus } from '@balier/lib/orders/updateStatus';
 import { attachWaybill, detachWaybill } from '@balier/lib/orders/waybill';
 import type { NpSenderSettings } from '@balier/lib/db/queries/settings';
@@ -196,7 +191,8 @@ if (Astro.request.method === 'POST') {
     const current = await findAdminOrder(db, orderNumber);
     if (!current) return new Response('Замовлення не знайдено', { status: 404 });
     // A hand-entered number has no ref — there is nothing of ours at the
-    // carrier to delete; clearing the number is the `ttn` intent's job.
+    // carrier to delete. Since manual entry was removed (2026-08-07) such
+    // legacy rows have no panel delete path at all; dev-only data, accepted.
     if (!current.npTtnRef) return done(current.npTtn ? 'bad_request' : 'no_waybill');
     if (!env.NOVAPOSHTA_API_KEY) return done('bad_request');
 
@@ -358,13 +354,12 @@ const weightTotalGrams =
 const waybillBlockers: string[] = [];
 if (waybillEligible && npSender) {
   if (!env.NOVAPOSHTA_API_KEY) waybillBlockers.push(ADMIN_WAYBILL_BLOCKERS.noApiKey);
-  if (!senderComplete(npSender)) {
-    waybillBlockers.push(
-      order!.paymentMethod === 'cod'
-        ? ADMIN_WAYBILL_BLOCKERS.codUnavailable
-        : ADMIN_WAYBILL_BLOCKERS.senderIncomplete,
-    );
-  }
+  /* One message for both payment methods: NP-3's live driving proved a COD
+     waybill creates fine on a personal key (`docs/plans/novaposhta.md`, live
+     finding 2), so the fix here is always the same — fill in the sender.
+     Whether the money transfer pays out at handover on a personal account is
+     still the plan's open «Constraints» question, but it is not this form's. */
+  if (!senderComplete(npSender)) waybillBlockers.push(ADMIN_WAYBILL_BLOCKERS.senderIncomplete);
   if (!deliveryCityRef) waybillBlockers.push(ADMIN_WAYBILL_BLOCKERS.noDeliveryCity);
 }
 
@@ -393,27 +388,25 @@ const waybillFieldMessages = [
 ] as string[];
 
 const transitions = order ? allowedTransitions(order) : [];
-const revert = order ? revertTarget(order) : null;
 /*
- * `packed` is filtered out along with the exits: the status is «ТТН створено»,
- * and the only thing that produces it is «Створити ТТН» in the card below —
- * a button that set it by hand would claim a waybill that does not exist
- * (`docs/plans/novaposhta.md`: there is no button for it).
+ * No forward buttons since NP-4: `packed` is «Створити ТТН»'s to set,
+ * `shipped`/`delivered` are the tracking cron's, and the forward-chain
+ * reverts died with them — undoing `packed` is deleting its waybill, and
+ * un-marking `shipped` by hand would be re-applied by the next tick. What the
+ * state machine still offers is the exit, and — from `cancelled`/`refunded`
+ * only — the revert that undoes the exit. Gated by `allowedTransitions`
+ * rather than read off `revertTarget` directly, so this page cannot render a
+ * button the server would refuse.
  */
-const forward = transitions.filter(
-  (next) => next !== 'cancelled' && next !== 'refunded' && next !== revert && next !== 'packed',
-);
+const revertCandidate = order ? revertTarget(order) : null;
+const revert =
+  revertCandidate !== null && transitions.includes(revertCandidate) ? revertCandidate : null;
 const exits = transitions.filter((next) => next === 'cancelled' || next === 'refunded');
-const revertWarning = order && revert && revertCrossesPayment(order) ? ORDER_REVERT_PAYMENT_WARNING : null;
 const revertFromRefundedWarning =
   order && revert && order.status === 'refunded' ? ORDER_REVERT_FROM_REFUNDED_WARNING : null;
-/**
- * Undoing `cancelled`/`refunded` re-decrements stock and can fail — a real
- * side effect, unlike the plain forward-chain revert — so it gets the same
- * two-click disclosure gate as the exits it undoes, rather than sitting next
- * to the ungated `packed`/`shipped`/`delivered` revert button.
- */
-const leavingTerminal = order?.status === 'cancelled' || order?.status === 'refunded';
+/** Statuses whose next movement belongs to the carrier — say so, since the
+ * buttons that used to imply otherwise are gone. */
+const carrierDriven = order?.status === 'packed' || order?.status === 'shipped';
 ---
 
 <AdminLayout title={order ? `Замовлення ${order.orderNumber}` : 'Замовлення не знайдено'}>
@@ -470,48 +463,20 @@ const leavingTerminal = order?.status === 'cancelled' || order?.status === 'refu
             Зараз: <strong class="text-fg font-medium">{ORDER_STATUS_LABELS[order.status]}</strong>
           </p>
 
+          {/* The forward chain moves itself now — «Створити ТТН» below sets
+              «ТТН створено», the tracking cron moves the rest — so this card
+              says so where the buttons used to be, and keeps only the way
+              out (and, from a terminal status, the way back). */}
+          {carrierDriven && (
+            <p class="text-fg-subtle mt-2 text-sm">{ADMIN_STATUS_CARRIER_HINT}</p>
+          )}
+
           {transitions.length === 0 ? (
             <p class="text-fg-subtle mt-2 text-sm">
               Замовлення завершене — далі статус не змінюється.
             </p>
           ) : (
             <>
-              {forward.map((next) => (
-                <form method="post" action={selfUrl} class="mt-3">
-                  <input type="hidden" name="intent" value="status" />
-                  {/* The status this page was rendered from: the server refuses
-                      the move if the row has changed since, so a stale tab
-                      cannot fire a transition nobody chose. */}
-                  <input type="hidden" name="from" value={order.status} />
-                  <input type="hidden" name="next" value={next} />
-                  <button type="submit" class="admin-btn admin-btn-primary w-full sm:w-auto">
-                    {ORDER_TRANSITION_LABELS[next]}
-                  </button>
-                </form>
-              ))}
-
-              {/* Undoing a wrong click, not a sale — no stock or reservation
-                  moves, so unlike the exits below this needs no disclosure
-                  gate. Only ever rendered here for `packed`/`shipped`/
-                  `delivered`; leaving `cancelled`/`refunded` renders its own
-                  gated form below instead (`leavingTerminal`). */}
-              {revert && !leavingTerminal && (
-                <form method="post" action={selfUrl} class="mt-3">
-                  <input type="hidden" name="intent" value="status" />
-                  <input type="hidden" name="from" value={order.status} />
-                  <input type="hidden" name="next" value={revert} />
-                  {ORDER_REVERT_HINTS[revert] && (
-                    <p class="text-fg-subtle mb-2 text-sm">{ORDER_REVERT_HINTS[revert]}</p>
-                  )}
-                  {revertWarning && (
-                    <p class="text-fg-subtle mb-2 text-sm">{revertWarning}</p>
-                  )}
-                  <button type="submit" class="admin-btn admin-btn-secondary w-full sm:w-auto">
-                    {ORDER_REVERT_LABELS[revert]}
-                  </button>
-                </form>
-              )}
-
               {/* A disclosure rather than a confirm dialog: these are terminal
                   (or undo a terminal state, which re-touches stock the same way
                   exiting it did) and there is no script on this page. Two
@@ -519,7 +484,7 @@ const leavingTerminal = order?.status === 'cancelled' || order?.status === 'refu
               {/* The disclosure ids keep them open across the enhancement
                   layer's swaps — a refused action must not fold away the
                   warning it was refused under. */}
-              {(exits.length > 0 || (revert && leavingTerminal)) && (
+              {(exits.length > 0 || revert) && (
                 <details id="order-exits" class="admin-disclosure border-border mt-4 border-t pt-4">
                   <summary>
                     Інші дії
@@ -536,7 +501,7 @@ const leavingTerminal = order?.status === 'cancelled' || order?.status === 'refu
                       <path d="m4 6 4 4 4-4" />
                     </svg>
                   </summary>
-                  {revert && leavingTerminal && (
+                  {revert && (
                     <form method="post" action={selfUrl} class="mt-3">
                       <input type="hidden" name="intent" value="status" />
                       <input type="hidden" name="from" value={order.status} />
@@ -766,6 +731,15 @@ const leavingTerminal = order?.status === 'cancelled' || order?.status === 'refu
                     {order.npStatusAt && (
                       <span class="text-fg-subtle"> · {formatAdminDateTime(order.npStatusAt)}</span>
                     )}
+                  </p>
+                )}
+                {/* Code 11 — the COD payout credited. The one line that says
+                    the money actually arrived, since `delivered` deliberately
+                    means the handover, not the credit. */}
+                {order.npMoneyTransferAt && (
+                  <p class="text-fg-muted mt-1 text-sm">
+                    Грошовий переказ зараховано
+                    <span class="text-fg-subtle"> · {formatAdminDateTime(order.npMoneyTransferAt)}</span>
                   </p>
                 )}
 

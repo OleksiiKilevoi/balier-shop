@@ -1,32 +1,34 @@
 import type { OrderStatus, PaymentMethod } from '../db/schema';
 
 /**
- * The order state machine, as the admin panel is allowed to drive it.
- *
- * Pure on purpose: every rule about what may follow what, and about what that
- * costs inventory, lives here and is unit-tested, while `./updateStatus.ts`
- * stays thin plumbing around it. `docs/CONVENTIONS.md` fixes the shape —
- * transitions move forward through the list, one step back, or out via
- * cancellation/refund:
+ * The order state machine. Pure on purpose: every rule about what may follow
+ * what, and about what that costs inventory, lives here and is unit-tested,
+ * while `./updateStatus.ts` stays thin plumbing around it. The shape:
  *
  *   pending → awaiting_payment → paid → packed → shipped → delivered
  *   pending → confirmed → packed → shipped → delivered     (cash on delivery)
  *
- * `paid` and `confirmed` are never *forward* targets from here — only the
- * Monobank webhook may set `paid` (`docs/CONVENTIONS.md`, hard rule 2), and only
- * `./create.ts` sets `confirmed` when the order is placed. A button that
- * produced either as a fresh transition would be forging a payment or an order.
+ * **The forward chain is not the panel's to drive** (`docs/plans/novaposhta.md`,
+ * NP-4). Each forward step has exactly one owner, and none of them is a status
+ * button: only the Monobank webhook sets `paid` (`docs/CONVENTIONS.md`, hard
+ * rule 2), only `./create.ts` sets `confirmed` when the order is placed, only
+ * creating a waybill sets `packed` (`./waybill.ts` — the act of packing *is*
+ * the waybill), and only the carrier's own tracking moves `packed → shipped →
+ * delivered` (`./applyCarrierStatus.ts`, fed by the cron; `carrierCanAdvance`
+ * below is its rule). What the panel keeps is the way *out* — cancel or
+ * refund — and the way back out of those. An order shipped outside Nova
+ * Poshta therefore has no path forward at all; that risk was raised and
+ * accepted, and the cron's stuck-order alert is the mitigation.
  *
- * They *are* legal **revert** targets, but only from exactly one place each,
- * because `FORWARD` maps both of them to `packed` and nothing else does: a
- * card order can only have reached `packed` by first passing through the
- * webhook's `paid`, and a cash order can only have reached `packed` by first
- * passing through `create.ts`'s `confirmed`. So reverting `packed` is never
- * inventing a status — it is restoring the one that got the order there in
- * the first place, picked by `paymentMethod` since the two payment methods
- * diverge at exactly this point. `awaiting_payment` and `pending` stay
- * unreachable in every direction: nothing before `paid`/`confirmed` is ever
- * revertable, because the panel has no earlier foothold to restore from.
+ * `paid` and `confirmed` remain legal **revert** targets from exactly one
+ * place: deleting `packed`'s waybill (`./waybill.ts` via `revertTarget`). A
+ * card order can only have reached `packed` through the webhook's `paid`, a
+ * cash order only through `create.ts`'s `confirmed`, so reverting `packed` is
+ * never inventing a status — it restores the one that got the order there,
+ * picked by `paymentMethod` since the two payment methods diverge at exactly
+ * this point. `awaiting_payment` and `pending` stay unreachable in every
+ * direction: nothing before `paid`/`confirmed` is ever revertable, because
+ * the panel has no earlier foothold to restore from.
  *
  * `cancelled` and `refunded` are terminal to *forward* progress, but they too
  * have exactly one legal way back: `orders.statusBeforeExit`
@@ -64,18 +66,26 @@ export function isStockCommitted(status: OrderStatus): boolean {
 /** Nothing follows these by *forward* progress — but see `revertTarget`. */
 const TERMINAL: ReadonlySet<OrderStatus> = new Set<OrderStatus>(['cancelled', 'refunded']);
 
-/** The single step forward from each status, or `null` where the panel has none. */
-const FORWARD: Readonly<Record<OrderStatus, OrderStatus | null>> = {
-  pending: null,
-  awaiting_payment: null,
-  paid: 'packed',
-  confirmed: 'packed',
-  packed: 'shipped',
-  shipped: 'delivered',
-  delivered: null,
-  cancelled: null,
-  refunded: null,
-};
+/**
+ * The slice of the chain the carrier owns, in travel order. `packed` is where
+ * a waybill starts and `delivered` is where it ends; nothing outside these
+ * three is ever the carrier's to touch — not `paid` (webhook-only, hard rule
+ * 2), not the terminal statuses (human-only, by the same NP-4 decision that
+ * removed the forward buttons).
+ */
+const CARRIER_CHAIN: readonly OrderStatus[] = ['packed', 'shipped', 'delivered'];
+
+/**
+ * May tracking move this order to `next`? Strictly forward along
+ * `packed → shipped → delivered`, and skipping is allowed on purpose: a
+ * 15-minute tick can easily miss the branch-arrival code and first see
+ * «отримано», and the parcel being handed over is better evidence of
+ * `delivered` than our having witnessed every hop on the way.
+ */
+export function carrierCanAdvance(current: OrderStatus, next: 'shipped' | 'delivered'): boolean {
+  const from = CARRIER_CHAIN.indexOf(current);
+  return from !== -1 && CARRIER_CHAIN.indexOf(next) > from;
+}
 
 /**
  * Has the customer's money actually reached us at this point?
@@ -134,42 +144,19 @@ export function revertTarget(order: OrderStateInput): OrderStatus | null {
 }
 
 /**
- * True when stepping back one status would flip "has the money arrived?" from
- * yes to no. In practice this is only cash on delivery's `delivered → shipped`:
- * money lands when the carrier hands the parcel over, so undoing that admits
- * the order was never actually paid for — and the exit action offered next
- * silently changes from refund back to cancel. Card never crosses this,
- * because every status from `paid` on already counts as collected. Reverting
- * out of `cancelled`/`refunded` never crosses it either, in either direction:
- * `statusBeforeExit` is only ever offered as a target when it is
- * `STOCK_COMMITTED`, and every `STOCK_COMMITTED` status already agrees with
- * `cancelled`/`refunded` on whether money was collected (that is exactly how
- * `allowedTransitions` chose between the two exits to begin with).
+ * What an operator may do to this order. Since NP-4 that is only the way out:
+ * cancel or refund, exactly one of the two, decided by whether money has
+ * changed hands — an order that was never paid for cannot be *refunded*, and
+ * an order that was paid for must not be quietly *cancelled* with the money
+ * still held. Both return committed stock; see `isStockCommitted`.
  *
- * Purely informational — `updateStatus.ts` does not consult this for the
- * forward-chain revert (no money or stock moves there); it exists so the
- * panel can warn before the click rather than surprise the operator after.
- */
-export function revertCrossesPayment(order: OrderStateInput): boolean {
-  const target = revertTarget(order);
-  if (!target) return false;
-  return (
-    moneyCollected(order.status, order.paymentMethod) && !moneyCollected(target, order.paymentMethod)
-  );
-}
-
-/**
- * What an operator may do to this order, in the order the buttons should read:
- * the step forward first, then the step back, then the way out.
- *
- * The way out is exactly one of the two, decided by whether money has changed
- * hands — an order that was never paid for cannot be *refunded*, and an order
- * that was paid for must not be quietly *cancelled* with the money still held.
- * Both return committed stock; see `isStockCommitted`.
- *
- * `cancelled`/`refunded` are the one case where the step back is the *only*
- * thing on offer — there is no forward step and no further exit from a
- * terminal status, only (maybe) undoing the exit itself.
+ * No forward steps (each has its one non-panel owner — see the module doc)
+ * and no forward-chain reverts either: undoing `packed` is deleting its
+ * waybill, and un-marking `shipped`/`delivered` by hand would just be
+ * re-applied by the next tracking tick — a button that fights the cron is
+ * worse than no button. `cancelled`/`refunded` are the one case where the
+ * step back is the *only* thing on offer — there is no forward step and no
+ * further exit from a terminal status, only (maybe) undoing the exit itself.
  */
 export function allowedTransitions(order: OrderStateInput): readonly OrderStatus[] {
   if (TERMINAL.has(order.status)) {
@@ -177,13 +164,7 @@ export function allowedTransitions(order: OrderStateInput): readonly OrderStatus
     return back ? [back] : [];
   }
 
-  const forward = FORWARD[order.status];
-  const back = revertTarget(order);
-  const exit: OrderStatus = moneyCollected(order.status, order.paymentMethod)
-    ? 'refunded'
-    : 'cancelled';
-
-  return [forward, back, exit].filter((next): next is OrderStatus => next !== null);
+  return [moneyCollected(order.status, order.paymentMethod) ? 'refunded' : 'cancelled'];
 }
 
 export function canTransition(order: OrderStateInput, next: OrderStatus): boolean {

@@ -4,30 +4,33 @@
 
 ## 📍 CURRENT STATE (overwrite this block; keep tight)
 
-- **Last done:** **three order-page fixes** (2026-08-07, evening). (1) `/orders/[n]` no longer
-  reloads on any action — `enhanceAdminForms` wired in (`#order-editor` root, `#order-toast`,
-  `#order-message`, disclosure ids so a refusal can't fold its own warning away, `onRender`
-  re-wiring the copy-link button); «Створити ТТН» included. (2) `packed` renamed: «Упаковано» →
-  **«ТТН створено»** (status, revert label; `waybill_created` shortened to match). (3) Manual ТТН
-  entry/change **removed end to end** — the hand-entry block, the `ttn` intent,
-  `trackingNumberSchema`/`TRACKING_NUMBER_LENGTH`, `setOrderTrackingNumber`, and the four
-  `ttn_*`/`invalid_tracking_number` messages; the `noDeliveryCity` blocker no longer offers the
-  cabinet fallback. With the rename, the manual «Позначити упакованим» forward button is gone too
-  (plan decision: creating the waybill *is* the transition; `shipped`/`delivered` buttons stay
-  until NP-4). Consequence to know: a legacy hand-entered ТТН (npTtn without ref) now has no
-  delete path, so such an order can't be edited past `edit_ttn_exists` except in the DB — dev-only
-  data. 303 tests, gate green. **Not driven in a browser yet, not deployed, not committed.**
-- **Before that, same day:** **order editing in the panel** — `/orders/[n]/edit` in
-  `/orders/new`'s draft mould, `orderDetailsLock` (editable through `packed`, ТТН outranks
-  status), `updateOrderDetails` re-checking under `FOR UPDATE`; driven live via Node fetch, QA
-  rows restored. Plus one-tap city chips on `/orders/new` and the edit page. Details in the log.
-- **Previously:** **NP-1, NP-2 and NP-3 from `docs/plans/novaposhta.md`, all in one day**
-  (2026-08-07) — migration `0011` (variant weight, seven `np_*` columns), the sender section on
-  `/settings`, the whole carrier adapter (no sandbox exists for API 2.0), and the «Нова Пошта»
-  card with carrier-first ТТН create/delete, driven live against the real API (real PDF printed,
-  both test waybills deleted). Migration `0012` moved the city ref onto `np_warehouses` (Kyiv
-  backfilled in dev; the country fills on the next full sync). Details in the session log below.
-- **In progress:** nothing. The gate is green (`pnpm check && pnpm build`, **303 tests**).
+- **Last done:** **review of the whole NP working tree, four fixes from it, and NP-4 built**
+  (2026-08-07, late evening). The review found one real trap — `carrierStatusIntent` coded
+  carrier code 2 (cabinet deletion) as «quiet», with a test cementing it, contradicting the
+  plan's detach+alert decision — plus a misleading COD blocker («чекайте бізнес-акаунт» when
+  filling the sender settings is the actual fix, proven live in NP-3) and two stale comments
+  (`ports.ts` still naming dropped `delivery_city_ref`; the dead `ttn`-intent reference). All
+  four fixed. Then **NP-4 whole**: `carrierStatusIntent` grew `detach`; `decideCarrierStatus` +
+  `applyCarrierStatus` (`FOR UPDATE`, `waybill_changed` skip, columns written only on a changed
+  code, code 2 detaching via the shared `waybillDetachPatch`); `status.ts` rewritten —
+  `allowedTransitions` is exit-only for non-terminal statuses (asserted as a property),
+  `carrierCanAdvance` owns `packed → shipped → delivered` (skips allowed),
+  `revertCrossesPayment` deleted with the button that showed it; the cron's */15 tick tracks
+  waybills (batched, per-order transactions, Telegram `CarrierAlerts` firing only on a fresh
+  code). The **stuck-order alert was built and then removed the same evening at the client's
+  request** — the plan's «Decisions» records the reversal: the no-forward-buttons risk now
+  stands unmitigated, knowingly. The order page lost its forward buttons, says «статуси
+  оновлюються автоматично» instead, and the «Нова Пошта» card grew the «Грошовий переказ
+  зараховано» line (code 11's `npMoneyTransferAt` was stamped but shown nowhere). **Not driven
+  live** — needs a real waybill round trip (create → tick sees code 1 → delete in cabinet →
+  tick detaches + alerts); not deployed, not committed.
+- **Before that, same day:** three order-page fixes (no-reload via `enhanceAdminForms`,
+  «Упаковано» → «ТТН створено», manual ТТН entry removed end to end — a legacy hand-entered ТТН
+  now has no delete path, dev-only data); order editing (`/orders/[n]/edit`, `orderDetailsLock`,
+  driven live); and **NP-1..NP-3 whole** — migrations `0011`/`0012`, the sender section on
+  `/settings`, the carrier adapter (no sandbox exists for API 2.0), the «Нова Пошта» card with
+  carrier-first ТТН create/delete driven against the real API. Details in the session log.
+- **In progress:** nothing. The gate is green (`pnpm check && pnpm build`, **308 tests**).
   Migrations `0006`–`0012` are all applied to the **dev** database. **Driven end to end locally**
   against the dev server, every rendered control's `name` checked against the schema: archive →
   archive tab → restore → archive again; a real purge (mixed-case address accepted, `normalizeEmail`
@@ -68,17 +71,18 @@
   («Киев»→Київ, «хркив»→Харків, «Lviv»→Львів against the deployed endpoint).
   **Everything above is deployed but NOT committed** — the working tree still holds this session's
   changes.
-- **Next step:** **NP-4 from `docs/plans/novaposhta.md`** — status synchronisation: the cron tick
-  every 15–30 min tracking every waybilled order in a non-final status through `trackWaybills`
-  (already built), a new `applyCarrierStatus` allowed only `packed → shipped → delivered`
-  (`carrierStatusIntent` in `tracking.ts` is the table, tested), the **rewrite of
-  `orders/status.ts`** removing the panel's forward buttons (only «Скасувати»/«Повернути кошти»
-  remain), and the Telegram alerts — including the stuck-order alert that replaces the buttons.
+- **Next step:** **drive NP-4 live, then NP-5** (register of shipments,
+  `docs/plans/novaposhta.md`). The NP-4 loop needs a real waybill: create one through the panel,
+  fire the cron tick by hand (`pnpm cron:dev`, hit `__scheduled?cron=*/15+*+*+*+*`), watch code 1
+  change nothing, delete the waybill in the NP cabinet, watch the next tick detach + Telegram-alert
+  — that verifies the code-2 path against the real API. Also drive the order page's new status card
+  in a browser (forward buttons gone, hint shown, exits still gated).
   **Before deploying any of it**: `wrangler secret put NOVAPOSHTA_API_KEY` on `balier-admin-dev`,
-  migrations `0011`+`0012` on the target DB (dev has them), `balier-cron` redeploy **plus one full
-  sync** to fill `np_warehouses.city_ref` country-wide (only Kyiv is backfilled in dev; the
-  nightly 04:00 UTC tick does it once the cron is redeployed). Also worth knowing: the dev sender
-  settings point at Київ, Відділення №1 as a placeholder handover branch.
+  migrations `0011`+`0012` on the target DB (dev has them), `balier-cron` redeploy — **now carrying
+  NP-4's tracking tick and alerts** — **plus one full sync** to fill `np_warehouses.city_ref`
+  country-wide (only Kyiv is backfilled in dev; the nightly 04:00 UTC tick does it once the cron is
+  redeployed; its five secrets incl. `TELEGRAM_*` are already set). Also worth knowing: the dev
+  sender settings point at Київ, Відділення №1 as a placeholder handover branch.
   Still standing, and not replaced by the above: the **browser pass** — `/checkout`'s delivery step is the one to drive
   first, since only curl/DB-level checks have been run against it; then `/categories` (rewritten,
   never driven), `/settings`, and now `/users`, whose script layer and whose disclosure CSS are the
@@ -229,6 +233,26 @@
 > Empty by design. Everything through the end of Phase 4 was moved to **`docs/history.md`** on
 > 2026-08-05, not rewritten — this file is read in full at every session start and had reached
 > 852 lines. New session entries go here; move a phase's entries across once the phase is done.
+
+**2026-08-07 (review + four fixes + NP-4 built).** Asked to review the uncommitted NP work before
+continuing. Found: `carrierStatusIntent` coding carrier code 2 as «quiet» *with a test asserting
+it* — the exact opposite of the plan's detach+alert decision, and the table NP-4 was about to be
+built on; the COD blocker telling operators to wait for a business account NP-3's live driving
+proved unnecessary (now the same «заповніть відправника» as card orders, plan decision reversed
+with consent); two stale comments (`ports.ts` naming the dropped `delivery_city_ref`, the dead
+`ttn`-intent reference). Then NP-4: `CarrierStatusIntent.detach` (code 2 → detach + `deleted`
+alert, never combined with a move — property-tested), `decideCarrierStatus`/`applyCarrierStatus`
+(pure decision + `FOR UPDATE` apply, `waybill_changed` skip, status columns written only on a
+changed code — the tuple-churn lesson, alerts only on a fresh code — 96-pages-a-day guard),
+`status.ts` exit-only for the panel with `carrierCanAdvance` owning the forward chain
+(`revertCrossesPayment` and its warning deleted with the button), cron */15 tracking tick,
+`CarrierAlerts` on the Telegram notifier, forward buttons off the order page with an
+«автоматично» hint in their place. The stuck-order alert was built (`STUCK_ORDER_DAYS = 2`,
+04:00 daily) and **removed the same evening at the client's request** — reversal recorded in the
+plan's «Decisions», the no-forward-buttons risk stands unmitigated on purpose. Asked what code 11
+does in the panel, found `npMoneyTransferAt` was stamped but rendered nowhere — the «Нова Пошта»
+card now shows «Грошовий переказ зараховано · дата». 308 tests; gate green; **not driven live,
+not deployed, not committed**.
 
 **2026-08-07 (order-page fixes: no-reload, «ТТН створено», manual ТТН removed).** Three asked-for
 fixes on `/orders/[n]`. The page joined the `enhanceAdminForms` screens — every POST (status,

@@ -40,10 +40,12 @@ export async function attachWaybill(
     if (!order) return { ok: false, reason: 'not_found' };
     if (order.npTtn !== null) return { ok: false, reason: 'ttn_exists', order };
     /*
-     * Deliberately NOT `canTransition(order, 'packed')`: the state machine also
-     * offers `packed` as the *revert* target of `shipped`, and a waybill must
-     * never be attached to an order that is already on a courier's shelf.
-     * Only the two statuses whose forward step is `packed` qualify.
+     * The one place `packed` is produced (`docs/plans/novaposhta.md`: creating
+     * the waybill *is* the act of packing), so the rule lives here rather than
+     * in `allowedTransitions`, which since NP-4 offers the panel no forward
+     * moves at all. Only the two statuses whose forward step is `packed`
+     * qualify — a waybill must never be attached to an order that is already
+     * on a courier's shelf.
      */
     if (order.status !== 'paid' && order.status !== 'confirmed') {
       return { ok: false, reason: 'waybill_invalid_state', order };
@@ -72,6 +74,29 @@ export type DetachWaybillResult =
   | { ok: false; reason: 'no_waybill'; order: Order };
 
 /**
+ * The columns a detach writes, shared with `applyCarrierStatus` — the cron's
+ * reaction to carrier code 2 (deleted in the NP cabinet) must clear exactly
+ * what «Видалити ТТН» clears, and a column added to one path but not the
+ * other would leave tracking noise describing a document that no longer
+ * exists. Reverts `packed` by the same rule the revert button used to; any
+ * other status keeps its status and only loses the waybill.
+ */
+export function waybillDetachPatch(order: Order) {
+  return {
+    status: order.status === 'packed' ? (revertTarget(order) ?? order.status) : order.status,
+    npTtn: null,
+    npTtnRef: null,
+    npTtnCreatedAt: null,
+    npStatusCode: null,
+    npStatusText: null,
+    npStatusAt: null,
+    npMoneyTransferAt: null,
+    npScanSheetRef: null,
+    updatedAt: sql`now()`,
+  };
+}
+
+/**
  * Clears everything the waybill wrote, including the tracking columns NP-4
  * fills — status text about a document that no longer exists is noise that
  * reads as fact. Reverts `packed` by the same rule the revert button uses;
@@ -93,23 +118,9 @@ export async function detachWaybill(
     if (!order) return { ok: false, reason: 'not_found' };
     if (order.npTtn === null) return { ok: false, reason: 'no_waybill', order };
 
-    const revertedStatus =
-      order.status === 'packed' ? (revertTarget(order) ?? order.status) : order.status;
-
     const [updated] = await tx
       .update(orders)
-      .set({
-        status: revertedStatus,
-        npTtn: null,
-        npTtnRef: null,
-        npTtnCreatedAt: null,
-        npStatusCode: null,
-        npStatusText: null,
-        npStatusAt: null,
-        npMoneyTransferAt: null,
-        npScanSheetRef: null,
-        updatedAt: sql`now()`,
-      })
+      .set(waybillDetachPatch(order))
       .where(eq(orders.id, order.id))
       .returning();
 

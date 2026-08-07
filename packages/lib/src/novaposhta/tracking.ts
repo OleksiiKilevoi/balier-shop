@@ -57,8 +57,9 @@ export async function trackWaybills(
 
 /* --------------------------------------------------------- the status table */
 
-/** The alerts NP-4 sends to Telegram. None of them moves an order. */
+/** The alerts NP-4 sends to Telegram. None of them moves an order forward. */
 export type CarrierAlert =
+  | 'deleted' // 2 — the waybill was deleted in the NP cabinet; see `detach`
   | 'not_found' // 3 — a mistyped or deleted waybill number
   | 'refused' // 102, 103, 108 — somebody declined the parcel
   | 'storage_ended' // 105 — the branch stopped holding it
@@ -72,6 +73,15 @@ export interface CarrierStatusIntent {
    * the order simply *stays* `packed`, and staying is not a move.
    */
   move: 'shipped' | 'delivered' | null;
+  /**
+   * Code 2 — the document no longer exists at the carrier, because someone
+   * deleted it in the NP cabinet (panel deletions clear our record before the
+   * sync could ever see the code). The record must not outlive the document:
+   * NP-4 clears the waybill columns and reverts `packed` exactly the way
+   * «Видалити ТТН» does — which already treats codes 2/3 as «document gone»
+   * when the carrier refuses a delete. Never combined with a `move`.
+   */
+  detach: boolean;
   /** Code 11 — the COD money transfer credited. Recorded, moves nothing extra. */
   moneyTransfer: boolean;
   alert: CarrierAlert | null;
@@ -86,7 +96,7 @@ export interface CarrierStatusIntent {
  * table is the intent, live driving in NP-4 is the confirmation.
  *
  *   1              created, parcel not handed over          stays `packed`
- *   2              deleted                                   nothing
+ *   2              deleted in the NP cabinet                 detach + alert
  *   3              number not found                          alert
  *   4, 41, 5, 6,   in transit / arrived / with recipient     `shipped`
  *   7, 8, 12, 14,    for inspection (14 is NOT received)
@@ -111,18 +121,27 @@ const ALERTS: Record<string, CarrierAlert> = {
   '111': 'failed_delivery',
 };
 
-const QUIET = new Set(['1', '2']);
-
 export function carrierStatusIntent(statusCode: string): CarrierStatusIntent {
   const code = statusCode.trim();
 
-  if (SHIPPED.has(code)) return { move: 'shipped', moneyTransfer: false, alert: null, known: true };
+  if (SHIPPED.has(code)) {
+    return { move: 'shipped', detach: false, moneyTransfer: false, alert: null, known: true };
+  }
   if (DELIVERED.has(code)) {
-    return { move: 'delivered', moneyTransfer: code === '11', alert: null, known: true };
+    return {
+      move: 'delivered',
+      detach: false,
+      moneyTransfer: code === '11',
+      alert: null,
+      known: true,
+    };
+  }
+  if (code === '2') {
+    return { move: null, detach: true, moneyTransfer: false, alert: 'deleted', known: true };
   }
   const alert = ALERTS[code];
-  if (alert) return { move: null, moneyTransfer: false, alert, known: true };
-  if (QUIET.has(code)) return { move: null, moneyTransfer: false, alert: null, known: true };
+  if (alert) return { move: null, detach: false, moneyTransfer: false, alert, known: true };
+  if (code === '1') return { move: null, detach: false, moneyTransfer: false, alert: null, known: true };
 
-  return { move: null, moneyTransfer: false, alert: null, known: false };
+  return { move: null, detach: false, moneyTransfer: false, alert: null, known: false };
 }

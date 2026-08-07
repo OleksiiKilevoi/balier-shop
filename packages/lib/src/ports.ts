@@ -84,10 +84,11 @@ export interface WaybillRecipient {
   /** `+380XXXXXXXXX`, checkout's canonical form. */
   phone: string;
   /**
-   * The recipient **city** ref (`np_settlements.delivery_city_ref`), NOT the
-   * settlement ref the order stores. They are different dictionaries at Nova
-   * Poshta, the API refuses nothing but ships wrong if they are confused, and
-   * this sentence is here because that mistake is otherwise inevitable.
+   * The recipient **city** ref (`np_warehouses.city_ref`, resolved via
+   * `getWarehouseCityRef` from the order's branch), NOT the settlement ref the
+   * order stores. They are different dictionaries at Nova Poshta, the API
+   * refuses nothing but ships wrong if they are confused, and this sentence is
+   * here because that mistake is otherwise inevitable.
    */
   cityRef: string;
   /** The branch/locker ref the order stores (`orders.np_warehouse_ref`). */

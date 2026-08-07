@@ -1,11 +1,14 @@
 import { and, eq, inArray, lt, sql } from 'drizzle-orm';
 import { createDb, createTxDb } from '@balier/lib/db';
+import { listWaybillOrdersToTrack } from '@balier/lib/db/queries/orders';
 import { orders, payments, stockReservations } from '@balier/lib/db/schema';
 import { createMonobankPayment } from '@balier/lib/monobank';
 import { createEmailNotifier } from '@balier/lib/notify/email';
 import { createTelegramNotifier } from '@balier/lib/notify/telegram';
 import { createNovaPoshtaClient } from '@balier/lib/novaposhta/client';
+import { createNovaPoshtaShipping } from '@balier/lib/novaposhta/shipping';
 import { syncNovaPoshtaReferenceData } from '@balier/lib/novaposhta/sync';
+import { applyCarrierStatus } from '@balier/lib/orders/applyCarrierStatus';
 import { confirmPayment } from '@balier/lib/orders/confirmPayment';
 
 /**
@@ -23,9 +26,11 @@ import { confirmPayment } from '@balier/lib/orders/confirmPayment';
 export default {
   async scheduled(event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     switch (event.cron) {
-      // Every 15 minutes — release reservations for orders that were never paid.
+      // Every 15 minutes — release reservations for orders that were never
+      // paid, and follow every live waybill's carrier status (NP-4).
       case '*/15 * * * *':
         ctx.waitUntil(releaseExpiredReservations(env));
+        ctx.waitUntil(trackWaybillStatuses(env));
         break;
 
       // 04:00 UTC daily — refresh the Nova Poshta settlement/warehouse cache.
@@ -164,4 +169,70 @@ async function syncNovaPoshta(env: Env): Promise<void> {
     `Nova Poshta sync: ${result.settlements} settlements, ${result.warehouses} warehouses, ` +
       `${result.retired} retired.`,
   );
+}
+
+/**
+ * NP-4: order status follows the carrier, not a person. Every order with a
+ * live waybill (see `listWaybillOrdersToTrack` for exactly which those are)
+ * is asked about in one batched `TrackingDocument` call, and each answer is
+ * applied in its own transaction by `applyCarrierStatus` — moves only ever
+ * forward along `packed → shipped → delivered`, code 2 detaches a
+ * cabinet-deleted waybill, every unhappy code is a Telegram alert and never
+ * a transition, and an alert fires only the first tick its code appears.
+ *
+ * The network call happens before any transaction opens, and one failed
+ * order never stalls the rest — the next tick retries whatever this one
+ * missed, because the list query finds unresolved orders again by state, not
+ * by memory.
+ */
+async function trackWaybillStatuses(env: Env): Promise<void> {
+  const db = createDb(env.DATABASE_URL);
+  const tracked = await listWaybillOrdersToTrack(db);
+  if (tracked.length === 0) return;
+
+  const shipping = createNovaPoshtaShipping(env.NOVAPOSHTA_API_KEY);
+  const statuses = await shipping.trackWaybills(tracked.map((row) => row.npTtn));
+  const byNumber = new Map(statuses.map((status) => [status.number, status]));
+
+  const notifier = createTelegramNotifier(env.TELEGRAM_BOT_TOKEN, env.TELEGRAM_CHAT_ID);
+  const { db: txDb, close } = createTxDb(env.DATABASE_URL);
+
+  try {
+    for (const row of tracked) {
+      const status = byNumber.get(row.npTtn);
+      if (!status) continue; // NP answered nothing for this number this tick.
+
+      try {
+        const result = await applyCarrierStatus(txDb, row.orderNumber, status);
+        if (!result.ok) continue; // Gone, or its waybill changed under us — skip.
+
+        const { decision } = result;
+        if (!decision.known) {
+          console.warn(
+            `Unknown NP status code ${status.statusCode} for order ${row.orderNumber}: ` +
+              `${status.statusText}`,
+          );
+        }
+        if (decision.move) {
+          console.log(`Order ${row.orderNumber} → ${decision.move} (NP code ${status.statusCode})`);
+        }
+        if (decision.detach) {
+          console.warn(`Order ${row.orderNumber}: waybill ${row.npTtn} deleted at NP, detached`);
+        }
+        if (decision.alert) {
+          await notifier.carrierAlert({
+            orderNumber: row.orderNumber,
+            ttn: row.npTtn,
+            alert: decision.alert,
+            statusText: status.statusText,
+          });
+        }
+      } catch (err) {
+        // One failed order must not stall the sweep; the next tick retries it.
+        console.error(`Carrier status apply failed for order ${row.orderNumber}`, err);
+      }
+    }
+  } finally {
+    await close();
+  }
 }

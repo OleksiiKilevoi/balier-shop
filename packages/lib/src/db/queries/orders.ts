@@ -1,4 +1,4 @@
-import { and, desc, eq, or, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNotNull, isNull, or, sql } from 'drizzle-orm';
 import type { SQL } from 'drizzle-orm';
 import type { Db, Tx, TxDb } from '../index';
 import type { Order, OrderItem, OrderStatus, Payment } from '../schema';
@@ -75,6 +75,44 @@ export async function getOrderItemWeights(db: Db, orderId: string): Promise<Orde
     .from(orderItems)
     .innerJoin(productVariants, eq(productVariants.id, orderItems.variantId))
     .where(eq(orderItems.orderId, orderId));
+}
+
+/**
+ * The orders whose waybill NP-4's tracking tick asks the carrier about.
+ *
+ * `packed` and `shipped` are tracked as long as they last — each needs the
+ * carrier (or a human, alerted) to resolve it, so there is no honest cutoff.
+ * A *delivered* COD order is tracked only for its code 11 (the money transfer
+ * credited, `npMoneyTransferAt`), and only for 30 days past its last movement:
+ * a credit that has not arrived a month after handover is not going to be
+ * noticed by polling — and on a personal NP account it never arrives at all,
+ * which without the cutoff would mean tracking every delivered order forever.
+ */
+export interface TrackedWaybillOrder {
+  orderNumber: string;
+  npTtn: string;
+}
+
+export async function listWaybillOrdersToTrack(db: Db): Promise<TrackedWaybillOrder[]> {
+  const rows = await db
+    .select({ orderNumber: orders.orderNumber, npTtn: orders.npTtn })
+    .from(orders)
+    .where(
+      and(
+        isNotNull(orders.npTtn),
+        or(
+          inArray(orders.status, ['packed', 'shipped']),
+          and(
+            eq(orders.status, 'delivered'),
+            eq(orders.paymentMethod, 'cod'),
+            isNull(orders.npMoneyTransferAt),
+            sql`coalesce(${orders.npStatusAt}, ${orders.npTtnCreatedAt}) > now() - interval '30 days'`,
+          ),
+        ),
+      ),
+    );
+
+  return rows.filter((row): row is TrackedWaybillOrder => row.npTtn !== null);
 }
 
 /** One row of the admin order list. */

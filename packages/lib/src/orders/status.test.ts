@@ -4,9 +4,9 @@ import type { OrderStatus, PaymentMethod } from '../db/schema';
 import {
   allowedTransitions,
   canTransition,
+  carrierCanAdvance,
   isStockCommitted,
   orderDetailsLock,
-  revertCrossesPayment,
   revertTarget,
 } from './status';
 
@@ -35,28 +35,36 @@ function order(status: OrderStatus, paymentMethod: PaymentMethod, statusBeforeEx
 }
 
 describe('allowedTransitions', () => {
-  it('offers `paid` in exactly one place among forward-chain statuses: reverting a card order out of `packed`', () => {
-    // `docs/CONVENTIONS.md`: an order becomes paid only in the webhook handler.
-    // This isn't the panel deciding an order is paid — a card order's only
-    // forward path to `packed` was through the webhook's `paid`, so reverting
-    // restores a status the order demonstrably already held.
-    for (const status of STOCK_COMMITTED_STATUSES) {
+  it('offers the panel nothing but the exit from every non-terminal status — the forward chain is carrier-driven', () => {
+    // `docs/plans/novaposhta.md`, NP-4: `paid` is the webhook's, `confirmed`
+    // is order creation's, `packed` is the waybill's, `shipped`/`delivered`
+    // are tracking's. The panel keeps only the way out — asserted as a
+    // property over every status and method, so no forward button can quietly
+    // come back.
+    for (const status of ALL_STATUSES) {
+      if (status === 'cancelled' || status === 'refunded') continue;
       for (const method of METHODS) {
         const next = allowedTransitions(order(status, method));
-        const shouldOffer = status === 'packed' && method === 'card';
-        expect(next.includes('paid')).toBe(shouldOffer);
+        expect(next).toHaveLength(1);
+        expect(next[0] === 'cancelled' || next[0] === 'refunded').toBe(true);
       }
     }
   });
 
-  it('offers `confirmed` in exactly one place among forward-chain statuses: reverting a cash order out of `packed`', () => {
-    for (const status of STOCK_COMMITTED_STATUSES) {
+  it('never offers `paid` or `confirmed` outside a terminal revert', () => {
+    // `docs/CONVENTIONS.md`: an order becomes paid only in the webhook handler.
+    // The one legal appearance left is restoring a recorded `statusBeforeExit`
+    // out of `cancelled`/`refunded` — a status the order demonstrably held.
+    for (const status of ALL_STATUSES) {
+      if (status === 'cancelled' || status === 'refunded') continue;
       for (const method of METHODS) {
         const next = allowedTransitions(order(status, method));
-        const shouldOffer = status === 'packed' && method === 'cod';
-        expect(next.includes('confirmed')).toBe(shouldOffer);
+        expect(next).not.toContain('paid');
+        expect(next).not.toContain('confirmed');
       }
     }
+    expect(allowedTransitions(order('refunded', 'card', 'paid'))).toEqual(['paid']);
+    expect(allowedTransitions(order('cancelled', 'cod', 'confirmed'))).toEqual(['confirmed']);
   });
 
   it('never offers `pending` or `awaiting_payment` — nothing before them is ever revertable', () => {
@@ -69,20 +77,6 @@ describe('allowedTransitions', () => {
         }
       }
     }
-  });
-
-  it('only ever moves one step forward through the fulfilment chain', () => {
-    expect(allowedTransitions(order('paid', 'card'))).toEqual(['packed', 'refunded']);
-    expect(allowedTransitions(order('confirmed', 'cod'))).toEqual(['packed', 'cancelled']);
-  });
-
-  it('also offers one step back, everywhere but `paid`/`confirmed`/`pending`/`awaiting_payment`', () => {
-    expect(allowedTransitions(order('packed', 'card'))).toEqual(['shipped', 'paid', 'refunded']);
-    expect(allowedTransitions(order('packed', 'cod'))).toEqual(['shipped', 'confirmed', 'cancelled']);
-    expect(allowedTransitions(order('shipped', 'cod'))).toEqual(['delivered', 'packed', 'cancelled']);
-    expect(allowedTransitions(order('shipped', 'card'))).toEqual(['delivered', 'packed', 'refunded']);
-    expect(allowedTransitions(order('delivered', 'card'))).toEqual(['shipped', 'refunded']);
-    expect(allowedTransitions(order('delivered', 'cod'))).toEqual(['shipped', 'refunded']);
   });
 
   it('offers nothing from `cancelled`/`refunded` when no eligible `statusBeforeExit` is recorded', () => {
@@ -152,25 +146,18 @@ describe('canTransition', () => {
     }
   });
 
-  it('rejects a jump past a step', () => {
-    expect(canTransition(order('paid', 'card'), 'delivered')).toBe(false);
-    expect(canTransition(order('confirmed', 'cod'), 'shipped')).toBe(false);
-  });
-
-  it('allows exactly one step backward, never further', () => {
-    expect(canTransition(order('shipped', 'card'), 'packed')).toBe(true);
-    expect(canTransition(order('delivered', 'cod'), 'shipped')).toBe(true);
-    expect(canTransition(order('packed', 'card'), 'paid')).toBe(true);
-    expect(canTransition(order('packed', 'cod'), 'confirmed')).toBe(true);
-    // Two steps back in one jump.
-    expect(canTransition(order('delivered', 'card'), 'packed')).toBe(false);
-    expect(canTransition(order('shipped', 'card'), 'paid')).toBe(false);
-  });
-
-  it('never lets the wrong payment method revert `packed` onto the other method’s predecessor', () => {
-    // A card order never held `confirmed`; a cash order never held `paid`.
-    expect(canTransition(order('packed', 'card'), 'confirmed')).toBe(false);
-    expect(canTransition(order('packed', 'cod'), 'paid')).toBe(false);
+  it('refuses every forward-chain move — forward and backward alike', () => {
+    // Forward is the carrier's (`carrierCanAdvance`); backward out of `packed`
+    // is deleting the waybill; and un-marking `shipped`/`delivered` by hand
+    // would only be re-applied by the next tracking tick.
+    expect(canTransition(order('paid', 'card'), 'packed')).toBe(false);
+    expect(canTransition(order('confirmed', 'cod'), 'packed')).toBe(false);
+    expect(canTransition(order('packed', 'card'), 'shipped')).toBe(false);
+    expect(canTransition(order('shipped', 'card'), 'delivered')).toBe(false);
+    expect(canTransition(order('shipped', 'card'), 'packed')).toBe(false);
+    expect(canTransition(order('delivered', 'cod'), 'shipped')).toBe(false);
+    expect(canTransition(order('packed', 'card'), 'paid')).toBe(false);
+    expect(canTransition(order('packed', 'cod'), 'confirmed')).toBe(false);
   });
 
   it('allows reverting `cancelled`/`refunded` only onto the exact recorded `statusBeforeExit`', () => {
@@ -178,6 +165,31 @@ describe('canTransition', () => {
     expect(canTransition(order('refunded', 'card', 'paid'), 'packed')).toBe(false);
     expect(canTransition(order('cancelled', 'cod', 'confirmed'), 'confirmed')).toBe(true);
     expect(canTransition(order('cancelled', 'cod', 'confirmed'), 'paid')).toBe(false);
+  });
+});
+
+describe('carrierCanAdvance', () => {
+  it('moves strictly forward along packed → shipped → delivered, skipping allowed', () => {
+    expect(carrierCanAdvance('packed', 'shipped')).toBe(true);
+    expect(carrierCanAdvance('shipped', 'delivered')).toBe(true);
+    // A 15-minute tick can miss the branch-arrival code and first see «отримано».
+    expect(carrierCanAdvance('packed', 'delivered')).toBe(true);
+  });
+
+  it('never moves backward or in place', () => {
+    expect(carrierCanAdvance('shipped', 'shipped')).toBe(false);
+    expect(carrierCanAdvance('delivered', 'shipped')).toBe(false);
+    expect(carrierCanAdvance('delivered', 'delivered')).toBe(false);
+  });
+
+  it('touches nothing outside the carrier chain — not `paid`, not the terminal statuses', () => {
+    // Hard rule 2 (`paid` is webhook-only) and the NP-4 decision that
+    // `cancelled`/`refunded` stay human-only, asserted over every status.
+    for (const status of ALL_STATUSES) {
+      if (status === 'packed' || status === 'shipped') continue;
+      expect(carrierCanAdvance(status, 'shipped'), status).toBe(false);
+      expect(carrierCanAdvance(status, 'delivered'), status).toBe(false);
+    }
   });
 });
 
@@ -215,35 +227,6 @@ describe('revertTarget', () => {
   it('has no target for `cancelled`/`refunded` when nothing was recorded', () => {
     expect(revertTarget(order('cancelled', 'card'))).toBeNull();
     expect(revertTarget(order('refunded', 'card', null))).toBeNull();
-  });
-});
-
-describe('revertCrossesPayment', () => {
-  it('is true only for cash on delivery stepping back out of `delivered`', () => {
-    expect(revertCrossesPayment(order('delivered', 'cod'))).toBe(true);
-  });
-
-  it('is false everywhere else, including reverting `packed` for either payment method', () => {
-    // Card counts every status from `paid` on as collected, so stepping back
-    // within that range never flips the answer. Cash on delivery only counts
-    // `delivered` as collected in the first place, so `packed → confirmed`
-    // was already "not collected" on both sides.
-    expect(revertCrossesPayment(order('delivered', 'card'))).toBe(false);
-    expect(revertCrossesPayment(order('shipped', 'card'))).toBe(false);
-    expect(revertCrossesPayment(order('shipped', 'cod'))).toBe(false);
-    expect(revertCrossesPayment(order('packed', 'card'))).toBe(false);
-    expect(revertCrossesPayment(order('packed', 'cod'))).toBe(false);
-  });
-
-  it('is false reverting out of `cancelled`/`refunded`, for every recorded `statusBeforeExit`', () => {
-    // The target is always the exact status that decided which exit was
-    // offered in the first place, so it can never disagree with itself.
-    for (const status of STOCK_COMMITTED_STATUSES) {
-      for (const method of METHODS) {
-        expect(revertCrossesPayment(order('cancelled', method, status))).toBe(false);
-        expect(revertCrossesPayment(order('refunded', method, status))).toBe(false);
-      }
-    }
   });
 });
 

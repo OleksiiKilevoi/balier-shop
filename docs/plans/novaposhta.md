@@ -37,7 +37,10 @@ rather than in a commit message.
 - **Status is fully carrier-driven, and the panel keeps no forward buttons at all** — not even when
   an order has no waybill. Raised as a risk (an order that ships outside Nova Poshta can then only
   be closed by editing the database) and the client accepted it: self-pickup and hand-delivery are
-  not going to happen. The mitigation that replaces the buttons is the **stuck-order alert** below.
+  not going to happen. The **stuck-order alert** was planned as the mitigation, built in NP-4, and
+  then **removed the same day at the client's request** («этот функционал не нужен», 2026-08-07) —
+  the risk above stands unmitigated, knowingly: nothing reminds anyone about a paid order nobody
+  made a waybill for.
 
 - **`delivered` for cash on delivery is the moment of handover** (NP codes 9/10), not the moment the
   money transfer is credited (code 11). This matches what the code already means by `delivered` for
@@ -203,21 +206,41 @@ one triple). Three live findings:
 3. **NP refuses Latin recipient names** («FirstName has invalid characters») — the verbatim
    banner surfaced it exactly as intended; names must be Cyrillic.
 
-### Phase NP-4 — Status synchronisation [todo]
+### Phase NP-4 — Status synchronisation [built 2026-08-07, not yet driven live]
 
-- [ ] Cron every 15–30 minutes: every order with a waybill in a non-final status, batched into
-      `TrackingDocument`, mapped through a new `applyCarrierStatus`.
-- [ ] `applyCarrierStatus` uses the existing state machine but is allowed only
-      `packed → shipped → delivered`. `paid` stays webhook-only (hard rule 2); `cancelled` and
-      `refunded` stay human-only.
-- [ ] Rewrite `orders/status.ts` and its tests: `allowedTransitions` returns only the exit action
-      for the panel. The forward chain becomes carrier-driven and is asserted as such.
-- [ ] Manager alerts to Telegram, none of which move an order:
-      refusal / storage ended / failed delivery / return to sender (102, 103, 105, 106, 111);
-      «номер не знайдено» (3), which means a mistyped or deleted waybill;
-      and the **stuck-order alert** — an order in `paid`/`confirmed` for more than N days with no
-      waybill. That alert is what stands in for the removed buttons: with no manual way forward,
-      silence must not look like everything being fine.
+- [x] Cron every 15 minutes (piggybacking the reservation tick, no new trigger):
+      `listWaybillOrdersToTrack` — `packed`/`shipped` always; a *delivered* COD order only while
+      its code 11 (money transfer) is outstanding and for 30 days past its last movement, so a
+      personal account that never credits doesn't mean tracking every delivered order forever —
+      batched into one `TrackingDocument` call, each answer applied in its own transaction.
+- [x] `applyCarrierStatus` (`orders/applyCarrierStatus.ts`): the pure decision
+      (`decideCarrierStatus`, tested) composes `carrierStatusIntent` with `status.ts`'s new
+      `carrierCanAdvance` — strictly forward along `packed → shipped → delivered`, skipping
+      allowed (a 15-minute tick can miss the in-transit code and first see «отримано»). `paid`
+      stays webhook-only (hard rule 2); `cancelled`/`refunded` stay human-only. Status columns are
+      written only when the code *changed* (the 2026-08-06 tuple-churn lesson), and **code 2
+      detaches** — clears the waybill columns and reverts `packed` via the same
+      `waybillDetachPatch` «Видалити ТТН» uses, closing the cabinet-deletion dead end
+      automatically. Applied under `FOR UPDATE`; a waybill deleted/recreated from the panel
+      between the list query and the write is skipped (`waybill_changed`).
+- [x] `orders/status.ts` rewritten with its tests: `allowedTransitions` returns only the exit for
+      every non-terminal status (asserted as a property over the whole enum), terminal reverts
+      stay, the forward-chain reverts died with the forward buttons (undoing `packed` is deleting
+      its waybill; un-marking `shipped` by hand would be re-applied by the next tick).
+      `revertCrossesPayment` and its warning string are gone with the button that showed them.
+      The order page keeps «Скасувати»/«Повернути кошти» (and the gated terminal revert) and says
+      «статуси оновлюються автоматично» where the forward buttons used to be.
+- [x] Manager alerts to Telegram (`CarrierAlerts` on the Telegram notifier; none moves an order):
+      refusal (102, 103, 108), storage ended (105), return (106), failed attempt (111),
+      «номер не знайдено» (3), and cabinet deletion (2, sent alongside the detach). Each fires
+      only on a **fresh** code — a 15-minute cron must not page 96 times a day.
+- [x] ~~The stuck-order alert~~ — built, then **removed at the client's request** the same day
+      (see the reversed decision under «Decisions» above). The daily 04:00 tick is back to the
+      sync alone.
+
+**Not driven live yet.** The whole loop needs a real waybill to exercise: create one through the
+panel, let the tick see code 1 (nothing happens), delete it in the NP cabinet and watch the next
+tick detach + alert — that also verifies the code-2 path against the real API.
 
 **Notes/decisions:** automation that cancels an order on a carrier code will eventually cancel a
 paid one. Every unhappy code is an alert, never a transition.
@@ -262,11 +285,11 @@ removing manual statuses.
 
 ## Open questions
 
-- Does Nova Poshta offer a usable sandbox for `InternetDocument.save`? Decides how NP-3 is driven.
+- Does Nova Poshta offer a usable sandbox for `InternetDocument.save`? **Answered in NP-2: no.**
 - Exact `OptionsSeat` requirements for parcel-locker delivery — dimensions are required, the precise
   field set is to be read off the API.
-- Stuck-order alert threshold (N days) — a constant to start with, a setting only if it turns out to
-  need tuning.
+- ~~Stuck-order alert threshold~~ — moot: the alert itself was removed at the client's request
+  (2026-08-07, «Decisions» above).
 
 ## Out of scope (for now)
 

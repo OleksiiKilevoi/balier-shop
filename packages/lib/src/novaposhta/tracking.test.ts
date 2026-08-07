@@ -32,10 +32,19 @@ describe('trackWaybills', () => {
  * asserted as a property over the table, not per code, so a future edit
  * cannot quietly break it.
  */
+/** Every code the table knows, for the property tests below. */
+const ALL_KNOWN_CODES = [
+  '1', '2', '3',
+  '4', '41', '5', '6', '7', '8', '12', '14', '101', '104', '112',
+  '9', '10', '11',
+  '102', '103', '105', '106', '108', '111',
+];
+
 describe('carrierStatusIntent', () => {
   it('keeps a created-but-not-handed-over parcel where it is', () => {
     expect(carrierStatusIntent('1')).toEqual({
       move: null,
+      detach: false,
       moneyTransfer: false,
       alert: null,
       known: true,
@@ -57,6 +66,7 @@ describe('carrierStatusIntent', () => {
   it('maps receipt to delivered, and code 11 additionally stamps the transfer', () => {
     expect(carrierStatusIntent('9')).toEqual({
       move: 'delivered',
+      detach: false,
       moneyTransfer: false,
       alert: null,
       known: true,
@@ -64,6 +74,7 @@ describe('carrierStatusIntent', () => {
     expect(carrierStatusIntent('10').move).toBe('delivered');
     expect(carrierStatusIntent('11')).toEqual({
       move: 'delivered',
+      detach: false,
       moneyTransfer: true,
       alert: null,
       known: true,
@@ -79,22 +90,43 @@ describe('carrierStatusIntent', () => {
     expect(carrierStatusIntent('106').alert).toBe('returning');
     expect(carrierStatusIntent('111').alert).toBe('failed_delivery');
 
-    for (const code of ['3', '102', '103', '105', '106', '108', '111']) {
-      expect(carrierStatusIntent(code).move, code).toBeNull();
+    // The property, over the whole table rather than a hand-kept list: any
+    // code that alerts moves nothing — automation that moves an order on an
+    // unhappy code will eventually cancel a paid one.
+    for (const code of ALL_KNOWN_CODES) {
+      const intent = carrierStatusIntent(code);
+      if (intent.alert !== null) expect(intent.move, code).toBeNull();
     }
   });
 
-  it('stays quiet on deletion (2) — deleting is something we did', () => {
+  it('detaches and alerts on deletion (2) — a cabinet-deleted waybill must not outlive its document', () => {
+    // Panel deletions clear our record before the sync could ever see code 2,
+    // so seeing it means someone deleted the waybill in the NP cabinet — the
+    // dead end found live on 2026-08-07, recorded in the plan's NP-4 table.
     expect(carrierStatusIntent('2')).toEqual({
       move: null,
+      detach: true,
       moneyTransfer: false,
-      alert: null,
+      alert: 'deleted',
       known: true,
     });
   });
 
+  it('never combines a detach with a move — over every code, not per case', () => {
+    for (const code of ALL_KNOWN_CODES) {
+      const intent = carrierStatusIntent(code);
+      if (intent.detach) expect(intent.move, code).toBeNull();
+    }
+  });
+
   it('confesses to codes it has never seen instead of guessing', () => {
     const unknown = carrierStatusIntent('999');
-    expect(unknown).toEqual({ move: null, moneyTransfer: false, alert: null, known: false });
+    expect(unknown).toEqual({
+      move: null,
+      detach: false,
+      moneyTransfer: false,
+      alert: null,
+      known: false,
+    });
   });
 });

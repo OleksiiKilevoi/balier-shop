@@ -1,4 +1,5 @@
 import { formatPrice } from '../money';
+import type { CarrierAlert } from '../novaposhta/tracking';
 import type { NotifierPort, OrderNotification } from '../ports';
 import { DELIVERY_METHOD_LABELS, deliveryDestination, PAYMENT_METHOD_LABELS } from './format';
 
@@ -38,7 +39,50 @@ export function formatOrderMessage(heading: string, notification: OrderNotificat
   return lines.join('\n');
 }
 
-export function createTelegramNotifier(botToken: string, chatId: string): NotifierPort {
+/**
+ * NP-4's manager alerts, cron-sent and Telegram-only — none of them concerns
+ * the customer, so unlike `NotifierPort` there is no email half to no-op.
+ * None of them moves an order either; that rule lives in
+ * `~/lib/novaposhta/tracking.ts` and this is just how a human hears about it.
+ */
+export interface CarrierAlerts {
+  /** An unhappy (or cabinet-deleted) tracking code, first time it is seen. */
+  carrierAlert(input: {
+    orderNumber: string;
+    ttn: string;
+    alert: CarrierAlert;
+    /** The carrier's own sentence, verbatim — an operator can act on it. */
+    statusText: string;
+  }): Promise<void>;
+}
+
+const CARRIER_ALERT_HEADINGS: Record<CarrierAlert, string> = {
+  deleted:
+    '⚠️ ТТН видалено в кабінеті Нової Пошти — запис у панелі знято, замовлення повернуто до попереднього статусу',
+  not_found: '⚠️ Нова Пошта не знає номера ТТН',
+  refused: '⚠️ Відмова від посилки',
+  storage_ended: '⚠️ Термін зберігання посилки закінчується або закінчився',
+  returning: '⚠️ Посилка повертається відправнику',
+  failed_delivery: '⚠️ Невдала спроба вручення',
+};
+
+export function formatCarrierAlert(input: {
+  orderNumber: string;
+  ttn: string;
+  alert: CarrierAlert;
+  statusText: string;
+}): string {
+  return [
+    CARRIER_ALERT_HEADINGS[input.alert],
+    `Замовлення ${input.orderNumber} · ТТН ${input.ttn}`,
+    `Нова Пошта: ${input.statusText}`,
+  ].join('\n');
+}
+
+export function createTelegramNotifier(
+  botToken: string,
+  chatId: string,
+): NotifierPort & CarrierAlerts {
   async function send(text: string): Promise<void> {
     try {
       const response = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
@@ -69,5 +113,6 @@ export function createTelegramNotifier(botToken: string, chatId: string): Notifi
           notification,
         ),
       ),
+    carrierAlert: (input) => send(formatCarrierAlert(input)),
   };
 }

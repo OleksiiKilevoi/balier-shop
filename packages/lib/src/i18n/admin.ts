@@ -1,6 +1,6 @@
 import type { AdminRole, OrderStatus, ProductStatus } from '../db/schema';
 import { MEDIA_FORMAT_LABELS } from '../media';
-import { EXPECTED_HEIGHT, EXPECTED_WIDTH, MAX_UPLOAD_BYTES } from '../media/upload';
+import { MAX_UPLOAD_BYTES } from '../media/upload';
 import type { UploadIssue } from '../media/upload';
 import {
   COD_LIMIT_MAX_HRYVNIAS,
@@ -29,17 +29,21 @@ export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
 /**
  * The button that produces each status — a verb, not the status name, because
  * the operator is recording something they did, not choosing a state.
- * Only the statuses `~/lib/orders/status.ts` can actually produce appear here.
- * `packed` has no button and so no verb: creating the waybill *is* the
- * transition (`docs/plans/novaposhta.md`), so «Створити ТТН» is its label.
+ * Only the two exits carry a verb since NP-4: the forward chain has no
+ * buttons at all — `packed` is «Створити ТТН»'s to set, `shipped`/`delivered`
+ * are the tracking cron's (`docs/plans/novaposhta.md`). The rest of the map
+ * is the plain status labels, kept complete so an unexpected key still
+ * renders words rather than nothing.
  */
 export const ORDER_TRANSITION_LABELS: Record<OrderStatus, string> = {
   ...ORDER_STATUS_LABELS,
-  shipped: 'Позначити відправленим',
-  delivered: 'Позначити доставленим',
   cancelled: 'Скасувати замовлення',
   refunded: 'Позначити поверненим',
 };
+
+/** The status card's sentence where the forward buttons used to be. */
+export const ADMIN_STATUS_CARRIER_HINT =
+  'Статуси «Відправлено» і «Доставлено» оновлюються автоматично за даними Нової Пошти.';
 
 /**
  * Shown under a transition button before it is pressed, where the consequence
@@ -57,15 +61,14 @@ export const ORDER_TRANSITION_HINTS: Partial<Record<OrderStatus, string>> = {
  * The button that undoes a wrong click, keyed by the status it steps back to.
  * A verb of its own (`~/lib/orders/status.ts`'s `revertTarget`) rather than
  * reusing `ORDER_TRANSITION_LABELS`, since the same target status reads as
- * *progress* going forward but as *undo* going back — a forward-sounding
- * label would be a strange thing to click while looking at a `shipped` order.
+ * *progress* going forward but as *undo* going back.
  *
- * `paid` and `confirmed` appear here two ways: as the two faces of reverting
- * `packed`, and as one of the possible landings when undoing a `cancelled`/
- * `refunded` that started from `paid`/`confirmed` directly. Neither is ever a
- * forward transition (`ORDER_TRANSITION_LABELS` has no entry for either, on
- * purpose). `delivered` only appears here for the second case — undoing an
- * exit taken from `delivered` — since nothing else ever reverts onto it.
+ * Since NP-4 the only revert the panel renders is undoing `cancelled`/
+ * `refunded`, so every entry here is a possible `statusBeforeExit` landing —
+ * which is why the whole committed chain appears. `paid`/`confirmed` are
+ * never a forward transition (`ORDER_TRANSITION_LABELS` has no entry for
+ * either, on purpose), and reverting `packed` itself is «Видалити ТТН»'s job,
+ * not a status button's.
  */
 export const ORDER_REVERT_LABELS: Partial<Record<OrderStatus, string>> = {
   paid: 'Повернути до «Оплачено»',
@@ -74,15 +77,6 @@ export const ORDER_REVERT_LABELS: Partial<Record<OrderStatus, string>> = {
   shipped: 'Повернути до «Відправлено»',
   delivered: 'Повернути до «Доставлено»',
 };
-
-/**
- * Shown under the revert button only when `revertCrossesPayment` says the step
- * back changes whether the order counts as paid — currently just cash on
- * delivery leaving `delivered`, since that is the only status where money
- * collection depends on having reached it exactly.
- */
-export const ORDER_REVERT_PAYMENT_WARNING =
-  'Товар вважатиметься ще не отриманим — накладений платіж надходить лише при видачі. «Скасувати» з’явиться замість «Повернено».';
 
 /**
  * A per-target note under the revert button, for the one case where the
@@ -157,8 +151,6 @@ export type AdminWaybillError = keyof typeof ADMIN_WAYBILL_ERRORS;
 export const ADMIN_WAYBILL_BLOCKERS = {
   senderIncomplete:
     'Не заповнено відправника Нової Пошти. У налаштуваннях, розділ «Нова Пошта — відправник»: натисніть «Підтягнути з акаунта», оберіть відділення й перевірте телефон.',
-  codUnavailable:
-    'Післяплата недоступна: не налаштований бізнес-акаунт Нової Пошти. Заповніть відправника в налаштуваннях, щойно акаунт буде.',
   noDeliveryCity:
     'Для відділення замовлення ще немає міста Нової Пошти в довіднику — його заповнює нічна синхронізація (або pnpm np:sync).',
   noApiKey: 'NOVAPOSHTA_API_KEY не налаштовано на цьому Worker — ТТН створити нізвідки.',

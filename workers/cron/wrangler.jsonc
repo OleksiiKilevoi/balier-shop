@@ -9,8 +9,9 @@
   },
   "triggers": {
     "crons": [
-      // Release stock reserved by orders that were never paid, and reconcile
-      // `awaiting_payment` orders against Monobank before cancelling them.
+      // Release stock reserved by orders that were never paid, reconcile
+      // `awaiting_payment` orders against Monobank before cancelling them,
+      // and follow every live waybill's carrier status (NP-4).
       "*/15 * * * *",
       // Refresh the Nova Poshta settlement/warehouse cache.
       "0 4 * * *"
