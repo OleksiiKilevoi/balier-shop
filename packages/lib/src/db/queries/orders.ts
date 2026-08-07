@@ -2,7 +2,7 @@ import { and, desc, eq, or, sql } from 'drizzle-orm';
 import type { SQL } from 'drizzle-orm';
 import type { Db, Tx, TxDb } from '../index';
 import type { Order, OrderItem, OrderStatus, Payment } from '../schema';
-import { orderItems, orders } from '../schema';
+import { orderItems, orders, productVariants } from '../schema';
 import type { Kopiykas } from '../../money';
 import { likeContains } from './like';
 
@@ -42,6 +42,39 @@ export async function findAdminOrder(
     with: { items: true, payments: true },
   });
   return order ?? null;
+}
+
+/**
+ * What each line of an order weighs — the waybill form's starting point.
+ *
+ * The one deliberate join back from an order to the live catalog: unlike the
+ * title and price, weight was never snapshotted at order time (the column is
+ * newer than most orders), and the physical parcel is being weighed *now*, so
+ * the variant's current number is the more honest starting value. It is only a
+ * prefill — the operator confirms or corrects it on the form.
+ *
+ * `weightGrams` NULL means the variant was never weighed; the form refuses to
+ * prefill a guessed total and names these lines instead (no silent default —
+ * docs/plans/novaposhta.md).
+ */
+export interface OrderItemWeight {
+  productTitle: string;
+  variantName: string | null;
+  quantity: number;
+  weightGrams: number | null;
+}
+
+export async function getOrderItemWeights(db: Db, orderId: string): Promise<OrderItemWeight[]> {
+  return db
+    .select({
+      productTitle: orderItems.productTitle,
+      variantName: orderItems.variantName,
+      quantity: orderItems.quantity,
+      weightGrams: productVariants.weightGrams,
+    })
+    .from(orderItems)
+    .innerJoin(productVariants, eq(productVariants.id, orderItems.variantId))
+    .where(eq(orderItems.orderId, orderId));
 }
 
 /** One row of the admin order list. */

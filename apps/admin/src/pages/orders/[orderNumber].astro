@@ -3,11 +3,16 @@ import { env } from 'cloudflare:workers';
 import OrderStatusBadge from '~/components/OrderStatusBadge.astro';
 import AdminLayout from '~/layouts/AdminLayout.astro';
 import { createDb, createTxDb } from '@balier/lib/db';
-import { findAdminOrder } from '@balier/lib/db/queries/orders';
-import { getReservationTtlMinutes } from '@balier/lib/db/queries/settings';
+import { getWarehouseCityRef } from '@balier/lib/db/queries/novaposhta';
+import { findAdminOrder, getOrderItemWeights } from '@balier/lib/db/queries/orders';
+import { getNpSenderSettings, getReservationTtlMinutes } from '@balier/lib/db/queries/settings';
 import {
   ADMIN_CARD_LINK_EXPIRED,
   ADMIN_ORDER_MESSAGES,
+  ADMIN_WAYBILL_BLOCKERS,
+  ADMIN_WAYBILL_ERRORS,
+  ADMIN_WAYBILL_MANUAL_NOTE,
+  ADMIN_WAYBILL_UNWEIGHED,
   ORDER_REVERT_FROM_REFUNDED_WARNING,
   ORDER_REVERT_HINTS,
   ORDER_REVERT_LABELS,
@@ -17,26 +22,34 @@ import {
   ORDER_TRANSITION_LABELS,
   cardLinkExpiryText,
   formatAdminDateTime,
+  npErrorText,
 } from '@balier/lib/i18n/admin';
 import type { AdminOrderMessage } from '@balier/lib/i18n/admin';
 import { formatPrice } from '@balier/lib/money';
 import { createMonobankPayment } from '@balier/lib/monobank';
 import { DELIVERY_METHOD_LABELS, PAYMENT_METHOD_LABELS, deliveryDestination } from '@balier/lib/notify/format';
-import { allowedTransitions, revertCrossesPayment, revertTarget } from '@balier/lib/orders/status';
+import { createNovaPoshtaShipping } from '@balier/lib/novaposhta/shipping';
+import { splitRecipientName } from '@balier/lib/novaposhta/waybill';
 import {
-  removeCancelledOrderInvoices,
-  setOrderTrackingNumber,
-  updateOrderStatus,
-} from '@balier/lib/orders/updateStatus';
-import { TRACKING_NUMBER_LENGTH, adminOrderActionSchema } from '@balier/lib/validation/admin';
+  allowedTransitions,
+  orderDetailsLock,
+  revertCrossesPayment,
+  revertTarget,
+} from '@balier/lib/orders/status';
+import { removeCancelledOrderInvoices, updateOrderStatus } from '@balier/lib/orders/updateStatus';
+import { attachWaybill, detachWaybill } from '@balier/lib/orders/waybill';
+import type { NpSenderSettings } from '@balier/lib/db/queries/settings';
+import { NP_CARGO_DESCRIPTION_MAX, adminOrderActionSchema } from '@balier/lib/validation/admin';
 
 /**
  * One order: what it is, and the two things an operator may do to it — move it
- * along the state machine, and record the Nova Poshta tracking number.
+ * along the state machine, and manage its Nova Poshta waybill.
  *
- * Both are plain form POSTs back to this same URL, answered with a 303 to it.
- * Post/redirect/get, so a refresh after acting re-reads the order instead of
- * re-firing the action, and the whole page needs no client-side script.
+ * Every action is a plain form POST back to this same URL, answered with a 303
+ * to it. Post/redirect/get, so a refresh after acting re-reads the order
+ * instead of re-firing the action, and the page works with no script at all —
+ * `enhanceAdminForms` (the script at the bottom) then takes the reload out of
+ * it, swapping the page in place and showing the answer as a toast.
  */
 export const prerender = false;
 
@@ -47,56 +60,218 @@ function done(message: AdminOrderMessage): Response {
   return Astro.redirect(`${selfUrl}?m=${message}`, 303);
 }
 
+/** Every sender ref the waybill payload needs; the settings screen may hold fewer. */
+function senderComplete(np: NpSenderSettings): boolean {
+  return Boolean(np.counterpartyRef && np.contactRef && np.phone && np.cityRef && np.warehouseRef);
+}
+
+/**
+ * A refused «Створити ТТН» is answered in place, not by redirect: the form
+ * holds nine values, five of which the operator should not have to retype, and
+ * the carrier's own refusal text cannot ride a `?m=` key.
+ */
+let waybillBanner: string | null = null;
+let waybillInvalid = new Set<string>();
+let waybillBody: Record<string, string> = {};
+
 if (Astro.request.method === 'POST') {
   const form = await Astro.request.formData();
+  const rawIntent = String(form.get('intent') ?? '');
   const parsed = adminOrderActionSchema.safeParse(Object.fromEntries(form));
 
   if (!parsed.success) {
-    const invalidTtn = parsed.error.issues.some(
-      (issue) => issue.message === 'invalid_tracking_number',
-    );
-    return done(invalidTtn ? 'invalid_tracking_number' : 'bad_request');
-  }
-
-  if (parsed.data.intent === 'ttn') {
-    const updated = await setOrderTrackingNumber(
-      createDb(env.DATABASE_URL),
-      orderNumber,
-      parsed.data.ttn,
-    );
-    if (!updated) return new Response('Замовлення не знайдено', { status: 404 });
-    return done(parsed.data.ttn ? 'ttn_updated' : 'ttn_cleared');
-  }
-
-  const { db: txDb, close } = createTxDb(env.DATABASE_URL);
-  try {
-    const result = await updateOrderStatus(txDb, {
-      orderNumber,
-      from: parsed.data.from,
-      next: parsed.data.next,
-    });
-
-    if (result.ok) {
-      // Cancelling an order whose card payment hasn't happened yet leaves its
-      // Monobank link payable until the invoice's own validity runs out — kill
-      // it now, after the transition committed, off the response path.
-      if (result.order.status === 'cancelled' && result.order.paidAt === null) {
-        Astro.locals.cfContext.waitUntil(
-          removeCancelledOrderInvoices(
-            createDb(env.DATABASE_URL),
-            createMonobankPayment(env.MONOBANK_TOKEN),
-            result.order.id,
-          ),
-        );
+    if (rawIntent === 'waybill_create') {
+      waybillBody = Object.fromEntries(form) as Record<string, string>;
+      for (const issue of parsed.error.issues) {
+        const head = issue.path[0];
+        if (typeof head === 'string') waybillInvalid.add(head);
       }
-      return done('status_updated');
+      // Field refusals render under their controls; the banner is only for a
+      // body whose failure no control explains (a tampered hidden field).
+      if (waybillInvalid.size === 0) waybillBanner = ADMIN_ORDER_MESSAGES.bad_request;
+    } else {
+      return done('bad_request');
     }
-    if (result.reason === 'not_found') {
-      return new Response('Замовлення не знайдено', { status: 404 });
+  } else if (parsed.data.intent === 'waybill_create') {
+    const db = createDb(env.DATABASE_URL);
+    const current = await findAdminOrder(db, orderNumber);
+    if (!current) return new Response('Замовлення не знайдено', { status: 404 });
+
+    /*
+     * The cheap refusals happen BEFORE the carrier call, in the order of how
+     * confusing the alternative would be: a carrier document for an order
+     * that moved on is a real parcel to explain, not an error message.
+     */
+    if (current.npTtn !== null) return done('ttn_exists');
+    if (current.status !== 'paid' && current.status !== 'confirmed') {
+      return done('waybill_invalid_state');
     }
-    return done(result.reason);
-  } finally {
-    Astro.locals.cfContext.waitUntil(close());
+
+    const np = (await getNpSenderSettings(db)).values;
+    const cityRef = current.npWarehouseRef
+      ? await getWarehouseCityRef(db, current.npWarehouseRef)
+      : null;
+    if (
+      !env.NOVAPOSHTA_API_KEY ||
+      !senderComplete(np) ||
+      !cityRef ||
+      !current.npWarehouseRef ||
+      (current.deliveryMethod !== 'np_warehouse' && current.deliveryMethod !== 'np_postomat')
+    ) {
+      // The GET below re-derives the exact blocker and names it; a body posted
+      // past a blocked form is answered generically.
+      return done('bad_request');
+    }
+
+    // Guaranteed by the schema's own refine — split again for the parts.
+    const name = splitRecipientName(parsed.data.recipientName)!;
+    const shipping = createNovaPoshtaShipping(env.NOVAPOSHTA_API_KEY);
+
+    let created: Awaited<ReturnType<typeof shipping.createWaybill>> | null = null;
+    try {
+      created = await shipping.createWaybill({
+        sender: {
+          counterpartyRef: np.counterpartyRef!,
+          contactRef: np.contactRef!,
+          phone: np.phone!,
+          cityRef: np.cityRef!,
+          warehouseRef: np.warehouseRef!,
+        },
+        recipient: {
+          lastName: name.lastName,
+          firstName: name.firstName,
+          phone: current.customerPhone,
+          cityRef,
+          warehouseRef: current.npWarehouseRef,
+        },
+        weightGrams: parsed.data.weightGrams,
+        seats: parsed.data.seats,
+        dimensionsCm: {
+          length: parsed.data.seatLength,
+          width: parsed.data.seatWidth,
+          height: parsed.data.seatHeight,
+        },
+        description: parsed.data.description,
+        declaredValueKopiykas: parsed.data.declaredValue,
+        /* The server's own total, never the client's — and only for COD, where
+           the carrier collects it (hard rule 1 does not bend for shipping). */
+        codKopiykas: current.paymentMethod === 'cod' ? current.total : null,
+      });
+    } catch (err) {
+      waybillBody = Object.fromEntries(form) as Record<string, string>;
+      waybillBanner = npErrorText(err instanceof Error ? err.message : String(err));
+    }
+
+    if (created) {
+      const { db: txDb, close } = createTxDb(env.DATABASE_URL);
+      try {
+        const result = await attachWaybill(txDb, orderNumber, {
+          ttn: created.number,
+          ttnRef: created.ref,
+        });
+        if (result.ok) return done('waybill_created');
+
+        /*
+         * The order moved between the pre-check and the lock — a second
+         * operator, a webhook, a double submit. The carrier document exists
+         * and must not: best-effort delete, off the response path, logged on
+         * failure (a stray waybill on the account is visible in the cabinet
+         * and deletable by hand; a second parcel sent is not undoable).
+         */
+        Astro.locals.cfContext.waitUntil(
+          shipping.deleteWaybill(created.ref).catch((err) => {
+            console.error(`Failed to delete orphaned waybill ${created!.number}`, err);
+          }),
+        );
+        if (result.reason === 'not_found') {
+          return new Response('Замовлення не знайдено', { status: 404 });
+        }
+        return done(result.reason);
+      } finally {
+        Astro.locals.cfContext.waitUntil(close());
+      }
+    }
+  } else if (parsed.data.intent === 'waybill_delete') {
+    const db = createDb(env.DATABASE_URL);
+    const current = await findAdminOrder(db, orderNumber);
+    if (!current) return new Response('Замовлення не знайдено', { status: 404 });
+    // A hand-entered number has no ref — there is nothing of ours at the
+    // carrier to delete; clearing the number is the `ttn` intent's job.
+    if (!current.npTtnRef) return done(current.npTtn ? 'bad_request' : 'no_waybill');
+    if (!env.NOVAPOSHTA_API_KEY) return done('bad_request');
+
+    const shipping = createNovaPoshtaShipping(env.NOVAPOSHTA_API_KEY);
+    try {
+      // Carrier first: their refusal (say, the branch already accepted the
+      // parcel) must leave our record standing — the waybill still exists.
+      await shipping.deleteWaybill(current.npTtnRef);
+    } catch (err) {
+      /*
+       * One refusal is not like the others: a waybill already deleted *in the
+       * NP cabinet* refuses deletion here forever («No document changed
+       * DeletionMark») while our record still shows it — a dead end, found
+       * live. Tracking is asked rather than the error text parsed: code 2 is
+       * «видалено», 3 is «номер не знайдено», and both mean there is nothing
+       * left at the carrier for our record to describe — so the detach below
+       * proceeds. Any other answer keeps the refusal, verbatim.
+       */
+      let documentGone = false;
+      try {
+        const [tracked] = await shipping.trackWaybills([current.npTtn ?? '']);
+        documentGone =
+          tracked !== undefined && (tracked.statusCode === '2' || tracked.statusCode === '3');
+      } catch {
+        /* Tracking failed too — the original refusal is the better message. */
+      }
+      if (!documentGone) {
+        waybillBanner = npErrorText(err instanceof Error ? err.message : String(err));
+      }
+    }
+
+    if (!waybillBanner) {
+      const { db: txDb, close } = createTxDb(env.DATABASE_URL);
+      try {
+        const result = await detachWaybill(txDb, orderNumber);
+        if (result.ok) return done('waybill_deleted');
+        if (result.reason === 'not_found') {
+          return new Response('Замовлення не знайдено', { status: 404 });
+        }
+        return done(result.reason);
+      } finally {
+        Astro.locals.cfContext.waitUntil(close());
+      }
+    }
+  } else {
+    const { db: txDb, close } = createTxDb(env.DATABASE_URL);
+    try {
+      const result = await updateOrderStatus(txDb, {
+        orderNumber,
+        from: parsed.data.from,
+        next: parsed.data.next,
+      });
+
+      if (result.ok) {
+        // Cancelling an order whose card payment hasn't happened yet leaves its
+        // Monobank link payable until the invoice's own validity runs out — kill
+        // it now, after the transition committed, off the response path.
+        if (result.order.status === 'cancelled' && result.order.paidAt === null) {
+          Astro.locals.cfContext.waitUntil(
+            removeCancelledOrderInvoices(
+              createDb(env.DATABASE_URL),
+              createMonobankPayment(env.MONOBANK_TOKEN),
+              result.order.id,
+            ),
+          );
+        }
+        return done('status_updated');
+      }
+      if (result.reason === 'not_found') {
+        return new Response('Замовлення не знайдено', { status: 404 });
+      }
+      return done(result.reason);
+    } finally {
+      Astro.locals.cfContext.waitUntil(close());
+    }
   }
 }
 
@@ -142,14 +317,91 @@ const FAILURES = new Set<AdminOrderMessage>([
   'invalid_transition',
   'insufficient_stock',
   'stale',
-  'invalid_tracking_number',
   'bad_request',
+  'edit_ttn_exists',
+  'edit_locked',
 ]);
+
+/** Whether the customer/delivery cards offer the edit page. */
+const detailsEditable = order !== null && orderDetailsLock(order) === null;
+const editUrl = `${selfUrl}/edit`;
+
+/* --- the waybill ----------------------------------------------------------- */
+
+const isNpDelivery =
+  order?.deliveryMethod === 'np_warehouse' || order?.deliveryMethod === 'np_postomat';
+
+/** The create form belongs on exactly the orders whose forward step is `packed`. */
+const waybillEligible =
+  order != null &&
+  isNpDelivery &&
+  order.npTtn === null &&
+  (order.status === 'paid' || order.status === 'confirmed');
+
+const npSender = waybillEligible ? (await getNpSenderSettings(db)).values : null;
+const itemWeights = waybillEligible && order ? await getOrderItemWeights(db, order.id) : [];
+const deliveryCityRef =
+  waybillEligible && order?.npWarehouseRef
+    ? await getWarehouseCityRef(db, order.npWarehouseRef)
+    : null;
+
+const unweighed = itemWeights.filter((item) => item.weightGrams === null);
+const weightTotalGrams =
+  itemWeights.length > 0 && unweighed.length === 0
+    ? itemWeights.reduce((total, item) => total + (item.weightGrams ?? 0) * item.quantity, 0)
+    : null;
+
+/**
+ * Why the form is absent, each one naming its fix — states, not errors. The
+ * unweighed variants are listed separately with the lines themselves.
+ */
+const waybillBlockers: string[] = [];
+if (waybillEligible && npSender) {
+  if (!env.NOVAPOSHTA_API_KEY) waybillBlockers.push(ADMIN_WAYBILL_BLOCKERS.noApiKey);
+  if (!senderComplete(npSender)) {
+    waybillBlockers.push(
+      order!.paymentMethod === 'cod'
+        ? ADMIN_WAYBILL_BLOCKERS.codUnavailable
+        : ADMIN_WAYBILL_BLOCKERS.senderIncomplete,
+    );
+  }
+  if (!deliveryCityRef) waybillBlockers.push(ADMIN_WAYBILL_BLOCKERS.noDeliveryCity);
+}
+
+const showWaybillForm = waybillEligible && waybillBlockers.length === 0 && unweighed.length === 0;
+
+/** Submitted values win over the prefill, but only when the form was refused. */
+const waybillRedrawing = waybillBanner !== null || waybillInvalid.size > 0;
+const wv = (name: string, fallback: string): string =>
+  waybillRedrawing && name in waybillBody ? (waybillBody[name] ?? '') : fallback;
+
+const seatDims = npSender?.seatDimensionsCm ?? null;
+
+/** The message under the form for each control the schema refused. */
+const WAYBILL_FIELD_ERRORS: Record<string, string> = {
+  recipientName: ADMIN_WAYBILL_ERRORS.invalid_recipient_name,
+  weightGrams: ADMIN_WAYBILL_ERRORS.invalid_waybill_weight,
+  seats: ADMIN_WAYBILL_ERRORS.invalid_seats,
+  seatLength: ADMIN_WAYBILL_ERRORS.invalid_waybill_dimensions,
+  seatWidth: ADMIN_WAYBILL_ERRORS.invalid_waybill_dimensions,
+  seatHeight: ADMIN_WAYBILL_ERRORS.invalid_waybill_dimensions,
+  description: ADMIN_WAYBILL_ERRORS.invalid_waybill_description,
+  declaredValue: ADMIN_WAYBILL_ERRORS.invalid_declared_value,
+};
+const waybillFieldMessages = [
+  ...new Set([...waybillInvalid].map((field) => WAYBILL_FIELD_ERRORS[field]).filter(Boolean)),
+] as string[];
 
 const transitions = order ? allowedTransitions(order) : [];
 const revert = order ? revertTarget(order) : null;
+/*
+ * `packed` is filtered out along with the exits: the status is «ТТН створено»,
+ * and the only thing that produces it is «Створити ТТН» in the card below —
+ * a button that set it by hand would claim a waybill that does not exist
+ * (`docs/plans/novaposhta.md`: there is no button for it).
+ */
 const forward = transitions.filter(
-  (next) => next !== 'cancelled' && next !== 'refunded' && next !== revert,
+  (next) => next !== 'cancelled' && next !== 'refunded' && next !== revert && next !== 'packed',
 );
 const exits = transitions.filter((next) => next === 'cancelled' || next === 'refunded');
 const revertWarning = order && revert && revertCrossesPayment(order) ? ORDER_REVERT_PAYMENT_WARNING : null;
@@ -171,7 +423,13 @@ const leavingTerminal = order?.status === 'cancelled' || order?.status === 'refu
     !order ? (
       <p class="text-fg mt-6">Замовлення «{orderNumber}» не знайдено.</p>
     ) : (
-      <>
+      <div
+        id="order-editor"
+        class="aria-busy:pointer-events-none aria-busy:opacity-60 transition-opacity"
+      >
+        {/* Everything an action can change lives inside this element, and it
+            is what `enhanceAdminForms` swaps in place. `id` is how the same
+            element is found again in the response. */}
         <header class="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2">
           <h1 class="text-fg font-mono text-2xl font-semibold sm:text-3xl">
             {order.orderNumber}
@@ -185,10 +443,15 @@ const leavingTerminal = order?.status === 'cancelled' || order?.status === 'refu
         </p>
 
         {/* A refusal is the only thing that earns colour on this page — the
-            successes are confirmed by the row itself having changed. */}
+            successes are confirmed by the row itself having changed. The id is
+            what the script moves into the toast host; `data-tone` tells it
+            whether the sentence may expire. Both are inert without script, and
+            this stays a banner at the top. */}
         {message && (
           <p
-            role="status"
+            id="order-message"
+            data-tone={FAILURES.has(message) ? 'bad' : 'ok'}
+            role={FAILURES.has(message) ? 'alert' : 'status'}
             class:list={[
               'rounded-card mt-5 p-3 text-sm',
               FAILURES.has(message)
@@ -253,8 +516,11 @@ const leavingTerminal = order?.status === 'cancelled' || order?.status === 'refu
                   (or undo a terminal state, which re-touches stock the same way
                   exiting it did) and there is no script on this page. Two
                   deliberate clicks. */}
+              {/* The disclosure ids keep them open across the enhancement
+                  layer's swaps — a refused action must not fold away the
+                  warning it was refused under. */}
               {(exits.length > 0 || (revert && leavingTerminal)) && (
-                <details class="admin-disclosure border-border mt-4 border-t pt-4">
+                <details id="order-exits" class="admin-disclosure border-border mt-4 border-t pt-4">
                   <summary>
                     Інші дії
                     <svg
@@ -311,7 +577,14 @@ const leavingTerminal = order?.status === 'cancelled' || order?.status === 'refu
         {/* ------------------------------------------------- customer, delivery */}
         <div class="mt-6 grid gap-6 md:grid-cols-2">
           <section class="admin-card p-5">
-            <h2 class="text-fg text-base font-semibold">Клієнт</h2>
+            <div class="flex items-baseline justify-between gap-x-4">
+              <h2 class="text-fg text-base font-semibold">Клієнт</h2>
+              {detailsEditable && (
+                <a href={editUrl} class="text-fg-muted hover:text-fg text-sm underline underline-offset-2">
+                  Редагувати
+                </a>
+              )}
+            </div>
             <dl class="mt-3 space-y-2 text-sm">
               <div>
                 <dt class="text-fg-subtle text-xs">Ім’я</dt>
@@ -348,7 +621,14 @@ const leavingTerminal = order?.status === 'cancelled' || order?.status === 'refu
           </section>
 
           <section class="admin-card p-5">
-            <h2 class="text-fg text-base font-semibold">Доставка й оплата</h2>
+            <div class="flex items-baseline justify-between gap-x-4">
+              <h2 class="text-fg text-base font-semibold">Доставка й оплата</h2>
+              {detailsEditable && (
+                <a href={editUrl} class="text-fg-muted hover:text-fg text-sm underline underline-offset-2">
+                  Редагувати
+                </a>
+              )}
+            </div>
             <dl class="mt-3 space-y-2 text-sm">
               <div>
                 <dt class="text-fg-subtle text-xs">Спосіб доставки</dt>
@@ -449,80 +729,309 @@ const leavingTerminal = order?.status === 'cancelled' || order?.status === 'refu
               </div>
             )}
 
-            {/* The tracking number is a *value* until someone asks to change it.
-                A live input alongside read-only fields reads as something that
-                still needs filling in, and invites an accidental edit of a
-                number the carrier already has.
-
-                Not a `<details>`, unlike «Інші дії» above: a `<summary>` toggles
-                on a click *anywhere* inside itself, so the number could not sit
-                in it and still be selectable — every attempt to copy it would
-                open the editor instead. A checkbox carries the toggle alone, the
-                number lives outside it, and `group-has-[:checked]` reveals the
-                form. Still no script on the page. */}
-            <div class="border-border group mt-4 border-t pt-4">
-              {/* The label is its own line: at 320px it wraps to two, and in the
-                  row below it would push the button between the label and the
-                  value it belongs to. */}
-              <p class="text-fg-subtle text-xs">Номер накладної Нової Пошти</p>
-
-              <div class="min-h-touch flex items-center gap-x-4">
-                {/* `select-all`: one click takes the whole number, which is the
-                    only reason to touch it without editing. */}
-                <span class="text-fg min-w-0 font-mono text-sm break-all select-all">
-                  {order.npTtn ?? <span class="text-fg-subtle font-sans select-none">—</span>}
-                </span>
-                {/* `ml-auto` rather than `justify-between` on the row: it keeps
-                    the button at the right edge whatever the value's width. The
-                    checkbox is `sr-only`, not hidden, so it stays keyboard
-                    reachable — and since the global `:focus-visible` outline
-                    would then land on a clipped 1px box, the ring is drawn on
-                    this label instead. */}
-                <label class="text-fg-muted hover:text-fg has-[:focus-visible]:outline-fg-subtle ml-auto shrink-0 cursor-pointer rounded-full text-sm underline underline-offset-2 has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2">
-                  {/* Checked from the server when the last attempt was rejected,
-                      so the correction happens where the error message points. */}
-                  <input
-                    type="checkbox"
-                    class="sr-only"
-                    checked={message === 'invalid_tracking_number'}
-                  />
-                  <span class="group-has-[:checked]:hidden">
-                    {order.npTtn ? 'Змінити' : 'Додати'}
-                  </span>
-                  <span class="hidden group-has-[:checked]:inline">Згорнути</span>
-                </label>
-              </div>
-
-              <form
-                method="post"
-                action={selfUrl}
-                class="group-has-[:checked]:block mt-1 hidden"
-              >
-                <input type="hidden" name="intent" value="ttn" />
-                <label for="ttn" class="sr-only">Номер накладної Нової Пошти</label>
-                <div class="flex flex-col gap-2 sm:flex-row">
-                  <input
-                    id="ttn"
-                    name="ttn"
-                    type="text"
-                    maxlength="14"
-                    inputmode="numeric"
-                    value={order.npTtn ?? ''}
-                    placeholder={'0'.repeat(TRACKING_NUMBER_LENGTH)}
-                    autocomplete="off"
-                    class="admin-field font-mono sm:flex-1"
-                  />
-                  <button type="submit" class="admin-btn admin-btn-primary shrink-0">
-                    Зберегти
-                  </button>
-                </div>
-                <p class="text-fg-subtle mt-2 text-xs">
-                  {TRACKING_NUMBER_LENGTH} цифр. Порожнє поле видаляє номер.
-                </p>
-              </form>
-            </div>
           </section>
         </div>
+
+        {/* ------------------------------------------------------ nova poshta */}
+        {/* Everything about the physical parcel, in one card: the waybill (or
+            the form that makes one), printing, deletion, and the hand-entry
+            fallback for a waybill made in the NP cabinet. Courier orders from
+            before 2026-08-06 have no branch to ship from and skip the card. */}
+        {isNpDelivery && (
+          <section class="admin-card mt-6 p-5">
+            <h2 class="text-fg text-base font-semibold">Нова Пошта</h2>
+
+            {/* The carrier's own refusal, verbatim — an operator can act on
+                «Sender address is invalid» and cannot act on «щось пішло не
+                так». */}
+            {waybillBanner && (
+              <p role="alert" class="admin-tone-negative rounded-card mt-4 p-3 text-sm">
+                {waybillBanner}
+              </p>
+            )}
+
+            {order.npTtn ? (
+              <>
+                <p class="text-fg-subtle mt-3 text-xs">Номер накладної</p>
+                <p class="text-fg font-mono text-sm break-all select-all">{order.npTtn}</p>
+                {order.npTtnCreatedAt && (
+                  <p class="text-fg-subtle mt-1 text-xs">
+                    Створено {formatAdminDateTime(order.npTtnCreatedAt)}.
+                  </p>
+                )}
+                {/* NP-4 fills these; until then the row simply has no line. */}
+                {order.npStatusText && (
+                  <p class="text-fg-muted mt-2 text-sm">
+                    {order.npStatusText}
+                    {order.npStatusAt && (
+                      <span class="text-fg-subtle"> · {formatAdminDateTime(order.npStatusAt)}</span>
+                    )}
+                  </p>
+                )}
+
+                {order.npTtnRef ? (
+                  <>
+                    <div class="mt-4">
+                      {/* The proxy route — the carrier's print URL carries the
+                          API key and never reaches this page. */}
+                      <a
+                        href={`${selfUrl}/marking`}
+                        target="_blank"
+                        rel="noreferrer"
+                        class="admin-btn admin-btn-secondary w-full sm:w-auto"
+                      >
+                        Друк маркування
+                      </a>
+                    </div>
+
+                    <details
+                      id="order-waybill-delete"
+                      class="admin-disclosure border-border mt-4 border-t pt-4"
+                    >
+                      <summary>
+                        Видалити ТТН
+                        <svg
+                          class="h-4 w-4 shrink-0"
+                          viewBox="0 0 16 16"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="1.5"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          aria-hidden="true"
+                        >
+                          <path d="m4 6 4 4 4-4" />
+                        </svg>
+                      </summary>
+                      <form method="post" action={selfUrl} class="mt-3">
+                        <input type="hidden" name="intent" value="waybill_delete" />
+                        <p class="text-fg-subtle mb-2 text-sm">
+                          Накладна видалиться і в Новій Пошті — це можливо, доки посилку не
+                          прийняли у відділенні. Замовлення повернеться до попереднього статусу.
+                        </p>
+                        <button type="submit" class="admin-btn admin-btn-danger w-full sm:w-auto">
+                          Видалити ТТН
+                        </button>
+                      </form>
+                    </details>
+                  </>
+                ) : (
+                  <p class="text-fg-subtle mt-2 text-xs">{ADMIN_WAYBILL_MANUAL_NOTE}</p>
+                )}
+              </>
+            ) : waybillEligible ? (
+              <>
+                {waybillBlockers.map((text) => (
+                  <p class="text-fg-muted mt-3 text-sm">{text}</p>
+                ))}
+
+                {unweighed.length > 0 && (
+                  <div class="mt-3 text-sm">
+                    <p class="text-fg-muted">{ADMIN_WAYBILL_UNWEIGHED}</p>
+                    <ul class="text-fg mt-1 list-disc pl-5">
+                      {unweighed.map((item) => (
+                        <li>
+                          {item.productTitle}
+                          {item.variantName && <span class="text-fg-muted"> · {item.variantName}</span>}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {showWaybillForm && order.npWarehouseRef && (
+                  <form method="post" action={selfUrl} class="mt-4">
+                    <input type="hidden" name="intent" value="waybill_create" />
+
+                    {/* Where it goes is the order's word, restated rather than
+                        editable: changing it here would mean shipping somewhere
+                        the customer did not ask. */}
+                    <p class="text-fg-muted text-sm">
+                      До: {deliveryDestination(order)} · {order.customerPhone}
+                    </p>
+                    {order.paymentMethod === 'cod' && (
+                      <p class="text-fg-muted mt-1 text-sm">
+                        Післяплата: {formatPrice(order.total)} — збере Нова Пошта при видачі.
+                      </p>
+                    )}
+
+                    <div class="mt-3 flex flex-wrap gap-3">
+                      <div class="w-full sm:w-72">
+                        <label for="wb-name" class="text-fg-subtle text-xs">
+                          Одержувач — Прізвище Ім’я
+                        </label>
+                        <input
+                          id="wb-name"
+                          name="recipientName"
+                          type="text"
+                          value={wv('recipientName', order.customerName)}
+                          autocomplete="off"
+                          class:list={[
+                            'admin-field mt-1',
+                            waybillInvalid.has('recipientName') && 'border-danger',
+                          ]}
+                        />
+                      </div>
+
+                      <div class="w-full sm:w-36">
+                        <label for="wb-weight" class="text-fg-subtle text-xs">Вага, г</label>
+                        <input
+                          id="wb-weight"
+                          name="weightGrams"
+                          type="text"
+                          inputmode="numeric"
+                          value={wv(
+                            'weightGrams',
+                            weightTotalGrams === null ? '' : String(weightTotalGrams),
+                          )}
+                          autocomplete="off"
+                          class:list={[
+                            'admin-field mt-1',
+                            waybillInvalid.has('weightGrams') && 'border-danger',
+                          ]}
+                        />
+                      </div>
+
+                      <div class="w-full sm:w-24">
+                        <label for="wb-seats" class="text-fg-subtle text-xs">Місць</label>
+                        <input
+                          id="wb-seats"
+                          name="seats"
+                          type="text"
+                          inputmode="numeric"
+                          value={wv('seats', '1')}
+                          autocomplete="off"
+                          class:list={[
+                            'admin-field mt-1',
+                            waybillInvalid.has('seats') && 'border-danger',
+                          ]}
+                        />
+                      </div>
+
+                      <div class="w-full sm:w-40">
+                        <label for="wb-declared" class="text-fg-subtle text-xs">
+                          Оголошена вартість
+                        </label>
+                        <div class="relative mt-1">
+                          <input
+                            id="wb-declared"
+                            name="declaredValue"
+                            type="text"
+                            inputmode="numeric"
+                            value={wv('declaredValue', String(Math.round(order.itemsTotal / 100)))}
+                            autocomplete="off"
+                            class:list={[
+                              'admin-field pr-10',
+                              waybillInvalid.has('declaredValue') && 'border-danger',
+                            ]}
+                          />
+                          <span
+                            class="text-fg-subtle pointer-events-none absolute inset-y-0 right-4.5 flex items-center text-base sm:text-sm"
+                            aria-hidden="true"
+                          >
+                            ₴
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <fieldset class="mt-3">
+                      <legend class="text-fg-subtle text-xs">Розміри місця, см</legend>
+                      <div class="mt-1 flex flex-wrap gap-3">
+                        <div class="w-28">
+                          <label for="wb-length" class="text-fg-subtle text-xs">Довжина</label>
+                          <input
+                            id="wb-length"
+                            name="seatLength"
+                            type="text"
+                            inputmode="numeric"
+                            value={wv('seatLength', seatDims ? String(seatDims.length) : '')}
+                            autocomplete="off"
+                            class:list={[
+                              'admin-field mt-1',
+                              waybillInvalid.has('seatLength') && 'border-danger',
+                            ]}
+                          />
+                        </div>
+                        <div class="w-28">
+                          <label for="wb-width" class="text-fg-subtle text-xs">Ширина</label>
+                          <input
+                            id="wb-width"
+                            name="seatWidth"
+                            type="text"
+                            inputmode="numeric"
+                            value={wv('seatWidth', seatDims ? String(seatDims.width) : '')}
+                            autocomplete="off"
+                            class:list={[
+                              'admin-field mt-1',
+                              waybillInvalid.has('seatWidth') && 'border-danger',
+                            ]}
+                          />
+                        </div>
+                        <div class="w-28">
+                          <label for="wb-height" class="text-fg-subtle text-xs">Висота</label>
+                          <input
+                            id="wb-height"
+                            name="seatHeight"
+                            type="text"
+                            inputmode="numeric"
+                            value={wv('seatHeight', seatDims ? String(seatDims.height) : '')}
+                            autocomplete="off"
+                            class:list={[
+                              'admin-field mt-1',
+                              waybillInvalid.has('seatHeight') && 'border-danger',
+                            ]}
+                          />
+                        </div>
+
+                        <div class="w-full sm:w-72">
+                          <label for="wb-description" class="text-fg-subtle text-xs">
+                            Опис вантажу
+                          </label>
+                          <input
+                            id="wb-description"
+                            name="description"
+                            type="text"
+                            maxlength={NP_CARGO_DESCRIPTION_MAX}
+                            value={wv('description', npSender?.cargoDescription ?? '')}
+                            autocomplete="off"
+                            class:list={[
+                              'admin-field mt-1',
+                              waybillInvalid.has('description') && 'border-danger',
+                            ]}
+                          />
+                        </div>
+                      </div>
+                    </fieldset>
+
+                    {waybillFieldMessages.length > 0 && (
+                      <ul class="text-danger mt-3 space-y-0.5 text-xs">
+                        {waybillFieldMessages.map((text) => (
+                          <li>{text}</li>
+                        ))}
+                      </ul>
+                    )}
+
+                    <div class="mt-4">
+                      <button type="submit" class="admin-btn admin-btn-primary w-full sm:w-auto">
+                        Створити ТТН
+                      </button>
+                    </div>
+                    <p class="text-fg-subtle mt-2 text-xs">
+                      Створення упакує замовлення. Доставку сплачує одержувач за тарифами
+                      перевізника.
+                    </p>
+                  </form>
+                )}
+              </>
+            ) : (
+              <p class="text-fg-subtle mt-2 text-sm">
+                ТТН створюється, коли замовлення оплачене або підтверджене.
+              </p>
+            )}
+
+          </section>
+        )}
 
         {/* -------------------------------------------------------- the goods */}
         <section class="admin-card mt-6 p-5">
@@ -568,21 +1077,32 @@ const leavingTerminal = order?.status === 'cancelled' || order?.status === 'refu
             </div>
           </dl>
         </section>
-      </>
+      </div>
     )
   }
 
-  <script>
-    /*
-     * Enhancement on a page that otherwise needs no script (see the comment on
-     * the POST handler): the payment link's one purpose is being pasted into a
-     * chat, and the `select-all` link covers that with script off. The button
-     * ships `hidden` and is revealed here, only when the clipboard API exists —
-     * a copy button that renders and then fails would be worse than none.
-     */
-    const copyButton = document.getElementById('copy-pay-link');
+  {/*
+    Empty until script has something to put in it, and hidden the rest of the
+    time by having nothing to lay out. The message it receives is the one
+    rendered inside the editor, moved rather than rebuilt.
+  */}
+  <div id="order-toast" class="admin-toast-host" aria-live="polite" aria-atomic="true"></div>
 
-    if (copyButton instanceof HTMLButtonElement && navigator.clipboard) {
+  <script>
+    import { enhanceAdminForms } from '@balier/lib/admin/forms';
+
+    /*
+     * The payment link's one purpose is being pasted into a chat, and the
+     * `select-all` link covers that with script off. The button ships `hidden`
+     * and is revealed here, only when the clipboard API exists — a copy button
+     * that renders and then fails would be worse than none. A function rather
+     * than top-level statements because every swap by the enhancement layer
+     * replaces the button node, listener and all.
+     */
+    function wireCopyButton() {
+      const copyButton = document.getElementById('copy-pay-link');
+      if (!(copyButton instanceof HTMLButtonElement) || !navigator.clipboard) return;
+
       copyButton.hidden = false;
 
       const idle = copyButton.querySelector<HTMLElement>('[data-copy="idle"]');
@@ -605,6 +1125,20 @@ const leavingTerminal = order?.status === 'cancelled' || order?.status === 'refu
             done.hidden = true;
           }, 2000);
         }
+      });
+    }
+
+    wireCopyButton();
+
+    const editor = document.getElementById('order-editor');
+    const toastHost = document.getElementById('order-toast');
+
+    if (editor && toastHost) {
+      enhanceAdminForms({
+        root: editor,
+        toastHost,
+        messageId: 'order-message',
+        onRender: wireCopyButton,
       });
     }
   </script>

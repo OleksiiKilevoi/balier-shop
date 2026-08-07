@@ -1,5 +1,7 @@
 import { z } from 'zod';
 import { adminRole, orderStatus } from '../db/schema';
+import { splitRecipientName } from '../novaposhta/waybill';
+import { phoneDigitsFromInput } from '../phone';
 import { cartItemsSchema } from './cart';
 import {
   MAX_CUSTOMER_NAME,
@@ -12,31 +14,13 @@ import {
 import { wholeHryvniaSchema } from './money';
 
 /**
- * The two things the order detail page can POST to itself. Both arrive as an
- * HTML form body rather than JSON — the panel is server-rendered and works with
- * no script at all — so everything here starts as a string.
+ * What the order detail page can POST to itself — status moves and the two
+ * waybill actions. Everything arrives as an HTML form body rather than JSON —
+ * the panel is server-rendered and works with no script at all — so everything
+ * here starts as a string.
  */
 
 const orderStatusSchema = z.enum(orderStatus.enumValues);
-
-/**
- * Nova Poshta's «Експрес-накладна» number: 14 digits, usually written in groups
- * of four. Spaces and dashes are stripped rather than rejected, since that is
- * how the number is printed and how it lands on the clipboard.
- *
- * An empty value is not an error — it clears a tracking number that was typed
- * wrong, which is otherwise impossible.
- */
-export const TRACKING_NUMBER_LENGTH = 14;
-
-export const trackingNumberSchema = z
-  .string()
-  .transform((raw) => raw.replace(/[\s-]/g, ''))
-  .refine(
-    (value) => value === '' || new RegExp(`^\\d{${TRACKING_NUMBER_LENGTH}}$`).test(value),
-    'invalid_tracking_number',
-  )
-  .transform((value) => (value === '' ? null : value));
 
 /**
  * The login form. Deliberately loose: this is the *shape* check, not the
@@ -58,6 +42,68 @@ export const adminLoginSchema = z.object({
 
 export type AdminLogin = z.infer<typeof adminLoginSchema>;
 
+/* ------------------------------------------------------------- the waybill */
+
+/**
+ * Bounds for «Створити ТТН». Typo guards in the COD-limit tradition — they
+ * catch an extra zero and an empty field, not what Nova Poshta will actually
+ * carry; the carrier's own refusal is authoritative and is shown verbatim.
+ */
+export const WAYBILL_WEIGHT_MAX_GRAMS = 1_000_000;
+export const WAYBILL_SEATS_MAX = 99;
+export const WAYBILL_DECLARED_MIN_HRYVNIAS = 1;
+export const WAYBILL_DECLARED_MAX_HRYVNIAS = 1_000_000;
+export const NP_SEAT_CM_MIN = 1;
+/* Shared with the «Нова Пошта» settings section below — declared here because
+   this schema is the first in the module to read them. */
+export const NP_SEAT_CM_MAX = 500;
+export const NP_CARGO_DESCRIPTION_MAX = 100;
+
+function waybillWholeNumber(min: number, max: number, error: string) {
+  return z
+    .string()
+    .transform((raw) => raw.replace(/[\s '’]/g, ''))
+    .refine((value) => /^\d+$/.test(value), error)
+    .transform(Number)
+    .refine((value) => value >= min && value <= max, error);
+}
+
+/**
+ * The waybill form. Weight, seats, dimensions, description and declared value
+ * are the operator's to confirm; the recipient's phone and destination are
+ * deliberately absent — they render read-only from the order, and a body that
+ * could override them would mean shipping somewhere the customer did not ask.
+ *
+ * The name *is* here: it is the one recipient field an order can hold in an
+ * unusable form («Аня» passes checkout), so the operator may fix it — for the
+ * waybill only, never written back to the order.
+ */
+const waybillCreateSchema = z.object({
+  intent: z.literal('waybill_create'),
+  recipientName: z
+    .string()
+    .trim()
+    .max(MAX_CUSTOMER_NAME, 'invalid_recipient_name')
+    .refine((value) => splitRecipientName(value) !== null, 'invalid_recipient_name'),
+  weightGrams: waybillWholeNumber(1, WAYBILL_WEIGHT_MAX_GRAMS, 'invalid_waybill_weight'),
+  seats: waybillWholeNumber(1, WAYBILL_SEATS_MAX, 'invalid_seats'),
+  seatLength: waybillWholeNumber(NP_SEAT_CM_MIN, NP_SEAT_CM_MAX, 'invalid_waybill_dimensions'),
+  seatWidth: waybillWholeNumber(NP_SEAT_CM_MIN, NP_SEAT_CM_MAX, 'invalid_waybill_dimensions'),
+  seatHeight: waybillWholeNumber(NP_SEAT_CM_MIN, NP_SEAT_CM_MAX, 'invalid_waybill_dimensions'),
+  description: z
+    .string()
+    .trim()
+    .min(1, 'invalid_waybill_description')
+    .max(NP_CARGO_DESCRIPTION_MAX, 'invalid_waybill_description'),
+  declaredValue: wholeHryvniaSchema({
+    min: WAYBILL_DECLARED_MIN_HRYVNIAS,
+    max: WAYBILL_DECLARED_MAX_HRYVNIAS,
+    error: 'invalid_declared_value',
+  }),
+});
+
+export type WaybillCreateInput = z.infer<typeof waybillCreateSchema>;
+
 export const adminOrderActionSchema = z.discriminatedUnion('intent', [
   z.object({
     intent: z.literal('status'),
@@ -69,10 +115,8 @@ export const adminOrderActionSchema = z.discriminatedUnion('intent', [
     from: orderStatusSchema,
     next: orderStatusSchema,
   }),
-  z.object({
-    intent: z.literal('ttn'),
-    ttn: trackingNumberSchema,
-  }),
+  waybillCreateSchema,
+  z.object({ intent: z.literal('waybill_delete') }),
 ]);
 
 export type AdminOrderAction = z.infer<typeof adminOrderActionSchema>;
@@ -104,6 +148,76 @@ export const codLimitSchema = wholeHryvniaSchema({
 export const adminSettingsSchema = z.object({ codLimit: codLimitSchema });
 
 export type AdminSettings = z.infer<typeof adminSettingsSchema>;
+
+/* --------------------------------------------------- nova poshta sender ----- */
+
+/**
+ * The «Нова Пошта» section of `/settings` — the sender behind every waybill.
+ *
+ * Three forms, three schemas (or none): the account identity is *fetched* from
+ * the API by a button with no fields at all — its refs exist nowhere an admin
+ * could copy them from — the handover branch is picked by name and number
+ * (`adminNpPlaceSchema`), and only the defaults below are typed in directly.
+ *
+ * Every typed field may be blank, and blank means NULL rather than an error:
+ * the plan is explicit that this screen has to survive being half-filled,
+ * because the panel is in use long before the client's account exists, and the
+ * waybill form is the place that refuses on a missing value, naming it.
+ */
+
+/**
+ * The masked phone field: the visible input holds the 9 local digits after the
+ * fixed `+380` prefix, exactly as on `/checkout` and `/admin/orders/new` —
+ * `phoneDigitsFromInput` also swallows a pasted `0…`/`380…`/`+380…`, so the
+ * mask script is a convenience, never a requirement.
+ */
+const optionalNpPhone = z
+  .string()
+  .transform((raw) => phoneDigitsFromInput(raw))
+  .refine((digits) => digits === '' || digits.length === 9, 'invalid_np_phone')
+  .transform((digits): string | null => (digits === '' ? null : `+380${digits}`));
+
+/** One side of the default seat, whole centimetres. Bounds are a typo guard. */
+const optionalNpCm = z
+  .string()
+  .transform((raw) => raw.trim())
+  .refine((value) => value === '' || /^\d+$/.test(value), 'invalid_np_dimensions')
+  .transform((value): number | null => (value === '' ? null : Number(value)))
+  .refine((value) => value === null || (value >= 1 && value <= NP_SEAT_CM_MAX), 'invalid_np_dimensions');
+
+export const adminNpSettingsSchema = z
+  .object({
+    phone: optionalNpPhone,
+    seatLength: optionalNpCm,
+    seatWidth: optionalNpCm,
+    seatHeight: optionalNpCm,
+    cargoDescription: z
+      .string()
+      .transform((raw) => raw.trim())
+      .refine((value) => value.length <= NP_CARGO_DESCRIPTION_MAX, 'invalid_np_description')
+      .transform((value): string | null => (value === '' ? null : value)),
+  })
+  /*
+   * Two of three dimensions is not a smaller parcel, it is a mistake — the
+   * triple goes to the carrier whole or not at all. Anchored to the first
+   * blank one, so the border lands where the typing stopped.
+   */
+  .refine(
+    (data) => {
+      const dims = [data.seatLength, data.seatWidth, data.seatHeight];
+      return dims.every((v) => v === null) || dims.every((v) => v !== null);
+    },
+    { message: 'np_dimensions_incomplete', path: ['seatLength'] },
+  );
+
+export type AdminNpSettings = z.infer<typeof adminNpSettingsSchema>;
+
+/*
+ * The branch picker deliberately has no schema: it is a draft flow in the
+ * `/admin/orders/new` mould — queries render suggestion lists, a suggestion
+ * row's own submit value is the choice — and its refs are validated by the
+ * database lookups that resolve them, not by shape.
+ */
 
 /* ------------------------------------------------------- passwords and roles */
 
@@ -271,6 +385,27 @@ export const adminNewOrderSchema = z.object({
 });
 
 export type AdminNewOrder = z.infer<typeof adminNewOrderSchema>;
+
+/**
+ * `/orders/[n]/edit` — the same customer whose order it already is, corrected.
+ *
+ * Deliberately `adminNewOrderSchema` minus the parts an edit must not touch:
+ * no items, no payment method, no comment — the goods and the money are the
+ * order, these fields are only who it is for and where it goes. The contact
+ * variant exists for legacy courier orders, whose stored delivery stays as
+ * placed unless the operator actually picks a branch (the page decides which
+ * schema applies; `updateOrderDetails` applies whichever subset it is handed).
+ */
+export const adminOrderEditSchema = z.object({
+  customerName: z.string().trim().min(2).max(MAX_CUSTOMER_NAME),
+  customerPhone: customerPhoneSchema,
+  customerEmail: customerEmailSchema,
+  delivery: deliverySchema,
+});
+
+export const adminOrderEditContactSchema = adminOrderEditSchema.omit({ delivery: true });
+
+export type AdminOrderEdit = z.infer<typeof adminOrderEditSchema>;
 
 /** Where a rejection is shown on the form. */
 export type AdminOrderField =

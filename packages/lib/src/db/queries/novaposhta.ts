@@ -194,6 +194,24 @@ export async function findSettlement(db: Db, ref: string): Promise<SettlementRes
 }
 
 /**
+ * The branch's ref in Nova Poshta's **city** dictionary (`getCities`) — what
+ * `InternetDocument.save` takes as `CityRecipient`, and a different thing from
+ * the settlement ref the order stores (see `CreateWaybillInput.cityRef`).
+ * Read off the *warehouse* because that is where the feed provides it;
+ * `getSettlements` has no such field. NULL until a sync with the `city_ref`
+ * column has run — the waybill form refuses then, naming the sync as the fix.
+ */
+export async function getWarehouseCityRef(db: Db, warehouseRef: string): Promise<string | null> {
+  const [row] = await db
+    .select({ cityRef: npWarehouses.cityRef })
+    .from(npWarehouses)
+    .where(eq(npWarehouses.ref, warehouseRef))
+    .limit(1);
+
+  return row?.cityRef ?? null;
+}
+
+/**
  * One warehouse by ref, carrying the two facts needed to decide whether it is
  * still a *valid* choice: which settlement it is in, and whether it is a
  * postomat. Switching the delivery method from «відділення» to «поштомат»

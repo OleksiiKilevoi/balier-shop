@@ -5,6 +5,7 @@ import {
   allowedTransitions,
   canTransition,
   isStockCommitted,
+  orderDetailsLock,
   revertCrossesPayment,
   revertTarget,
 } from './status';
@@ -267,5 +268,26 @@ describe('isStockCommitted', () => {
   it('is false for the terminal statuses', () => {
     expect(isStockCommitted('cancelled')).toBe(false);
     expect(isStockCommitted('refunded')).toBe(false);
+  });
+});
+
+describe('orderDetailsLock', () => {
+  const EDITABLE: OrderStatus[] = ['pending', 'awaiting_payment', 'paid', 'confirmed', 'packed'];
+
+  it('allows editing exactly up to `packed`, while no waybill exists', () => {
+    for (const status of ALL_STATUSES) {
+      expect(orderDetailsLock({ status, npTtn: null }), status).toBe(
+        EDITABLE.includes(status) ? null : 'edit_locked',
+      );
+    }
+  });
+
+  it('lets the waybill outrank every status — even an editable one', () => {
+    // A ТТН is a carrier document carrying the recipient's name, phone and
+    // destination; the fix it names (delete, edit, recreate) only exists while
+    // the parcel has not moved, but the *reason* shown must be the waybill.
+    for (const status of ALL_STATUSES) {
+      expect(orderDetailsLock({ status, npTtn: '20450000000000' }), status).toBe('edit_ttn_exists');
+    }
   });
 });

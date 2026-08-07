@@ -138,6 +138,15 @@ export const productVariants = pgTable(
     colorHex: text('color_hex'),
     /** Kopiykas. NULL means "use products.base_price". */
     priceOverride: integer('price_override'),
+    /**
+     * Grams. Nova Poshta requires a weight on every waybill, and an order's
+     * weight is the sum over its items — so it lives here, on the thing an
+     * order item references. NULL means «never weighed», and deliberately has
+     * no fallback: a waybill for an order containing a weightless variant is
+     * refused by name, because a silently assumed kilogram is a wrong waybill
+     * and an argument at the counter (docs/plans/novaposhta.md).
+     */
+    weightGrams: integer('weight_grams'),
     /** Physical units on hand. Availability = stock - active reservations. */
     stock: integer('stock').notNull().default(0),
     position: integer('position').notNull().default(0),
@@ -190,6 +199,34 @@ export const orders = pgTable(
     npAddress: text('np_address'),
     /** Nova Poshta tracking number, set when the parcel is created. */
     npTtn: text('np_ttn'),
+    /**
+     * The waybill's internal document Ref at Nova Poshta. `npTtn` above stays
+     * the printed 14-digit number; this is what deletion and printing take.
+     * NULL with `npTtn` set means the number was recorded by hand — a waybill
+     * made in the NP cabinet — and such an order can be tracked but its waybill
+     * cannot be deleted or printed from the panel.
+     */
+    npTtnRef: text('np_ttn_ref'),
+    npTtnCreatedAt: timestamp('np_ttn_created_at', { withTimezone: true }),
+    /**
+     * Last tracking status, verbatim from the carrier — the code as NP sent it
+     * (text, not integer: what the API returns is recorded, never parsed into
+     * shape), the human sentence next to it, and when the sync saw it. Display
+     * and diagnosis only; the order's own `status` is what the state machine
+     * moves, and only `applyCarrierStatus` maps one onto the other.
+     */
+    npStatusCode: text('np_status_code'),
+    npStatusText: text('np_status_text'),
+    npStatusAt: timestamp('np_status_at', { withTimezone: true }),
+    /**
+     * COD only: when tracking first reported code 11 — the money transfer
+     * credited to the seller. Recorded because the money matters, but it moves
+     * nothing: `delivered` is the handover (codes 9/10), which is what the word
+     * already means for a COD order.
+     */
+    npMoneyTransferAt: timestamp('np_money_transfer_at', { withTimezone: true }),
+    /** Ref of the register of shipments (ScanSheet) this waybill is on, if any. */
+    npScanSheetRef: text('np_scan_sheet_ref'),
 
     paymentMethod: paymentMethod('payment_method').notNull(),
 
@@ -316,8 +353,6 @@ export const npSettlements = pgTable(
     area: text('area'),
     region: text('region'),
     type: text('type'),
-    /** Ref used by delivery-cost lookups; not every settlement has one. */
-    deliveryCityRef: text('delivery_city_ref'),
     /**
      * Denormalised count of `np_warehouses` rows for this settlement, refreshed by
      * the same sync that populates both tables. NP's `getSettlements` has no
@@ -361,6 +396,16 @@ export const npWarehouses = pgTable(
   {
     ref: text('ref').primaryKey(),
     settlementRef: text('settlement_ref').notNull(),
+    /**
+     * The branch's ref in NP's **city** dictionary (`getCities`) — a different
+     * dictionary from the settlement one, and the ref `InternetDocument.save`
+     * takes as `CityRecipient`. Lives on the warehouse because that is where
+     * the feed actually provides it: `getSettlements` has no such field (found
+     * 2026-08-07 when every `delivery_city_ref` turned out NULL — that column
+     * was designed against data that does not exist, and is gone). NULL until
+     * the first sync with this column runs; the waybill form refuses then.
+     */
+    cityRef: text('city_ref'),
     number: text('number'),
     /**
      * `number` is what NP prints on the branch, and it is text because a few

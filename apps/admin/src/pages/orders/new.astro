@@ -10,6 +10,7 @@ import {
   findWarehouse,
   listWarehouses,
   searchSettlements,
+  topSettlements,
 } from '@balier/lib/db/queries/novaposhta';
 import { searchAdminVariants } from '@balier/lib/db/queries/products';
 import { getCodLimitKopiykas, getReservationTtlMinutes } from '@balier/lib/db/queries/settings';
@@ -225,7 +226,8 @@ if (form && isCreateSubmit(form)) {
 
 const productTokens = searchTokens(parseSearchQuery(draft.productQuery));
 
-const [basketVariants, productResults, settlementResults, warehouseResults] = await Promise.all([
+const [basketVariants, productResults, settlementResults, warehouseResults, settlementChips] =
+  await Promise.all([
   findCartVariants(
     db,
     draft.items.map((item) => item.variantId),
@@ -250,6 +252,8 @@ const [basketVariants, productResults, settlementResults, warehouseResults] = aw
         WAREHOUSE_RESULT_LIMIT,
       )
     : Promise.resolve([]),
+  /* `/checkout`'s one-tap chips, `/settings`' ranking (`warehouse_count`). */
+  topSettlements(db, 4),
 ]);
 
 /**
@@ -713,6 +717,25 @@ const DELIVERY_CHOICES = [
         {
           invalid.has('settlement') && !settlement && (
             <p class="text-danger mt-1 text-xs">{ADMIN_NEW_ORDER_ERRORS.settlement}</p>
+          )
+        }
+
+        {/* `/checkout`'s one-tap chips — a submit each, so a tap is a real
+            pick with script off too. */}
+        {
+          settlementChips.length > 0 && (
+            <div class="mt-2 flex flex-wrap gap-1.5" aria-label="Популярні міста">
+              {settlementChips.map((chip) => (
+                <button
+                  type="submit"
+                  name={DRAFT_ACTIONS.pickSettlement}
+                  value={chip.ref}
+                  class="admin-badge text-fg-muted hover:bg-surface-hover hover:text-fg min-h-8 w-auto max-w-none cursor-pointer px-3 text-sm"
+                >
+                  {chip.name}
+                </button>
+              ))}
+            </div>
           )
         }
       </div>

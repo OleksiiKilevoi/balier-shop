@@ -839,6 +839,27 @@ function imageMeta(image: (typeof images)[number]): string {
                       </div>
 
                       <div class="w-full sm:w-32">
+                        <label for={`weightGrams-${variant.id}`} class="text-fg-subtle text-xs">
+                          Вага, г
+                        </label>
+                        <input
+                          id={`weightGrams-${variant.id}`}
+                          name="weightGrams"
+                          type="text"
+                          inputmode="numeric"
+                          value={redrawVariant(variant.id, 'weightGrams', variant.weightGrams)}
+                          autocomplete="off"
+                          placeholder="не зважено"
+                          class:list={[
+                            'admin-field mt-1',
+                            variantRowFailed(variant.id) &&
+                              invalid.has('weightGrams') &&
+                              'border-danger',
+                          ]}
+                        />
+                      </div>
+
+                      <div class="w-full sm:w-32">
                         <label for={`stock-${variant.id}`} class="text-fg-subtle text-xs">
                           Залишок
                         </label>
@@ -1010,6 +1031,25 @@ function imageMeta(image: (typeof images)[number]): string {
                       id="new-colorHex"
                       value={redraw('variant_add', 'colorHex', '')}
                       invalid={failedIntent === 'variant_add' && invalid.has('colorHex')}
+                    />
+                  </div>
+
+                  <div class="w-full sm:w-32">
+                    <label for="new-weightGrams" class="text-fg-subtle text-xs">Вага, г</label>
+                    <input
+                      id="new-weightGrams"
+                      name="weightGrams"
+                      type="text"
+                      inputmode="numeric"
+                      value={redraw('variant_add', 'weightGrams', '')}
+                      autocomplete="off"
+                      placeholder="не зважено"
+                      class:list={[
+                        'admin-field mt-1',
+                        failedIntent === 'variant_add' &&
+                          invalid.has('weightGrams') &&
+                          'border-danger',
+                      ]}
                     />
                   </div>
 

@@ -41,6 +41,22 @@ function wholeNumber(max: number, error: string) {
 }
 
 /**
+ * A whole number the manager may leave blank, where blank means NULL rather
+ * than zero. Written for the variant's weight, where the difference is the
+ * point: NULL is «not weighed yet» and refuses a waybill by name, while 0 would
+ * be a claim about physics — so zero is rejected along with everything else
+ * that is not a positive count.
+ */
+function optionalWholeNumber(max: number, error: string) {
+  return z
+    .string()
+    .transform((raw) => raw.replace(/[\s '’]/g, ''))
+    .refine((value) => value === '' || /^\d+$/.test(value), error)
+    .transform((value): number | null => (value === '' ? null : Number(value)))
+    .refine((value) => value === null || (value >= 1 && value <= max), error);
+}
+
+/**
  * A `<select>` whose empty option means «none». Kept as a plain uuid check
  * rather than a lookup: whether the id names a row that still exists is a
  * question for the database, and the foreign key answers it definitively.
@@ -59,6 +75,8 @@ export const PRODUCT_PRICE_MIN_HRYVNIAS = 1;
 export const PRODUCT_PRICE_MAX_HRYVNIAS = 1_000_000;
 export const STOCK_MAX = 100_000;
 export const POSITION_MAX = 9_999;
+/** Grams. A typo guard like the COD limit's bounds, not what NP will carry. */
+export const WEIGHT_GRAMS_MAX = 100_000;
 
 export const TITLE_MAX = 200;
 export const DESCRIPTION_MAX = 4_000;
@@ -147,6 +165,7 @@ const variantFields = {
   colorName: optionalText(COLOR_NAME_MAX),
   colorHex: colorHexSchema,
   priceOverride: optionalPriceSchema,
+  weightGrams: optionalWholeNumber(WEIGHT_GRAMS_MAX, 'invalid_weight'),
   stock: wholeNumber(STOCK_MAX, 'invalid_stock'),
   position: wholeNumber(POSITION_MAX, 'invalid_position'),
 };
@@ -272,6 +291,7 @@ const CATALOG_FIELDS = [
   'colorName',
   'colorHex',
   'priceOverride',
+  'weightGrams',
   'stock',
   'alt',
 ] as const;

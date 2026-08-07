@@ -189,3 +189,37 @@ export function allowedTransitions(order: OrderStateInput): readonly OrderStatus
 export function canTransition(order: OrderStateInput, next: OrderStatus): boolean {
   return allowedTransitions(order).includes(next);
 }
+
+/**
+ * Statuses at which the customer's own facts — name, phone, email, where the
+ * parcel goes — are still the panel's to correct. Everything up to and
+ * including `packed`: the parcel exists but has not moved. From `shipped` on
+ * the data already travelled with it, and the terminal statuses describe an
+ * order that is over either way.
+ */
+const DETAILS_EDITABLE: ReadonlySet<OrderStatus> = new Set<OrderStatus>([
+  'pending',
+  'awaiting_payment',
+  'paid',
+  'confirmed',
+  'packed',
+]);
+
+/**
+ * Why the customer/delivery details may not be edited right now, or `null`
+ * when they may.
+ *
+ * The waybill outranks the status: a ТТН — panel-made or hand-entered — is a
+ * carrier document carrying the recipient's name, phone and destination, and
+ * an order edited underneath it would quietly disagree with the parcel. The
+ * way through is the one the message names: delete the ТТН, edit, recreate.
+ */
+export type OrderDetailsLock = 'edit_ttn_exists' | 'edit_locked';
+
+export function orderDetailsLock(order: {
+  status: OrderStatus;
+  npTtn: string | null;
+}): OrderDetailsLock | null {
+  if (order.npTtn !== null) return 'edit_ttn_exists';
+  return DETAILS_EDITABLE.has(order.status) ? null : 'edit_locked';
+}

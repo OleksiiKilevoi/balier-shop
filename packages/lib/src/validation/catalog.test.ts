@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   PRODUCT_PRICE_MAX_HRYVNIAS,
   STOCK_MAX,
+  WEIGHT_GRAMS_MAX,
   catalogFieldErrors,
   categoryActionSchema,
   newProductSchema,
@@ -48,6 +49,7 @@ const VARIANT = {
   colorName: '',
   colorHex: '',
   priceOverride: '',
+  weightGrams: '',
   stock: '3',
   position: '0',
 } as const;
@@ -207,6 +209,30 @@ describe('variant intents', () => {
     expect(addVariant({ stock: '-1' }).success).toBe(false);
     expect(addVariant({ stock: '1.5' }).success).toBe(false);
     expect(addVariant({ stock: String(STOCK_MAX + 1) }).success).toBe(false);
+  });
+
+  /**
+   * Blank is NULL and zero is refused — the pair that keeps «not weighed yet»
+   * distinct from a claim of weightlessness. NULL is what makes the waybill
+   * form refuse the order by item instead of shipping a guessed kilogram.
+   */
+  it('keeps an unweighed variant NULL rather than zero', () => {
+    const result = addVariant();
+    expect(result.success).toBe(true);
+    if (result.success && result.data.intent === 'variant_add') {
+      expect(result.data.weightGrams).toBeNull();
+    }
+  });
+
+  it('accepts a weight in whole grams and refuses zero, fractions and absurdity', () => {
+    const result = addVariant({ weightGrams: '1 250' });
+    expect(result.success).toBe(true);
+    if (result.success && result.data.intent === 'variant_add') {
+      expect(result.data.weightGrams).toBe(1250);
+    }
+    for (const raw of ['0', '-1', '1.5', '0,4', String(WEIGHT_GRAMS_MAX + 1)]) {
+      expect(addVariant({ weightGrams: raw }).success, raw).toBe(false);
+    }
   });
 
   it('normalises a colour swatch and refuses a malformed one', () => {

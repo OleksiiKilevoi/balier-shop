@@ -12,13 +12,32 @@ const ENDPOINT = 'https://api.novaposhta.ua/v2.0/json/';
 export interface NovaPoshtaRequest {
   modelName: string;
   calledMethod: string;
-  methodProperties?: Record<string, string>;
+  /**
+   * Values are `unknown` rather than `string` because the document methods
+   * (`InternetDocument.save`, `ScanSheet.insertDocuments`, tracking) take
+   * nested arrays — `OptionsSeat`, `BackwardDeliveryData`, `Documents` — while
+   * the reference lookups are flat string maps. The API itself is stringly
+   * typed either way; each caller owns its payload's shape.
+   */
+  methodProperties?: Record<string, unknown>;
 }
 
 interface NovaPoshtaResponse<T> {
   success: boolean;
   data: T[];
-  errors: string[];
+  /**
+   * Usually an array of sentences — but the document methods answer a refused
+   * `delete` with an *object* keyed by ref (seen live 2026-08-07:
+   * `{"019fdbbd-…": "Document already deleted 20451505720271"}`), and the
+   * first version of this client crashed on `.join` right there, eating the
+   * actual error. Hence `formatErrors` below.
+   */
+  errors: string[] | Record<string, string>;
+}
+
+function formatErrors(errors: NovaPoshtaResponse<unknown>['errors']): string {
+  const parts = Array.isArray(errors) ? errors : Object.values(errors ?? {});
+  return parts.length > 0 ? parts.join('; ') : 'no error text';
 }
 
 export function createNovaPoshtaClient(apiKey: string) {
@@ -37,7 +56,7 @@ export function createNovaPoshtaClient(apiKey: string) {
       const body = (await response.json()) as NovaPoshtaResponse<T>;
 
       if (!body.success) {
-        throw new Error(`Nova Poshta ${request.calledMethod} failed: ${body.errors.join('; ')}`);
+        throw new Error(`Nova Poshta ${request.calledMethod} failed: ${formatErrors(body.errors)}`);
       }
 
       return body.data;

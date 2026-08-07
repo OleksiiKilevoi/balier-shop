@@ -445,6 +445,8 @@ export interface VariantFields {
   colorName: string | null;
   colorHex: string | null;
   priceOverride: Kopiykas | null;
+  /** Grams; NULL = not weighed, which blocks a waybill rather than defaulting. */
+  weightGrams: number | null;
   stock: number;
   position: number;
 }

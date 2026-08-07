@@ -1,0 +1,666 @@
+---
+import { env } from 'cloudflare:workers';
+import AdminLayout from '~/layouts/AdminLayout.astro';
+import { createDb, createTxDb } from '@balier/lib/db';
+import {
+  SETTLEMENT_MIN_QUERY_LENGTH,
+  findSettlement,
+  findWarehouse,
+  listWarehouses,
+  searchSettlements,
+  topSettlements,
+} from '@balier/lib/db/queries/novaposhta';
+import { findAdminOrder } from '@balier/lib/db/queries/orders';
+import { ADMIN_NEW_ORDER_ERRORS } from '@balier/lib/i18n/admin';
+import { settlementLabel } from '@balier/lib/i18n/checkout';
+import { DELIVERY_METHOD_LABELS, deliveryDestination } from '@balier/lib/notify/format';
+import {
+  DRAFT_ACTIONS,
+  DRAFT_FIELDS,
+  applyDraftAction,
+  isSearchQuery,
+  readDraft,
+} from '@balier/lib/orders/draft';
+import type { OrderDraft } from '@balier/lib/orders/draft';
+import { orderDetailsLock } from '@balier/lib/orders/status';
+import { updateOrderDetails } from '@balier/lib/orders/updateStatus';
+import type { OrderDetailsPatch } from '@balier/lib/orders/updateStatus';
+import { formatPhoneDigits, phoneDigitsFromInput } from '@balier/lib/phone';
+import {
+  adminOrderEditContactSchema,
+  adminOrderEditSchema,
+  adminOrderFieldErrors,
+} from '@balier/lib/validation/admin';
+import type { AdminOrderField } from '@balier/lib/validation/admin';
+import { MAX_CUSTOMER_NAME } from '@balier/lib/validation/checkout';
+
+/**
+ * Correcting who an order is for and where it goes — the customer misspelled
+ * their own name, dictated the wrong branch, wants it sent to another city.
+ *
+ * IT IS `/orders/new`'s FORM, NARROWED. The draft lives in the form's own
+ * fields (`~/lib/orders/draft.ts` — same field names, same pick actions), the
+ * settlement and branch are the same two search-and-pick boxes, and the same
+ * enhancement layer makes it reload-free; without script every button is still
+ * a real submit. What is different is only where the draft starts (the order
+ * itself, on GET) and what the final submit does (`updateOrderDetails`, a
+ * guarded UPDATE instead of `createOrder`).
+ *
+ * WHEN IT REFUSES: `orderDetailsLock` — no waybill, nothing past `packed`. The
+ * page checks it to answer with the reason up front, and the write re-checks it
+ * under `FOR UPDATE`, because a waybill created from a second tab between this
+ * render and the save must win: the parcel it describes is real.
+ *
+ * A legacy courier order (courier was withdrawn 2026-08-06) is the one special
+ * case: its stored street address stays as placed unless the operator actually
+ * picks a branch, so a contact-only fix does not force a re-route — and picking
+ * one converts the order to branch delivery, which also makes it waybill-able.
+ */
+export const prerender = false;
+
+const orderNumber = Astro.params.orderNumber!;
+const orderUrl = `/orders/${encodeURIComponent(orderNumber)}`;
+const SELF = `${orderUrl}/edit`;
+const SETTLEMENT_RESULT_LIMIT = 8;
+const WAREHOUSE_RESULT_LIMIT = 12;
+/** The submit that writes; every other submit just re-renders the draft. */
+const SAVE_ACTION = 'save';
+
+const db = createDb(env.DATABASE_URL);
+
+const order = await findAdminOrder(db, orderNumber);
+if (!order) return new Response('Замовлення не знайдено', { status: 404 });
+
+const lock = orderDetailsLock(order);
+if (lock) return Astro.redirect(`${orderUrl}?m=${lock}`, 303);
+
+const isLegacyCourier = order.deliveryMethod === 'np_courier';
+
+/** The submitted body, read exactly once — it is a stream. */
+const form = Astro.request.method === 'POST' ? await Astro.request.formData() : null;
+
+/** On GET the draft *is* the order; every POST carries it in the body. */
+const draft: OrderDraft = form
+  ? applyDraftAction(readDraft(form), form)
+  : {
+      customerName: order.customerName,
+      customerPhoneDigits: phoneDigitsFromInput(order.customerPhone),
+      customerEmail: order.customerEmail ?? '',
+      comment: '',
+      paymentMethod: order.paymentMethod,
+      // A courier order has no branch to prefill; the radios start at the
+      // default and the pickers start empty, which is also what `readDraft`
+      // does with a body still naming `np_courier`.
+      deliveryMethod: isLegacyCourier ? 'np_warehouse' : order.deliveryMethod,
+      settlementRef: order.npSettlementRef,
+      warehouseRef: order.npWarehouseRef,
+      items: [],
+      productQuery: '',
+      settlementQuery: '',
+      warehouseQuery: '',
+    };
+
+let invalid = new Set<AdminOrderField>();
+
+/* The two refs resolved to rows, and the searching/picked split — the same
+   rules as `/orders/new`, commented there (`new.astro`). */
+const settlementRow = draft.settlementRef ? await findSettlement(db, draft.settlementRef) : null;
+const branch = draft.warehouseRef ? await findWarehouse(db, draft.warehouseRef) : null;
+const branchRow =
+  branch &&
+  settlementRow &&
+  branch.settlementRef === settlementRow.ref &&
+  branch.isPostomat === (draft.deliveryMethod === 'np_postomat')
+    ? branch
+    : null;
+
+const settlementSearching = isSearchQuery(
+  draft.settlementQuery,
+  settlementRow ? settlementLabel(settlementRow) : null,
+);
+const settlement = settlementSearching ? null : settlementRow;
+
+const warehouseSearching = isSearchQuery(draft.warehouseQuery, branch?.description ?? null);
+const warehouse = settlement && !warehouseSearching ? branchRow : null;
+
+const settlementValue = settlementSearching
+  ? draft.settlementQuery
+  : (settlement ? settlementLabel(settlement) : '');
+const warehouseValue = warehouseSearching
+  ? draft.warehouseQuery
+  : (warehouse ? warehouse.description : '');
+
+const deliveryInput = {
+  deliveryMethod: draft.deliveryMethod,
+  npSettlementRef: settlement?.ref ?? '',
+  npSettlementName: settlement?.name ?? '',
+  npWarehouseRef: warehouse?.ref ?? '',
+  npWarehouseName: warehouse?.description ?? '',
+};
+
+if (form && form.has(SAVE_ACTION)) {
+  /*
+   * A legacy courier order whose picker was never touched keeps its stored
+   * delivery — the operator came to fix a phone number, not to re-route. A
+   * non-empty settlement box (picked or mid-search) means a re-route was
+   * started, and then the full schema holds it to the same standard as any
+   * other order: finish the pick or clear the box.
+   */
+  const contactOnly = isLegacyCourier && !settlement && !settlementSearching;
+
+  const contact = {
+    customerName: draft.customerName,
+    // The draft holds only the 9 local digits — the `+380` the field shows is
+    // a label, not part of its value (see `/orders/new`).
+    customerPhone: `+380${draft.customerPhoneDigits}`,
+    customerEmail: draft.customerEmail,
+  };
+
+  const save = async (patch: OrderDetailsPatch): Promise<Response> => {
+    const { db: txDb, close } = createTxDb(env.DATABASE_URL);
+    try {
+      const result = await updateOrderDetails(txDb, orderNumber, patch);
+
+      if (result.ok) return Astro.redirect(`${orderUrl}?m=order_updated`, 303);
+      if (result.reason === 'not_found') {
+        return new Response('Замовлення не знайдено', { status: 404 });
+      }
+      // The lock moved under us — the order page explains which one held.
+      return Astro.redirect(`${orderUrl}?m=${result.reason}`, 303);
+    } finally {
+      Astro.locals.cfContext.waitUntil(close());
+    }
+  };
+
+  if (contactOnly) {
+    const parsed = adminOrderEditContactSchema.safeParse(contact);
+    if (!parsed.success) invalid = adminOrderFieldErrors(parsed.error);
+    else {
+      return await save({
+        customerName: parsed.data.customerName,
+        customerPhone: parsed.data.customerPhone,
+        customerEmail: parsed.data.customerEmail ?? null,
+      });
+    }
+  } else {
+    const parsed = adminOrderEditSchema.safeParse({ ...contact, delivery: deliveryInput });
+    if (!parsed.success) invalid = adminOrderFieldErrors(parsed.error);
+    else {
+      return await save({
+        customerName: parsed.data.customerName,
+        customerPhone: parsed.data.customerPhone,
+        customerEmail: parsed.data.customerEmail ?? null,
+        delivery: parsed.data.delivery,
+      });
+    }
+  }
+}
+
+/* ------------------------------------------------------ what the page renders */
+
+const [settlementResults, warehouseResults, settlementChips] = await Promise.all([
+  settlementSearching
+    ? searchSettlements(db, draft.settlementQuery, SETTLEMENT_RESULT_LIMIT)
+    : Promise.resolve([]),
+  settlement
+    ? listWarehouses(
+        db,
+        settlement.ref,
+        draft.deliveryMethod === 'np_postomat' ? 'np_postomat' : 'np_warehouse',
+        warehouseSearching ? draft.warehouseQuery : '',
+        WAREHOUSE_RESULT_LIMIT,
+      )
+    : Promise.resolve([]),
+  /* `/checkout`'s one-tap chips, `/settings`' ranking (`warehouse_count`). */
+  topSettlements(db, 4),
+]);
+
+const DELIVERY_CHOICES = [
+  { value: 'np_warehouse', id: 'dm-warehouse' },
+  { value: 'np_postomat', id: 'dm-postomat' },
+] as const;
+---
+
+<AdminLayout title={`Редагування ${order.orderNumber}`}>
+  <a href={orderUrl} class="text-fg-muted hover:text-fg text-sm">← До замовлення</a>
+
+  <header class="mt-4">
+    <h1 class="text-fg text-2xl font-semibold sm:text-3xl">
+      Редагування <span class="font-mono">{order.orderNumber}</span>
+    </h1>
+    <p class="text-fg-muted mt-1 text-sm">
+      Ім’я, телефон, пошта й адреса доставки. Товари, оплата і статус замовлення звідси не
+      змінюються.
+    </p>
+  </header>
+
+  <form
+    method="post"
+    action={SELF}
+    id="edit-order-form"
+    class="group aria-busy:pointer-events-none aria-busy:opacity-40 mt-6 space-y-6 transition-opacity"
+  >
+    {/* The form's default button — Enter in any box asks for a re-render, not a
+        save; see the same button on `/orders/new`. */}
+    <button type="submit" class="sr-only" tabindex="-1" aria-hidden="true">Оновити</button>
+
+    {/* ------------------------------------------------------------ customer */}
+    <section class="admin-card p-5">
+      <h2 class="text-fg text-base font-semibold">Клієнт</h2>
+
+      <div class="mt-3 grid gap-4 sm:grid-cols-2">
+        <div>
+          <label for="customer-name" class="text-fg-subtle text-xs">Ім’я</label>
+          <input
+            id="customer-name"
+            name={DRAFT_FIELDS.name}
+            type="text"
+            value={draft.customerName}
+            maxlength={MAX_CUSTOMER_NAME}
+            autocomplete="off"
+            class="admin-field mt-1"
+          />
+          {invalid.has('customerName') && (
+            <p class="text-danger mt-1 text-xs">{ADMIN_NEW_ORDER_ERRORS.customerName}</p>
+          )}
+        </div>
+
+        <div>
+          <label for="customer-phone" class="text-fg-subtle text-xs">Телефон</label>
+          <div class="relative mt-1">
+            <span
+              class="text-fg pointer-events-none absolute inset-y-0 left-4.5 flex items-center text-base sm:text-sm"
+              aria-hidden="true"
+            >
+              +380
+            </span>
+            <input
+              id="customer-phone"
+              name={DRAFT_FIELDS.phone}
+              type="tel"
+              inputmode="numeric"
+              value={formatPhoneDigits(draft.customerPhoneDigits)}
+              placeholder="XX XXX XX XX"
+              autocomplete="off"
+              class="admin-field admin-field-phone"
+              data-phone-input
+            />
+          </div>
+          {invalid.has('customerPhone') && (
+            <p class="text-danger mt-1 text-xs">{ADMIN_NEW_ORDER_ERRORS.customerPhone}</p>
+          )}
+        </div>
+
+        <div class="sm:col-span-2">
+          <label for="customer-email" class="text-fg-subtle text-xs">
+            Пошта <span class="text-fg-subtle">— не обов’язково</span>
+          </label>
+          <input
+            id="customer-email"
+            name={DRAFT_FIELDS.email}
+            type="text"
+            inputmode="email"
+            value={draft.customerEmail}
+            autocomplete="off"
+            class="admin-field mt-1"
+          />
+          <p class="text-fg-subtle mt-1 text-xs">Порожнє поле видаляє пошту із замовлення.</p>
+          {invalid.has('customerEmail') && (
+            <p class="text-danger mt-1 text-xs">{ADMIN_NEW_ORDER_ERRORS.customerEmail}</p>
+          )}
+        </div>
+      </div>
+    </section>
+
+    {/* ------------------------------------------------------------ delivery */}
+    <section class="admin-card p-5">
+      <h2 class="text-fg text-base font-semibold">Доставка</h2>
+
+      {isLegacyCourier && (
+        <p class="text-fg-muted mt-2 text-sm">
+          Замовлення оформлене з кур’єрською доставкою — зараз: {deliveryDestination(order)}. Кур’єра
+          більше немає: оберіть нижче відділення чи поштомат, щоб замінити адресу, або збережіть,
+          нічого не обираючи — тоді доставка лишиться як є.
+        </p>
+      )}
+
+      <div class="mt-3 flex flex-wrap gap-2">
+        {
+          DELIVERY_CHOICES.map((choice) => (
+            <div>
+              <input
+                type="radio"
+                id={choice.id}
+                name={DRAFT_FIELDS.deliveryMethod}
+                value={choice.value}
+                checked={draft.deliveryMethod === choice.value}
+                class="peer sr-only"
+              />
+              <label
+                for={choice.id}
+                class="admin-badge text-fg-muted peer-[:not(:checked)]:hover:bg-surface-hover peer-[:not(:checked)]:hover:text-fg peer-checked:bg-accent peer-checked:text-accent-fg peer-checked:cursor-default peer-focus-visible:outline-fg-subtle min-h-8 w-auto max-w-none cursor-pointer px-3 text-sm peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2"
+              >
+                {DELIVERY_METHOD_LABELS[choice.value]}
+              </label>
+            </div>
+          ))
+        }
+      </div>
+
+      {/* The settlement and branch pickers — `/orders/new`'s, commented there. */}
+      <div class="border-border mt-5 border-t pt-5">
+        <label for="settlement-q" class="text-fg-subtle text-xs">Населений пункт</label>
+
+        <input type="hidden" name={DRAFT_FIELDS.settlement} value={settlement?.ref ?? ''} />
+
+        <div class="relative mt-1">
+          <input
+            id="settlement-q"
+            name={DRAFT_FIELDS.settlementQuery}
+            type="search"
+            value={settlementValue}
+            placeholder="Почніть вводити назву міста…"
+            autocomplete="off"
+            class:list={[
+              'admin-field',
+              invalid.has('settlement') && !settlement && 'border-danger',
+            ]}
+          />
+
+          {
+            settlementResults.length > 0 && (
+              <ul
+                role="listbox"
+                aria-label="Знайдені населені пункти"
+                class="admin-card divide-border absolute inset-x-0 top-full z-20 mt-1 max-h-64 divide-y overflow-y-auto shadow-lg"
+              >
+                {settlementResults.map((result) => (
+                  <li role="option">
+                    <button
+                      type="submit"
+                      name={DRAFT_ACTIONS.pickSettlement}
+                      value={result.ref}
+                      class="text-fg hover:bg-surface-hover w-full cursor-pointer px-4 py-2.5 text-left text-sm"
+                    >
+                      {settlementLabel(result)}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )
+          }
+        </div>
+
+        {
+          settlementSearching &&
+            settlementResults.length === 0 &&
+            draft.settlementQuery.length >= SETTLEMENT_MIN_QUERY_LENGTH && (
+              <p class="text-fg-subtle mt-1 text-xs">Нічого не знайдено.</p>
+            )
+        }
+        {
+          invalid.has('settlement') && !settlement && (
+            <p class="text-danger mt-1 text-xs">{ADMIN_NEW_ORDER_ERRORS.settlement}</p>
+          )
+        }
+
+        {/* `/checkout`'s one-tap chips — a submit each, so a tap is a real
+            pick with script off too. */}
+        {
+          settlementChips.length > 0 && (
+            <div class="mt-2 flex flex-wrap gap-1.5" aria-label="Популярні міста">
+              {settlementChips.map((chip) => (
+                <button
+                  type="submit"
+                  name={DRAFT_ACTIONS.pickSettlement}
+                  value={chip.ref}
+                  class="admin-badge text-fg-muted hover:bg-surface-hover hover:text-fg min-h-8 w-auto max-w-none cursor-pointer px-3 text-sm"
+                >
+                  {chip.name}
+                </button>
+              ))}
+            </div>
+          )
+        }
+      </div>
+
+      <div class="border-border mt-5 border-t pt-5">
+        <label for="warehouse-q" class="text-fg-subtle text-xs">Відділення або поштомат</label>
+
+        <input type="hidden" name={DRAFT_FIELDS.warehouse} value={warehouse?.ref ?? ''} />
+
+        <div class="group/wh relative mt-1">
+          <input
+            id="warehouse-q"
+            name={DRAFT_FIELDS.warehouseQuery}
+            type="search"
+            value={warehouseValue}
+            placeholder={
+              settlement ? 'Почніть вводити номер або вулицю…' : 'Спочатку оберіть населений пункт'
+            }
+            disabled={!settlement}
+            autocomplete="off"
+            class:list={[
+              'admin-field disabled:cursor-not-allowed disabled:opacity-40',
+              invalid.has('warehouse') && !warehouse && 'border-danger',
+            ]}
+          />
+
+          {
+            warehouseResults.length > 0 && (
+              <ul
+                role="listbox"
+                aria-label="Знайдені відділення"
+                class:list={[
+                  'admin-card divide-border absolute inset-x-0 top-full z-20 mt-1 max-h-64 divide-y overflow-y-auto shadow-lg',
+                  !warehouseSearching && 'hidden group-focus-within/wh:block',
+                ]}
+              >
+                {warehouseResults.map((result) => (
+                  <li role="option">
+                    <button
+                      type="submit"
+                      name={DRAFT_ACTIONS.pickWarehouse}
+                      value={result.ref}
+                      class="text-fg hover:bg-surface-hover w-full cursor-pointer px-4 py-2.5 text-left text-sm"
+                    >
+                      {result.description}
+                    </button>
+                  </li>
+                ))}
+
+                {warehouseResults.length === WAREHOUSE_RESULT_LIMIT && (
+                  <li class="text-fg-subtle px-4 py-2 text-xs">
+                    Показано перші {WAREHOUSE_RESULT_LIMIT}. Уточніть пошук, якщо потрібного немає.
+                  </li>
+                )}
+              </ul>
+            )
+          }
+        </div>
+
+        {
+          settlement && warehouseResults.length === 0 && (
+            <p class="text-fg-subtle mt-1 text-xs">
+              {warehouseSearching
+                ? 'Нічого не знайдено.'
+                : 'У цьому населеному пункті немає відповідних відділень.'}
+            </p>
+          )
+        }
+        {
+          invalid.has('warehouse') && !warehouse && (
+            <p class="text-danger mt-1 text-xs">{ADMIN_NEW_ORDER_ERRORS.warehouse}</p>
+          )
+        }
+      </div>
+    </section>
+
+    {/* ---------------------------------------------------------------- save */}
+    <div class="flex flex-col gap-3 sm:flex-row-reverse sm:items-center">
+      <button
+        type="submit"
+        name={SAVE_ACTION}
+        value="1"
+        class="admin-btn admin-btn-primary w-full sm:w-auto"
+      >
+        Зберегти зміни
+      </button>
+      <a href={orderUrl} class="text-fg-muted hover:text-fg text-center text-sm underline underline-offset-2 sm:text-left">
+        Скасувати
+      </a>
+    </div>
+  </form>
+
+  {/*
+    The enhancement layer — `/orders/new`'s, trimmed: same fetch-and-swap of
+    the same POST the browser would make, same search-as-you-type, same phone
+    mask, same fallback to a real submit on any failure. `save` takes `create`'s
+    role as the one guarded, never-raced submit; its success is a redirect back
+    to the order, which the script follows like any other.
+  */}
+  <script>
+    import { applyPhoneMask } from '@balier/lib/phone';
+
+    const form = document.getElementById('edit-order-form');
+
+    if (form instanceof HTMLFormElement) {
+      let bypass = false;
+      let saving = false;
+      let navigating = false;
+      let inflight: AbortController | null = null;
+      let searchTimer: ReturnType<typeof setTimeout> | undefined;
+
+      form.addEventListener('submit', (event) => {
+        if (bypass) return;
+        event.preventDefault();
+        clearTimeout(searchTimer);
+        void post(event.submitter instanceof HTMLButtonElement ? event.submitter : null);
+      });
+
+      form.addEventListener('input', (event) => {
+        const field = event.target;
+        if (!(field instanceof HTMLInputElement)) return;
+
+        if (field.hasAttribute('data-phone-input')) {
+          applyPhoneMask(field);
+          return;
+        }
+
+        if (field.type !== 'search') return;
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(() => void post(null), 300);
+      });
+
+      // A delivery-method switch changes which branches are listed.
+      form.addEventListener('change', (event) => {
+        const field = event.target;
+        if (field instanceof HTMLInputElement && field.type === 'radio') void post(null);
+      });
+
+      document.addEventListener('pointerdown', (event) => {
+        for (const list of form.querySelectorAll('[role="listbox"]')) {
+          const box = list.parentElement;
+          if (event.target instanceof Node && !box?.contains(event.target)) {
+            list.classList.add('hidden');
+          }
+        }
+      });
+
+      async function post(submitter: HTMLButtonElement | null) {
+        if (saving || navigating || !(form instanceof HTMLFormElement)) return;
+
+        inflight?.abort();
+        const controller = new AbortController();
+        inflight = controller;
+
+        const body = new FormData(form);
+        if (submitter?.name) body.append(submitter.name, submitter.value);
+
+        const isSave = submitter?.name === 'save';
+        if (isSave) saving = true;
+        if (submitter) form.setAttribute('aria-busy', 'true');
+
+        try {
+          const response = await fetch(form.action, {
+            method: 'POST',
+            body,
+            signal: controller.signal,
+          });
+
+          // A redirect is a decision, not a render: the saved order's page, a
+          // lock that beat us to the row, or the login form.
+          if (response.redirected) {
+            navigating = true;
+            window.location.assign(response.url);
+            return;
+          }
+
+          if (!response.ok) throw new Error(`POST ${response.status}`);
+
+          const html = await response.text();
+          if (inflight === controller) render(html, isSave);
+        } catch (error) {
+          if (error instanceof DOMException && error.name === 'AbortError') return;
+          bypass = true;
+          form.requestSubmit(submitter ?? undefined);
+        } finally {
+          saving = false;
+          if (inflight === controller && !navigating) {
+            inflight = null;
+            form.removeAttribute('aria-busy');
+          }
+        }
+      }
+
+      function render(html: string, fromSave: boolean) {
+        if (!(form instanceof HTMLFormElement)) return;
+
+        const next = new DOMParser()
+          .parseFromString(html, 'text/html')
+          .getElementById('edit-order-form');
+        if (!next) {
+          window.location.reload();
+          return;
+        }
+
+        const active = document.activeElement;
+        let keep: { id: string; value: string | null; start: number | null; end: number | null } | null =
+          null;
+        if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) {
+          const textual = active instanceof HTMLTextAreaElement || active.type !== 'radio';
+          let start: number | null = null;
+          let end: number | null = null;
+          try {
+            start = active.selectionStart;
+            end = active.selectionEnd;
+          } catch {
+            /* number inputs refuse selection access */
+          }
+          keep = { id: active.id, value: textual ? active.value : null, start, end };
+        }
+
+        form.innerHTML = next.innerHTML;
+
+        const el = keep?.id ? document.getElementById(keep.id) : null;
+        if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+          if (keep?.value != null) el.value = keep.value;
+          el.focus({ preventScroll: true });
+          if (keep?.start != null && keep.end != null) {
+            try {
+              el.setSelectionRange(keep.start, keep.end);
+            } catch {
+              /* not a text-entry field */
+            }
+          }
+        }
+
+        // A refused save explains itself under its fields; the operator who
+        // clicked at the bottom has to see the first of them.
+        if (fromSave) {
+          form.querySelector('.text-danger')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        }
+      }
+    }
+  </script>
+</AdminLayout>

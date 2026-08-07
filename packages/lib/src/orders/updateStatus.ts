@@ -3,7 +3,8 @@ import type { Db, TxDb } from '../db';
 import type { Order, OrderStatus } from '../db/schema';
 import { orderItems, orders, payments, productVariants, stockReservations } from '../db/schema';
 import type { PaymentPort } from '../ports';
-import { allowedTransitions, isStockCommitted } from './status';
+import { allowedTransitions, isStockCommitted, orderDetailsLock } from './status';
+import type { OrderDetailsLock } from './status';
 
 /**
  * The admin panel's write path for an order.
@@ -183,20 +184,71 @@ export async function removeCancelledOrderInvoices(
 }
 
 /**
- * The Nova Poshta tracking number, typed in by whoever created the parcel.
- * Plain single-row write with no transaction and no state machine behind it —
- * it annotates an order, it does not move one. `null` clears it.
+ * The customer's facts, as `/orders/[n]/edit` may rewrite them. `delivery`
+ * absent means "leave the delivery columns alone" — the contact-only save a
+ * legacy courier order gets when its picker was never touched.
  */
-export async function setOrderTrackingNumber(
-  db: Db,
-  orderNumber: string,
-  ttn: string | null,
-): Promise<Order | null> {
-  const [updated] = await db
-    .update(orders)
-    .set({ npTtn: ttn, updatedAt: sql`now()` })
-    .where(eq(orders.orderNumber, orderNumber))
-    .returning();
+export interface OrderDetailsPatch {
+  customerName: string;
+  customerPhone: string;
+  /** `null` clears a stored address — the field is optional at checkout too. */
+  customerEmail: string | null;
+  delivery?: {
+    deliveryMethod: 'np_warehouse' | 'np_postomat';
+    npSettlementRef: string;
+    npSettlementName: string;
+    npWarehouseRef: string;
+    npWarehouseName: string;
+  };
+}
 
-  return updated ?? null;
+export type UpdateOrderDetailsResult =
+  | { ok: true; order: Order }
+  | { ok: false; reason: 'not_found' }
+  | { ok: false; reason: OrderDetailsLock };
+
+/**
+ * Rewrites who the order is for and where it goes. The *when* lives in
+ * `./status.ts` (`orderDetailsLock`) and is re-checked here under the same
+ * `FOR UPDATE` the status writes take: the page's own check ran against a
+ * render that may be minutes old, and a waybill created from a second tab in
+ * between must win — the parcel it describes is real.
+ */
+export async function updateOrderDetails(
+  txDb: TxDb,
+  orderNumber: string,
+  patch: OrderDetailsPatch,
+): Promise<UpdateOrderDetailsResult> {
+  return txDb.transaction(async (tx) => {
+    const [order] = await tx
+      .select()
+      .from(orders)
+      .where(eq(orders.orderNumber, orderNumber))
+      .for('update')
+      .limit(1);
+
+    if (!order) return { ok: false, reason: 'not_found' };
+
+    const lock = orderDetailsLock(order);
+    if (lock) return { ok: false, reason: lock };
+
+    const [updated] = await tx
+      .update(orders)
+      .set({
+        customerName: patch.customerName,
+        customerPhone: patch.customerPhone,
+        customerEmail: patch.customerEmail,
+        // A picked branch replaces the whole destination, including a legacy
+        // courier street address — half-updated delivery columns would name a
+        // branch in one city and a doorstep in another.
+        ...(patch.delivery ? { ...patch.delivery, npAddress: null } : {}),
+        updatedAt: sql`now()`,
+      })
+      .where(eq(orders.id, order.id))
+      .returning();
+
+    if (!updated) throw new Error('order details update returned no row');
+
+    return { ok: true, order: updated };
+  });
 }

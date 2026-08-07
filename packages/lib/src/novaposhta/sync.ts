@@ -40,7 +40,6 @@ interface RawSettlement {
   RegionsDescription?: string;
   /** Ukrainian settlement-type label — "місто" | "село" | "селище" | "селище міського типу". */
   SettlementTypeDescription?: string;
-  DeliveryCity?: string;
 }
 
 interface RawWarehouseType {
@@ -143,7 +142,6 @@ const SETTLEMENT_SYNCED = [
   'area',
   'region',
   'type',
-  'deliveryCityRef',
 ] as const;
 
 async function upsertSettlements(db: Db, rows: RawSettlement[]): Promise<void> {
@@ -159,7 +157,6 @@ async function upsertSettlements(db: Db, rows: RawSettlement[]): Promise<void> {
         area: s.AreaDescription ?? null,
         region: s.RegionsDescription ?? null,
         type: s.SettlementTypeDescription ?? null,
-        deliveryCityRef: s.DeliveryCity ?? null,
       })),
     )
     .onConflictDoUpdate({
@@ -209,6 +206,7 @@ function branchNumberSort(number: string | undefined): number | null {
 /** As `SETTLEMENT_SYNCED` — every warehouse column the feed owns. */
 const WAREHOUSE_SYNCED = [
   'settlementRef',
+  'cityRef',
   'number',
   'numberSort',
   'description',
@@ -262,6 +260,8 @@ async function syncWarehouses(client: NovaPoshtaClient, db: Db): Promise<number>
             return {
               ref: w.Ref,
               settlementRef: (w.SettlementRef ?? w.CityRef)!,
+              /* The waybill's `CityRecipient` — see the schema's own doc. */
+              cityRef: w.CityRef ?? null,
               number: w.Number ?? null,
               numberSort: branchNumberSort(w.Number),
               description: w.Description,

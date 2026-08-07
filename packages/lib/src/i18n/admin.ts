@@ -5,6 +5,7 @@ import type { UploadIssue } from '../media/upload';
 import {
   COD_LIMIT_MAX_HRYVNIAS,
   COD_LIMIT_MIN_HRYVNIAS,
+  NP_SEAT_CM_MAX,
   PASSWORD_MAX_LENGTH,
   PASSWORD_MIN_LENGTH,
 } from '../validation/admin';
@@ -18,7 +19,7 @@ export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
   awaiting_payment: 'Очікує оплати',
   paid: 'Оплачено',
   confirmed: 'Підтверджено',
-  packed: 'Упаковано',
+  packed: 'ТТН створено',
   shipped: 'Відправлено',
   delivered: 'Доставлено',
   cancelled: 'Скасовано',
@@ -29,10 +30,11 @@ export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
  * The button that produces each status — a verb, not the status name, because
  * the operator is recording something they did, not choosing a state.
  * Only the statuses `~/lib/orders/status.ts` can actually produce appear here.
+ * `packed` has no button and so no verb: creating the waybill *is* the
+ * transition (`docs/plans/novaposhta.md`), so «Створити ТТН» is its label.
  */
 export const ORDER_TRANSITION_LABELS: Record<OrderStatus, string> = {
   ...ORDER_STATUS_LABELS,
-  packed: 'Позначити упакованим',
   shipped: 'Позначити відправленим',
   delivered: 'Позначити доставленим',
   cancelled: 'Скасувати замовлення',
@@ -55,8 +57,8 @@ export const ORDER_TRANSITION_HINTS: Partial<Record<OrderStatus, string>> = {
  * The button that undoes a wrong click, keyed by the status it steps back to.
  * A verb of its own (`~/lib/orders/status.ts`'s `revertTarget`) rather than
  * reusing `ORDER_TRANSITION_LABELS`, since the same target status reads as
- * *progress* going forward but as *undo* going back — «Позначити упакованим»
- * would be a strange thing to click while looking at a `shipped` order.
+ * *progress* going forward but as *undo* going back — a forward-sounding
+ * label would be a strange thing to click while looking at a `shipped` order.
  *
  * `paid` and `confirmed` appear here two ways: as the two faces of reverting
  * `packed`, and as one of the possible landings when undoing a `cancelled`/
@@ -68,7 +70,7 @@ export const ORDER_TRANSITION_HINTS: Partial<Record<OrderStatus, string>> = {
 export const ORDER_REVERT_LABELS: Partial<Record<OrderStatus, string>> = {
   paid: 'Повернути до «Оплачено»',
   confirmed: 'Повернути до «Підтверджено»',
-  packed: 'Повернути до «Упаковано»',
+  packed: 'Повернути до «ТТН створено»',
   shipped: 'Повернути до «Відправлено»',
   delivered: 'Повернути до «Доставлено»',
 };
@@ -109,16 +111,71 @@ export const ORDER_REVERT_FROM_REFUNDED_WARNING =
 export const ADMIN_ORDER_MESSAGES = {
   created: 'Замовлення створено.',
   status_updated: 'Статус замовлення оновлено.',
-  ttn_updated: 'Номер накладної збережено.',
-  ttn_cleared: 'Номер накладної видалено.',
   invalid_transition: 'Цей перехід недоступний для замовлення в такому статусі.',
   insufficient_stock: 'Недостатньо товару на складі, щоб повернути це замовлення — частину вже продано.',
   stale: 'Замовлення вже змінилося — сторінку оновлено, спробуйте ще раз.',
-  invalid_tracking_number: 'Номер накладної має складатися з 14 цифр.',
   bad_request: 'Не вдалося виконати дію.',
+  order_updated: 'Дані замовлення оновлено.',
+  edit_ttn_exists:
+    'У замовлення є накладна, і дані в ній не зміняться. Щоб редагувати замовлення, спочатку видаліть ТТН, а після змін створіть нову.',
+  edit_locked: 'Замовлення вже відправлене або закрите — його дані не редагуються.',
+
+  /* The waybill. */
+  waybill_created: 'ТТН створено.',
+  waybill_deleted: 'ТТН видалено — замовлення повернулося до попереднього статусу.',
+  ttn_exists: 'У замовлення вже є накладна — другу не створено.',
+  waybill_invalid_state: 'ТТН створюється лише для замовлення в статусі «Оплачено» або «Підтверджено».',
+  no_waybill: 'У цього замовлення немає накладної.',
 } as const;
 
 export type AdminOrderMessage = keyof typeof ADMIN_ORDER_MESSAGES;
+
+/* ------------------------------------------------------------- the waybill */
+
+/**
+ * Field-level refusals of «Створити ТТН», keyed by the schema's own issue
+ * names (`waybillCreateSchema`). Rendered in place, not through the redirect:
+ * the form holds nine values the operator should not have to retype.
+ */
+export const ADMIN_WAYBILL_ERRORS = {
+  invalid_recipient_name:
+    'Вкажіть прізвище та ім’я одержувача — два слова, як в паспорті. Замовлення це не змінює.',
+  invalid_waybill_weight: 'Вага — цілі грами, від 1.',
+  invalid_seats: 'Місця — ціле число від 1 до 99.',
+  invalid_waybill_dimensions: 'Розміри місця — цілі сантиметри, від 1 до 500.',
+  invalid_waybill_description: 'Опис вантажу — до 100 символів, не порожній.',
+  invalid_declared_value: 'Оголошена вартість — цілі гривні, від 1.',
+} as const;
+
+export type AdminWaybillError = keyof typeof ADMIN_WAYBILL_ERRORS;
+
+/**
+ * Why the create form is not on the page, each one naming the fix. These are
+ * states, not errors — the panel is usable long before the NP account is
+ * configured, and the plan makes this form the place that says what is missing.
+ */
+export const ADMIN_WAYBILL_BLOCKERS = {
+  senderIncomplete:
+    'Не заповнено відправника Нової Пошти. У налаштуваннях, розділ «Нова Пошта — відправник»: натисніть «Підтягнути з акаунта», оберіть відділення й перевірте телефон.',
+  codUnavailable:
+    'Післяплата недоступна: не налаштований бізнес-акаунт Нової Пошти. Заповніть відправника в налаштуваннях, щойно акаунт буде.',
+  noDeliveryCity:
+    'Для відділення замовлення ще немає міста Нової Пошти в довіднику — його заповнює нічна синхронізація (або pnpm np:sync).',
+  noApiKey: 'NOVAPOSHTA_API_KEY не налаштовано на цьому Worker — ТТН створити нізвідки.',
+} as const;
+
+/** Prefix for the list of order lines whose variant has no weight. */
+export const ADMIN_WAYBILL_UNWEIGHED =
+  'Немає ваги у варіанта. Зважте й збережіть у редакторі товару, тоді форма підставить суму:';
+
+/** The carrier said no — its own sentence, shown verbatim. */
+export function npErrorText(message: string): string {
+  return `Нова Пошта відхилила запит: ${message}`;
+}
+
+/** Label next to a hand-entered number, so nobody looks for a delete button. */
+export const ADMIN_WAYBILL_MANUAL_NOTE =
+  'Номер внесено вручну (ТТН створено в кабінеті Нової Пошти).';
 
 /**
  * The order a manager types in themselves — `/admin/orders/new`.
@@ -196,6 +253,20 @@ export const ADMIN_SETTINGS_MESSAGES = {
   passwords_do_not_match: 'Паролі не збігаються.',
   password_unchanged: 'Новий пароль такий самий, як поточний.',
   too_many_attempts: 'Забагато невдалих спроб. Спробуйте пізніше.',
+
+  /* The Nova Poshta sender — admin-only section. */
+  np_updated: 'Налаштування Нової Пошти збережено.',
+  np_fetched: 'Дані акаунта Нової Пошти підтягнуто.',
+  np_fetch_empty:
+    'На цьому акаунті Нова Пошта ще не знає відправника. Зазвичай він з’являється після першої відправки, створеної в кабінеті.',
+  np_place_updated: 'Відділення відправника збережено.',
+  np_place_branch_not_found: 'Це відділення вже не знайшлося в довіднику — оберіть інше.',
+  np_place_no_city:
+    'Для цього відділення ще не синхронізовано місто Нової Пошти — дочекайтеся нічної синхронізації або запустіть pnpm np:sync.',
+  invalid_np_phone: 'Телефон відправника — український мобільний: дев’ять цифр після +380.',
+  invalid_np_dimensions: `Розміри місця — цілі сантиметри, від 1 до ${NP_SEAT_CM_MAX}.`,
+  np_dimensions_incomplete: 'Вкажіть усі три розміри місця — або залиште всі три порожніми.',
+  invalid_np_description: 'Опис вантажу задовгий.',
 } as const;
 
 export type AdminSettingsMessage = keyof typeof ADMIN_SETTINGS_MESSAGES;
@@ -210,6 +281,13 @@ export const ADMIN_SETTINGS_FAILURES = new Set<AdminSettingsMessage>([
   'passwords_do_not_match',
   'password_unchanged',
   'too_many_attempts',
+  'np_fetch_empty',
+  'np_place_branch_not_found',
+  'np_place_no_city',
+  'invalid_np_phone',
+  'invalid_np_dimensions',
+  'np_dimensions_incomplete',
+  'invalid_np_description',
 ]);
 
 /**
@@ -321,6 +399,15 @@ export const ADMIN_ARCHIVE_HINT =
  */
 export const ADMIN_COD_LIMIT_HINT =
   'Замовлення, дорожчі за цю суму, не можна оформити з післяплатою — на сайті залишиться тільки оплата карткою.';
+
+/**
+ * Why half-empty is fine, said out loud: the section exists before the client's
+ * NP account does, and the screen that pays for a missing value is the waybill
+ * form, which names it. Without this sentence a row of empty Ref fields reads
+ * as a broken page rather than a not-yet-configured account.
+ */
+export const ADMIN_NP_SENDER_HINT =
+  'Дані відправника для створення ТТН. Відправник підтягується з акаунта, відділення обирається пошуком.';
 
 /* ------------------------------------------------------------- the catalog */
 
@@ -450,6 +537,7 @@ export const ADMIN_CATALOG_ERRORS: Record<CatalogField, string> = {
   colorName: 'Назва кольору задовга.',
   colorHex: 'Колір у форматі #1a1a1a.',
   priceOverride: 'Своя ціна варіанта — ціле число гривень або порожнє поле.',
+  weightGrams: 'Вага — ціле число грамів від 1, або порожнє поле, поки не зважено.',
   stock: 'Залишок — ціле число від 0.',
   alt: 'Опис зображення задовгий.',
 };

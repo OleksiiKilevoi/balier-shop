@@ -4,40 +4,31 @@
 
 ## 📍 CURRENT STATE (overwrite this block; keep tight)
 
-- **Last done:** **the Nova Poshta sync stopped rewriting the whole country every night**
-  (2026-08-06, migration `0010`). Neon reported 361 MB for a shop with seven products; the database
-  itself was 144 MB, 94% of it the two NP tables, and the gap was retained history for nightly
-  writes that changed nothing. Upserts are now conditional (`db/upsert.ts`), retirement reads the
-  new `np_sync_seen` scratch table instead of inferring from `updated_at`, and warehouse
-  `search_text` lost its separator-free variant. A full sync now writes **17 settlement rows
-  instead of 26 791**; after a `VACUUM FULL` the dev database is **64 MB**. The `/checkout` searches
-  were re-driven against the slimmed data («хркив»→Харків, «Крещатик» and «вул.Хрещатик» both
-  finding Kyiv branches). **`balier-cron` redeployed the same day** — version `26fa1ef6`, both
-  schedules re-registered, all five secrets still present per `wrangler secret list`. That deploy
-  was the deadline: the old Worker would have re-bloated the tables at 04:00 UTC. The **first
-  deployed run of the new sync is that 04:00 tick** — worth a look at the sizes afterwards, since
-  every local run so far was `tsx`, not the Workers runtime.
-- **Previously:** **`/users` — its own screen, with an archive** (2026-08-06, migration `0009`).
-  Four asked-for changes to the panel. (1) Accounts can now be **removed**, in two steps that are
-  deliberately not one: «Видалити» sets `admin_users.archived_at`, which drops the row out of the
-  list into an «Архів» tab, ends its sessions, and is undone by «Відновити»; only from that tab,
-  behind the address **typed back**, does «Видалити назавжди» actually `DELETE` the row and free
-  the email. So no single click anywhere destroys an account, and `lastLoginAt` survives everything
-  but the last one. **Archiving deliberately leaves `is_active` alone**, so a restore returns the
-  account in the state it was removed in — which only works because `sessionStillValid` reads the
-  two facts separately, and an archived row may well still be `is_active: true`. (2) Managing other
-  people moved off `/settings` onto **`/users`**, admin-only, with a fourth nav item rendered only
-  for admins (the manager's header is unchanged, and the role comes from the live row, so a
-  demotion takes the link away on the next request). `/settings` is now two sections: the COD limit
-  and your own password. (3) «Власну роль і доступ змінити не можна…» is gone — your own row simply
-  carries no controls, just the role badge, «це ви» and a link to `/settings`. The server still
-  refuses `self_demote` / `self_archive` / `self_password` for hand-made bodies. (4) The default
-  `::marker` is gone panel-wide (a base rule, so nothing can ship with it by omission);
-  `.admin-disclosure` grew a chevron in a hover/open well and a `::details-content` slide behind
-  `@supports`, plus an `.admin-disclosure-danger` variant for the two destructive ones — and
-  «Інші дії» on the order page finally uses the component instead of its own markup.
-- **In progress:** nothing. The gate is green (`pnpm check && pnpm build`, **266 tests**).
-  Migrations `0006`–`0010` are all applied to the **dev** database. **Driven end to end locally**
+- **Last done:** **three order-page fixes** (2026-08-07, evening). (1) `/orders/[n]` no longer
+  reloads on any action — `enhanceAdminForms` wired in (`#order-editor` root, `#order-toast`,
+  `#order-message`, disclosure ids so a refusal can't fold its own warning away, `onRender`
+  re-wiring the copy-link button); «Створити ТТН» included. (2) `packed` renamed: «Упаковано» →
+  **«ТТН створено»** (status, revert label; `waybill_created` shortened to match). (3) Manual ТТН
+  entry/change **removed end to end** — the hand-entry block, the `ttn` intent,
+  `trackingNumberSchema`/`TRACKING_NUMBER_LENGTH`, `setOrderTrackingNumber`, and the four
+  `ttn_*`/`invalid_tracking_number` messages; the `noDeliveryCity` blocker no longer offers the
+  cabinet fallback. With the rename, the manual «Позначити упакованим» forward button is gone too
+  (plan decision: creating the waybill *is* the transition; `shipped`/`delivered` buttons stay
+  until NP-4). Consequence to know: a legacy hand-entered ТТН (npTtn without ref) now has no
+  delete path, so such an order can't be edited past `edit_ttn_exists` except in the DB — dev-only
+  data. 303 tests, gate green. **Not driven in a browser yet, not deployed, not committed.**
+- **Before that, same day:** **order editing in the panel** — `/orders/[n]/edit` in
+  `/orders/new`'s draft mould, `orderDetailsLock` (editable through `packed`, ТТН outranks
+  status), `updateOrderDetails` re-checking under `FOR UPDATE`; driven live via Node fetch, QA
+  rows restored. Plus one-tap city chips on `/orders/new` and the edit page. Details in the log.
+- **Previously:** **NP-1, NP-2 and NP-3 from `docs/plans/novaposhta.md`, all in one day**
+  (2026-08-07) — migration `0011` (variant weight, seven `np_*` columns), the sender section on
+  `/settings`, the whole carrier adapter (no sandbox exists for API 2.0), and the «Нова Пошта»
+  card with carrier-first ТТН create/delete, driven live against the real API (real PDF printed,
+  both test waybills deleted). Migration `0012` moved the city ref onto `np_warehouses` (Kyiv
+  backfilled in dev; the country fills on the next full sync). Details in the session log below.
+- **In progress:** nothing. The gate is green (`pnpm check && pnpm build`, **303 tests**).
+  Migrations `0006`–`0012` are all applied to the **dev** database. **Driven end to end locally**
   against the dev server, every rendered control's `name` checked against the schema: archive →
   archive tab → restore → archive again; a real purge (mixed-case address accepted, `normalizeEmail`
   does the matching) and then **the same address re-used for a new account**; every refusal —
@@ -77,7 +68,18 @@
   («Киев»→Київ, «хркив»→Харків, «Lviv»→Львів against the deployed endpoint).
   **Everything above is deployed but NOT committed** — the working tree still holds this session's
   changes.
-- **Next step:** the standing **browser pass** — `/checkout`'s delivery step is the one to drive
+- **Next step:** **NP-4 from `docs/plans/novaposhta.md`** — status synchronisation: the cron tick
+  every 15–30 min tracking every waybilled order in a non-final status through `trackWaybills`
+  (already built), a new `applyCarrierStatus` allowed only `packed → shipped → delivered`
+  (`carrierStatusIntent` in `tracking.ts` is the table, tested), the **rewrite of
+  `orders/status.ts`** removing the panel's forward buttons (only «Скасувати»/«Повернути кошти»
+  remain), and the Telegram alerts — including the stuck-order alert that replaces the buttons.
+  **Before deploying any of it**: `wrangler secret put NOVAPOSHTA_API_KEY` on `balier-admin-dev`,
+  migrations `0011`+`0012` on the target DB (dev has them), `balier-cron` redeploy **plus one full
+  sync** to fill `np_warehouses.city_ref` country-wide (only Kyiv is backfilled in dev; the
+  nightly 04:00 UTC tick does it once the cron is redeployed). Also worth knowing: the dev sender
+  settings point at Київ, Відділення №1 as a placeholder handover branch.
+  Still standing, and not replaced by the above: the **browser pass** — `/checkout`'s delivery step is the one to drive
   first, since only curl/DB-level checks have been run against it; then `/categories` (rewritten,
   never driven), `/settings`, and now `/users`, whose script layer and whose disclosure CSS are the
   newest untested things in the panel, on `admin.balier.mlosko.dev`, plus the panel flows curl
@@ -147,6 +149,12 @@
 - **Blockers (waiting on me):**
   - Phase 0 externals unchanged: Monobank Acquiring registration, Nova Poshta business account +
     cash-on-delivery setup, Telegram manager account / bot / chat.
+  - **A Nova Poshta API key — no longer a dev blocker** (2026-08-07): the key already in
+    `.dev.vars` has a sender counterparty and contact person behind it (checked via
+    `Counterparty.getCounterparties` / `getCounterpartyContactPersons`), so waybill creation works
+    on it. Test waybills are made in the developer's name — create-then-delete. The client's own
+    account remains a Phase 5 item, and the **business account** still blocks only cash on
+    delivery, whose code gets written regardless.
   - `PUBLIC_TELEGRAM_MANAGER` in `wrangler.jsonc` is a **placeholder handle**.
   - Small cleanup on `balier-dev` (run from `apps/site`): `wrangler secret delete
     CF_ACCESS_TEAM_DOMAIN` / `CF_ACCESS_AUD` (dead since the auth switch), and now also
@@ -207,6 +215,10 @@
       creation; `/settings` for the COD limit; and the catalog — `/products`, its editor,
       `/categories` and image upload. Deployed; since the split the whole phase lives on
       `admin.balier.mlosko.dev`)
+- [ ] **Nova Poshta operations** — outside the phase numbering, planned 2026-08-07 in its own file
+      `docs/plans/novaposhta.md`: waybills, the register of shipments, and carrier-driven order
+      statuses. Sits between Phase 4 and Phase 5 in practice — it finishes the panel, and Phase 5's
+      account migration has to carry its sender settings and API key across
 - [ ] Phase 5 — Launch (incl. migrating off the dev Neon/Cloudflare accounts)
 - [ ] Phase 6 — Improvements
 
@@ -217,6 +229,144 @@
 > Empty by design. Everything through the end of Phase 4 was moved to **`docs/history.md`** on
 > 2026-08-05, not rewritten — this file is read in full at every session start and had reached
 > 852 lines. New session entries go here; move a phase's entries across once the phase is done.
+
+**2026-08-07 (order-page fixes: no-reload, «ТТН створено», manual ТТН removed).** Three asked-for
+fixes on `/orders/[n]`. The page joined the `enhanceAdminForms` screens — every POST (status,
+waybill create/delete) now swaps in place with the answer as a toast, the copy-link button re-wired
+per swap via `onRender`, disclosures keeping their open state by new ids. `packed`'s label is now
+«ТТН створено» («Повернути до «ТТН створено»» on the revert; `waybill_created` is just «ТТН
+створено.»). Manual waybill-number entry removed whole: template block, `ttn` intent,
+`trackingNumberSchema`, `setOrderTrackingNumber`, four message keys — and the «Позначити
+упакованим» button with it, per the plan's «no button for `packed`» decision (forward filter drops
+`packed`; a paid/confirmed NP order moves forward only via «Створити ТТН» now). Known edge left on
+purpose: legacy hand-entered ТТН rows keep rendering their manual-entry note but have no delete
+path anymore. 303 tests; `pnpm check && pnpm build` green; not yet driven in a browser (the swap
+behaviour is script-only), not committed.
+
+**2026-08-07 (order editing).** Asked to make an order's name, phone, email and delivery address
+editable. Built `/orders/[n]/edit` in `/orders/new`'s draft mould (same field names and pick
+actions, same picker, same enhancement script), linked from both order-page cards. The rule is
+`orderDetailsLock` (`orders/status.ts`, tested): editable through `packed`; any ТТН refuses with
+`edit_ttn_exists` — delete, edit, recreate — and `updateOrderDetails` re-checks under `FOR UPDATE`.
+Courier legacy orders save contact-only unless a branch is picked (picking converts them, clearing
+the street address). Driven live: contact save, email clear/restore, re-route Київ→Харків→back,
+both locks, a forged POST refused, courier save keeping its address; QA rows restored after.
+303 tests; gate green; uncommitted. Found while driving: curl on this shell mangles Cyrillic form
+bodies to `?` — the drive scripts use Node `fetch` (`scratchpad/drive-edit*.mjs`). Follow-up: the
+`/settings` one-tap city chips added to the settlement picker on `/orders/new` and the edit page —
+same `topSettlements` ranking, each chip a real `pick_city` submit; driven on both pages. And the
+other way: `/settings`' branch picker lost its «Знайти» button (typing already asks for the same
+render) — replaced by `/orders/new`'s sr-only default button, which also fixes the quirk where a
+script-off Enter would «click» the first suggestion row or the «Київ» chip instead of searching;
+driven: a no-button search POST still answers with suggestion rows.
+
+**2026-08-07 (NP-3 follow-up 3: four picker bugs, reported from a browser).** The client drove the
+new branch picker and found what curl had not: a cleared settlement box refilled itself (two causes
+— an empty query still carried the old ref forward, and the render fell back from an empty draft to
+the *stored* settlement; both fixed — a draft's word is now final, clearing un-picks); the branch
+box did not follow the settlement box (it now empties whenever the settlement is being searched or
+absent, and is disabled without a chosen settlement, `/checkout`'s rule); the one-tap city chips
+were missing entirely (added — `topSettlements`, same ranking as checkout, each chip a real
+`pickSettlement` submit so it works with script off); and «Нічого не знайдено» pushed «Знайти»
+downward (the button aligns by its own `pt-5` now, not `self-end` against a column that grows).
+All four re-driven through the panel: clear→un-pick with the branch box disabled, typing over the
+city resetting the branch, chip tap picking Київ, branch pick saving. 297 tests; gate green;
+uncommitted. The admin dev server died once mid-session and was restarted (same `pnpm dev:admin`,
+now under this session).
+
+**2026-08-07 (NP-3 follow-up 2: the branch picker, and the cabinet-deletion dead end).** Two more
+asked-for fixes. «Звідки відправляєте» became `/checkout`'s own picker instead of two text boxes:
+type-ahead settlement suggest (suggestion rows are real submit buttons carrying their ref, so it
+all works with script off; search-as-you-type is `requestSubmit` debounced into
+`enhanceAdminForms`), then the branch list scoped to the chosen settlement, and clicking a branch
+row *is* the save — with the un-pick-on-typing rule and dropdown dismissal mirrored from
+`/orders/new`, whose draft mould this reuses (`adminNpPlaceSchema` died with the text boxes).
+Driving it caught the un-pick bug (picking left the query in the box, which read as searching and
+un-picked). And the dead end the client hit live — a waybill deleted in the NP cabinet refuses
+panel deletion forever («No document changed DeletionMark») while the record stands — is closed:
+on a delete refusal the page asks *tracking* rather than parsing error text, and codes 2/3
+(«видалено»/«не знайдено») let the detach proceed. Reproduced end to end: waybill created via
+panel, deleted raw at NP, panel delete then cleanly reverted the order. The *automatic* half —
+the nightly sync detaching cabinet-deleted waybills without a click — is recorded in the plan as
+NP-4's job (code 2 → detach + alert, table updated). 297 tests; gate green; uncommitted.
+
+**2026-08-07 (NP-3 follow-up: the sender section stopped asking for UUIDs).** Two asked-for UX
+fixes on `/settings`. The phone field wears `/checkout`'s mask (fixed `+380`, nine grouped local
+digits, `applyPhoneMask` delegated so the reload-free swap keeps it; the schema reads the digits
+via `phoneDigitsFromInput`, so script-off and pasted `0…`/`380…` forms still land). And the Ref
+fields are gone from the form entirely — they existed nowhere an admin could copy them from. The
+section is now three forms: «Підтягнути з акаунта» (new `novaposhta/sender.ts`
+`fetchSenderIdentity` — counterparty + contact + phone straight off the API key, names stored in
+two new settings keys and rendered instead of UUIDs; the account's phone fills an empty field,
+never overwrites a chosen one), a branch picker («Київ» + «1» → resolved against the synced
+dictionaries server-side, exact branch-number match outranking street-substring hits, saved with
+its `city_ref` and rendered back in words), and the typed defaults (phone/dims/description).
+`setNpSenderSettings` became partial `updateNpSenderSettings` — three forms own three subsets.
+Driven live through the panel: fetch filled «Приватна особа · Шулежко Михайло Олександрович»,
+the picker resolved «Київ, Відділення №1», both not-found refusals render in place, and a waybill
+was created and deleted with the settings written this way. 298 tests; gate green; uncommitted.
+
+**2026-08-07 (NP-3: waybills in the panel, driven live).** Opened with the round trip NP-2 owed —
+it caught a real client bug on its first run: NP's document methods answer a refused `delete` with
+`errors` as an *object keyed by ref*, and the client's `.join` crashed over the actual message
+(fixed, both shapes formatted; two test waybills created and deleted, account clean). Built the
+panel half: `orders/waybill.ts` (`attachWaybill` — `FOR UPDATE`, refuses `ttn_exists`/
+`waybill_invalid_state`, deliberately not `canTransition` since that also offers `packed` as
+`shipped`'s revert; `detachWaybill` clearing every `np_*` column), `waybill_create`/
+`waybill_delete` intents, the «Нова Пошта» card with in-place refusals (carrier text verbatim),
+the `marking` proxy route, `ttn_managed` guarding hand-edits of panel-made numbers. Driving it
+found the day's big one: **`np_settlements.delivery_city_ref` was NULL for all 26 791 rows** —
+`getSettlements` never returns `DeliveryCity`; the column was designed against data that does not
+exist. Migration `0012` drops it and adds `np_warehouses.city_ref` (the feed's `CityRef`), sync
+maps it, waybills read the warehouse's city; Kyiv backfilled by hand (7 775 rows), the country
+fills on the next full sync. Driven through the dev panel against the real API: create → «Друк
+маркування» (real PDF through the proxy) → delete → revert, on a card order (→«Оплачено») and a
+COD order (→«Підтверджено»); **NP accepted COD backward delivery on the personal key**, contrary
+to the plan's expectation; Latin names refused («FirstName has invalid characters»), surfaced
+verbatim in the banner as designed. QA admin `qa-np@balier.test` created and disabled after.
+299 tests; gate green; not deployed, not committed.
+
+**2026-08-07 (NP-2: the adapter).** Answered the plan's first question before writing a call:
+**API 2.0 has no sandbox** — the only NP test environment (`api-stage.novapost.pl`) belongs to the
+new international REST API and refuses UA keys; recorded in the plan, so NP-3 drives
+create-then-delete. Built the adapter: `ShippingPort` grew the eight waybill/register methods and
+their types (`CreateWaybillInput` warns in its own doc that `cityRef` is the *city* dictionary
+ref, not the settlement ref orders store); `waybill.ts` (pure `buildWaybillPayload` — always
+`WarehouseWarehouse`, recipient pays carrier; `ensureRecipient` over `Counterparty.save`;
+`toUahString` kopiyka-exact because COD pays it out; `kyivToday` because the API refuses past
+dates and workerd's clock is UTC), `tracking.ts` (batch-100; status table with the
+alert-never-moves property test; codes 41/14/108 added over the plan's table — 14 «на огляді» maps
+to `shipped`, not `delivered`), `scanSheet.ts`, `shipping.ts` factory closing over the key.
+Deliberately not done: no live waybill was created — that round trip opens NP-3, so a real
+document with the client's dev name on it is made in the session that immediately deletes it.
+295 tests (+21); gate green; nothing deployed, nothing committed.
+
+**2026-08-07 (NP-1: schema and sender settings).** Built NP-1 whole. Migration `0011`
+(`0011_bouncy_sumo.sql`): `weight_grams` on the variant, seven `np_*` columns on `orders` —
+`np_status_code` deliberately **text**, the carrier's answer stored verbatim and interpreted only
+by NP-4's `applyCarrierStatus`. The editor's variant rows and add-form grew «Вага, г» (blank=NULL,
+zero refused — `optionalWholeNumber`); `/settings` grew the admin-only «Нова Пошта — відправник»
+section: five refs, an all-or-nothing seat-dimensions triple (`np_seat_dimensions`), cargo
+description, every field optional and a refused form redrawn from its own body (pasted UUIDs are
+not retyped). Before any of it: checked the dev API key against the live API — it has a sender
+counterparty «Приватна особа» (`9e2a9945-…`) and contact «Шулежко Михайло» (`9e2c1516-…`,
+`380988974064`), which unblocks NP-2/NP-3 without waiting for the client. Applied `0011` to dev
+and read the columns back. 274 tests (+8); gate green; not deployed, not committed.
+
+**2026-08-07 (Nova Poshta operations — planning only).** Asked to plan waybill creation, the
+documents handed over at the branch, and status sync replacing manual status management. Read the
+existing ground first, which changed the plan twice: courier delivery was **withdrawn** on
+2026-08-06, so every waybill is warehouse→warehouse and no street/house/flat has to be parsed out
+of `np_address`; and the catalog carries **no weight at all** (removed by the «site never quotes
+delivery» decision), which is a real gap because NP requires weight always and dimensions for
+parcel lockers. Four decisions taken with the client, one corrected mid-way: «накладні» turned out
+to mean the **register of shipments** (ScanSheet), which they described by function rather than
+name — one document for the whole batch so the branch scans once. Weight goes on the variant, with
+**no silent default** (a wrong 1 kg is an argument at the counter). COD `delivered` is handover
+(codes 9/10), not the money-transfer credit (11, recorded separately). And **all forward status
+buttons go away**, unconditionally — the risk that an order shipped outside NP can then only be
+closed in the database was raised and accepted, so a stuck-order Telegram alert replaces them.
+Written to `docs/plans/novaposhta.md`, deliberately **not** into `roadmap.md`. No code changed.
 
 **2026-08-06 (Nova Poshta sync stopped rewriting the country).** Asked why Neon reported 361 MB.
 It wasn't data: `pg_database_size` was 144 MB, 94% of it the NP reference tables, and the rest was

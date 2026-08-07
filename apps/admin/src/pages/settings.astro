@@ -13,23 +13,46 @@ import {
   revokeAdminSessions,
   updateAdminPasswordHash,
 } from '@balier/lib/db/queries/adminUsers';
-import { getCodLimitSetting, setCodLimitKopiykas } from '@balier/lib/db/queries/settings';
+import {
+  SETTLEMENT_MIN_QUERY_LENGTH,
+  findSettlement,
+  findWarehouse,
+  getWarehouseCityRef,
+  listWarehouses,
+  searchSettlements,
+  topSettlements,
+} from '@balier/lib/db/queries/novaposhta';
+import {
+  getCodLimitSetting,
+  getNpSenderSettings,
+  setCodLimitKopiykas,
+  updateNpSenderSettings,
+} from '@balier/lib/db/queries/settings';
 import {
   ADMIN_COD_LIMIT_HINT,
+  ADMIN_NP_SENDER_HINT,
   ADMIN_PASSWORD_HINT,
   ADMIN_SETTINGS_FAILURES,
   ADMIN_SETTINGS_MESSAGES,
   formatAdminDateTime,
+  npErrorText,
 } from '@balier/lib/i18n/admin';
 import type { AdminSettingsMessage } from '@balier/lib/i18n/admin';
 import { formatPrice } from '@balier/lib/money';
+import { settlementLabel } from '@balier/lib/i18n/checkout';
+import { createNovaPoshtaClient } from '@balier/lib/novaposhta/client';
+import { fetchSenderIdentity } from '@balier/lib/novaposhta/sender';
+import { isSearchQuery } from '@balier/lib/orders/draft';
+import { formatPhoneDigits, phoneDigitsFromInput } from '@balier/lib/phone';
 import { peekRateLimit, recordRateLimitHit } from '@balier/lib/rateLimit';
 import {
   COD_LIMIT_MAX_HRYVNIAS,
   COD_LIMIT_MIN_HRYVNIAS,
+  NP_CARGO_DESCRIPTION_MAX,
   PASSWORD_MAX_LENGTH,
   PASSWORD_MIN_LENGTH,
   adminIssueKey,
+  adminNpSettingsSchema,
   adminPasswordChangeSchema,
   adminSettingsSchema,
 } from '@balier/lib/validation/admin';
@@ -77,6 +100,18 @@ const db = createDb(env.DATABASE_URL);
 let banner: AdminSettingsMessage | null = null;
 /** Which form failed, so only that one is marked and redrawn. */
 let failedIntent: string | null = null;
+/** The NP fields the refusal is about, by schema key. */
+let npInvalid = new Set<string>();
+/** What the refused NP form submitted, so a typo is fixed rather than retyped. */
+let npBody: Record<string, string> = {};
+/** Nova Poshta's own refusal, verbatim — dynamic text, so not a message key. */
+let npCarrierBanner: string | null = null;
+/** Set by a search render of the branch picker; null on GET and every other POST. */
+let npPlaceDraft: {
+  settlementRef: string;
+  settlementQuery: string;
+  warehouseQuery: string;
+} | null = null;
 
 if (Astro.request.method === 'POST') {
   const form = await Astro.request.formData();
@@ -100,6 +135,119 @@ if (Astro.request.method === 'POST') {
     } else {
       await setCodLimitKopiykas(db, parsed.data.codLimit);
       return Astro.redirect(`${SELF_URL}?m=cod_limit_updated`, 303);
+    }
+  } else if (intent === 'np_fetch') {
+    /*
+     * Admin-only, like `/users` and unlike the rest of this page: the sender
+     * decides whose name is on every parcel, which is account administration,
+     * not the panel's day job. None of the NP forms is even rendered for a
+     * manager, so these branches only ever refuse a hand-made body.
+     */
+    if (me.role !== 'admin') {
+      banner = 'bad_request';
+    } else if (!env.NOVAPOSHTA_API_KEY) {
+      npCarrierBanner = npErrorText('NOVAPOSHTA_API_KEY не налаштовано на цьому Worker');
+    } else {
+      try {
+        const identity = await fetchSenderIdentity(
+          createNovaPoshtaClient(env.NOVAPOSHTA_API_KEY),
+        );
+        if (!identity) {
+          banner = 'np_fetch_empty';
+        } else {
+          const current = (await getNpSenderSettings(db)).values;
+          await updateNpSenderSettings(db, {
+            counterpartyRef: identity.counterpartyRef,
+            contactRef: identity.contactRef,
+            counterpartyName: identity.counterpartyName,
+            contactName: identity.contactName,
+            /* The account's phone fills an empty field and never overwrites a
+               chosen one — the admin may deliberately publish another number. */
+            ...(current.phone === null && identity.phone !== null
+              ? { phone: identity.phone }
+              : {}),
+          });
+          return Astro.redirect(`${SELF_URL}?m=np_fetched`, 303);
+        }
+      } catch (err) {
+        npCarrierBanner = npErrorText(err instanceof Error ? err.message : String(err));
+      }
+    }
+  } else if (intent === 'np_place') {
+    /*
+     * The branch picker, in `/admin/orders/new`'s mould: most submits are
+     * *renders* — typing (or «Знайти») redraws the page with suggestion lists,
+     * a settlement row narrows to its branches, and only a branch row writes
+     * anything. The suggestion rows are real submit buttons carrying their
+     * ref, so the whole flow works with script off; search-as-you-type is the
+     * enhancement on top.
+     */
+    if (me.role !== 'admin') {
+      banner = 'bad_request';
+    } else {
+      const pickWarehouse = form.get('pickWarehouse');
+      if (typeof pickWarehouse === 'string' && pickWarehouse !== '') {
+        const chosen = await findWarehouse(db, pickWarehouse);
+        if (!chosen) {
+          banner = 'np_place_branch_not_found';
+        } else {
+          const cityRef = await getWarehouseCityRef(db, chosen.ref);
+          if (!cityRef) {
+            banner = 'np_place_no_city';
+          } else {
+            await updateNpSenderSettings(db, { warehouseRef: chosen.ref, cityRef });
+            return Astro.redirect(`${SELF_URL}?m=np_place_updated`, 303);
+          }
+        }
+      } else {
+        const pickSettlement = form.get('pickSettlement');
+        const picked = typeof pickSettlement === 'string' && pickSettlement !== '';
+        const settlementQuery = picked ? '' : String(form.get('placeSettlementQuery') ?? '');
+        npPlaceDraft = {
+          /* An emptied box is an un-pick, not a display request: without this
+             the render below would put the chosen label right back, and the
+             field could never be cleared (found live). */
+          settlementRef: picked
+            ? pickSettlement
+            : settlementQuery.trim() === ''
+              ? ''
+              : String(form.get('placeSettlementRef') ?? '').trim(),
+          /* Picking clears both queries: the settlement box now *displays* the
+             choice (a lingering query would read as searching and un-pick it),
+             and the old branch query belonged to the old settlement's list. */
+          settlementQuery,
+          warehouseQuery: picked ? '' : String(form.get('placeWarehouseQuery') ?? ''),
+        };
+      }
+    }
+  } else if (intent === 'np_sender') {
+    if (me.role !== 'admin') {
+      banner = 'bad_request';
+    } else {
+      const fields = Object.fromEntries(form) as Record<string, string>;
+      const parsed = adminNpSettingsSchema.safeParse(fields);
+
+      if (!parsed.success) {
+        npBody = fields;
+        npInvalid = new Set(
+          parsed.error.issues.map((issue) => String(issue.path[0] ?? '')),
+        );
+        const key = adminIssueKey(parsed.error);
+        banner = key in ADMIN_SETTINGS_MESSAGES ? (key as AdminSettingsMessage) : 'bad_request';
+      } else {
+        const data = parsed.data;
+        await updateNpSenderSettings(db, {
+          phone: data.phone,
+          /* The all-or-nothing refinement has already run: either every side
+             is a number here, or every side is null. */
+          seatDimensionsCm:
+            data.seatLength !== null && data.seatWidth !== null && data.seatHeight !== null
+              ? { length: data.seatLength, width: data.seatWidth, height: data.seatHeight }
+              : null,
+          cargoDescription: data.cargoDescription,
+        });
+        return Astro.redirect(`${SELF_URL}?m=np_updated`, 303);
+      }
     }
   } else if (intent === 'password') {
     const budgetKey = `admin-password:${me.id}`;
@@ -159,6 +307,87 @@ if (Astro.request.method === 'POST') {
 }
 
 const codLimit = await getCodLimitSetting(db);
+
+/* The NP sender section renders for admins only, so its rows are not even read
+   for a manager — the page must not leak what it will not show. */
+const isAdmin = me.role === 'admin';
+const np = isAdmin ? await getNpSenderSettings(db) : null;
+
+/* The chosen branch, resolved back into words — a ref answers nothing when an
+   admin wonders where their parcels ship from. */
+const npPlaceBranch = np?.values.warehouseRef
+  ? await findWarehouse(db, np.values.warehouseRef)
+  : null;
+const npPlaceSettlement = npPlaceBranch
+  ? await findSettlement(db, npPlaceBranch.settlementRef)
+  : null;
+
+/* --- the branch picker's draft state (see the np_place POST branch) --------
+   With no draft, the boxes display the stored choice; a draft means a search
+   render is in flight and the boxes hold what is being typed. Same rules as
+   `/admin/orders/new`: typing over a chosen settlement un-picks it. */
+/* A draft's word is final, even when it says «nothing chosen»: falling back to
+   the stored settlement here is what made a cleared box refill itself. */
+const placeChosenRow = npPlaceDraft
+  ? npPlaceDraft.settlementRef
+    ? await findSettlement(db, npPlaceDraft.settlementRef)
+    : null
+  : npPlaceSettlement;
+const placeSettlementSearching =
+  npPlaceDraft !== null &&
+  isSearchQuery(
+    npPlaceDraft.settlementQuery,
+    placeChosenRow ? settlementLabel(placeChosenRow) : null,
+  );
+const placeSettlement = placeSettlementSearching ? null : placeChosenRow;
+const placeSettlementResults = placeSettlementSearching
+  ? await searchSettlements(db, npPlaceDraft!.settlementQuery, 8)
+  : [];
+
+const PLACE_WAREHOUSE_LIMIT = 12;
+/* The branch list renders only during a draft: on a plain GET the box shows
+   the saved branch and stays quiet until somebody types or clicks into it. */
+const placeWarehouseResults =
+  npPlaceDraft !== null && placeSettlement !== null
+    ? await listWarehouses(
+        db,
+        placeSettlement.ref,
+        'np_warehouse',
+        npPlaceDraft.warehouseQuery,
+        PLACE_WAREHOUSE_LIMIT,
+      )
+    : [];
+
+const placeSettlementValue = npPlaceDraft
+  ? placeSettlementSearching
+    ? npPlaceDraft.settlementQuery
+    : placeSettlement
+      ? settlementLabel(placeSettlement)
+      : ''
+  : npPlaceSettlement
+    ? settlementLabel(npPlaceSettlement)
+    : '';
+/* The branch box follows the settlement box, like `/checkout`: typing over
+   (or clearing) the settlement empties it — its old content described the old
+   settlement's list. */
+const placeWarehouseValue = npPlaceDraft
+  ? placeSettlementSearching || !placeSettlement
+    ? ''
+    : npPlaceDraft.warehouseQuery
+  : (npPlaceBranch?.description ?? '');
+
+/* `/checkout`'s one-tap chips, the same ranking (`warehouse_count`), rendered
+   as submit buttons so a tap is a real `pickSettlement` with script off too. */
+const placeChips = isAdmin ? await topSettlements(db, 4) : [];
+
+/** The masked field holds the 9 local digits; `+380` is a label over it. */
+const npPhoneDigits = np?.values.phone ? phoneDigitsFromInput(np.values.phone) : '';
+
+/** A refused NP form is redrawn from what was submitted, per form. */
+const npRedraw = (intent: string, name: string, stored: string): string =>
+  banner !== null && failedIntent === intent ? (npBody[name] ?? '') : stored;
+const npFailed = (name: string) =>
+  banner !== null && failedIntent === 'np_sender' && npInvalid.has(name);
 
 /* The field is in whole hryvnias — see `codLimitSchema`. Rendered bare rather
    than through `formatPrice`: this is a value to be edited, and a grouping
@@ -266,6 +495,325 @@ const formFailed = (intent: string) => banner !== null && failedIntent === inten
       </form>
     </section>
 
+    {/* The Nova Poshta sender — admins only. Three forms, because the three
+        facts have three sources: who ships is the API key's own account
+        (fetched, never typed), where from is a branch picked by search over
+        the synced dictionaries, and only the defaults below are typed in. */}
+    {
+      isAdmin && np && (
+        <section class="admin-card mt-6 p-5">
+          <h2 class="text-fg text-base font-semibold">Нова Пошта — відправник</h2>
+          <p class="text-fg-muted mt-1 text-sm">{ADMIN_NP_SENDER_HINT}</p>
+
+          {/* The carrier's own words when the fetch fails — an admin can act on
+              them, and a message key could not carry them. */}
+          {npCarrierBanner && (
+            <p role="alert" class="admin-tone-negative rounded-card mt-4 p-3 text-sm">
+              {npCarrierBanner}
+            </p>
+          )}
+
+          {/* --- who ships: the account behind the API key ---------------- */}
+          <div class="border-border mt-4 border-t pt-4">
+            <p class="text-fg-subtle text-xs">Відправник</p>
+            {np.values.counterpartyRef ? (
+              <>
+                <p class="text-fg mt-1 text-sm">
+                  {np.values.counterpartyName ?? 'Відправник'}
+                  {np.values.contactName && (
+                    <span class="text-fg-muted"> · {np.values.contactName}</span>
+                  )}
+                </p>
+                <p class="text-fg-subtle mt-1 font-mono text-xs break-all">
+                  {np.values.counterpartyRef}
+                </p>
+              </>
+            ) : (
+              <p class="text-fg-muted mt-1 text-sm">
+                Ще не заповнено — дані підтягуються з акаунта, до якого належить ключ API.
+              </p>
+            )}
+            <form method="post" action={SELF_URL} data-form="np-fetch" class="mt-3">
+              <input type="hidden" name="intent" value="np_fetch" />
+              <button type="submit" class="admin-btn admin-btn-secondary">
+                {np.values.counterpartyRef ? 'Оновити з акаунта' : 'Підтягнути з акаунта'}
+              </button>
+            </form>
+          </div>
+
+          {/* --- where from: the handover branch, `/checkout`'s own picker
+              shape — the box holds what is picked, typing over it searches,
+              and a suggestion row (a real submit button carrying its ref)
+              picks. Clicking a *branch* row is the save. Works with script
+              off: «Знайти» and Enter ask for the same render. */}
+          <div class="border-border mt-4 border-t pt-4">
+            <p class="text-fg-subtle text-xs">Звідки відправляєте</p>
+            {!npPlaceBranch && (
+              <p class="text-fg-muted mt-1 text-sm">
+                Відділення ще не обрано — оберіть населений пункт, потім відділення.
+              </p>
+            )}
+            <form method="post" action={SELF_URL} data-form="np-place" class="mt-2">
+              <input type="hidden" name="intent" value="np_place" />
+              <input type="hidden" name="placeSettlementRef" value={placeSettlement?.ref ?? ''} />
+
+              {/* The form's default button, `/orders/new`'s trick: Enter in
+                  either search box must mean «search», and a browser submits
+                  via the *first* submit button — which would otherwise be a
+                  suggestion row or the «Київ» chip, picking a city nobody
+                  chose. This one carries no name, so the server just
+                  re-renders with the suggestion lists freshly answered. With
+                  script on, typing asks for the same render by itself. */}
+              <button type="submit" class="sr-only" tabindex="-1" aria-hidden="true">
+                Оновити
+              </button>
+
+              <div class="flex flex-wrap gap-3">
+                <div class="w-full sm:w-72">
+                  <label for="np-place-settlement" class="text-fg-subtle text-xs">
+                    Населений пункт
+                  </label>
+                  <div class="relative mt-1">
+                    <input
+                      id="np-place-settlement"
+                      name="placeSettlementQuery"
+                      type="search"
+                      value={placeSettlementValue}
+                      placeholder="Почніть вводити назву міста…"
+                      autocomplete="off"
+                      class="admin-field"
+                    />
+                    {placeSettlementResults.length > 0 && (
+                      <ul
+                        role="listbox"
+                        aria-label="Знайдені населені пункти"
+                        class="admin-card divide-border absolute inset-x-0 top-full z-20 mt-1 max-h-64 divide-y overflow-y-auto shadow-lg"
+                      >
+                        {placeSettlementResults.map((result) => (
+                          <li role="option">
+                            <button
+                              type="submit"
+                              name="pickSettlement"
+                              value={result.ref}
+                              class="text-fg hover:bg-surface-hover w-full cursor-pointer px-4 py-2.5 text-left text-sm"
+                            >
+                              {settlementLabel(result)}
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                  {placeSettlementSearching &&
+                    placeSettlementResults.length === 0 &&
+                    (npPlaceDraft?.settlementQuery.length ?? 0) >= SETTLEMENT_MIN_QUERY_LENGTH && (
+                      <p class="text-fg-subtle mt-1 text-xs">Нічого не знайдено.</p>
+                    )}
+
+                  {/* `/checkout`'s one-tap chips — a submit each, so a tap is a
+                      real pick with script off too. */}
+                  {placeChips.length > 0 && (
+                    <div class="mt-2 flex flex-wrap gap-1.5" aria-label="Популярні міста">
+                      {placeChips.map((chip) => (
+                        <button
+                          type="submit"
+                          name="pickSettlement"
+                          value={chip.ref}
+                          class="admin-badge text-fg-muted hover:bg-surface-hover hover:text-fg min-h-8 w-auto max-w-none cursor-pointer px-3 text-sm"
+                        >
+                          {chip.name}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div class="w-full sm:w-96">
+                  <label for="np-place-warehouse" class="text-fg-subtle text-xs">Відділення</label>
+                  <div class="group/npwh relative mt-1">
+                    <input
+                      id="np-place-warehouse"
+                      name="placeWarehouseQuery"
+                      type="search"
+                      value={placeWarehouseValue}
+                      placeholder={
+                        placeSettlement
+                          ? 'Почніть вводити номер або вулицю…'
+                          : 'Спочатку оберіть населений пункт'
+                      }
+                      disabled={!placeSettlement}
+                      autocomplete="off"
+                      class="admin-field disabled:cursor-not-allowed disabled:opacity-40"
+                    />
+                    {placeWarehouseResults.length > 0 && (
+                      <ul
+                        role="listbox"
+                        aria-label="Знайдені відділення"
+                        class:list={[
+                          'admin-card divide-border absolute inset-x-0 top-full z-20 mt-1 max-h-64 divide-y overflow-y-auto shadow-lg',
+                          npPlaceDraft?.warehouseQuery === '' &&
+                            'hidden group-focus-within/npwh:block',
+                        ]}
+                      >
+                        {placeWarehouseResults.map((result) => (
+                          <li role="option">
+                            <button
+                              type="submit"
+                              name="pickWarehouse"
+                              value={result.ref}
+                              class="text-fg hover:bg-surface-hover w-full cursor-pointer px-4 py-2.5 text-left text-sm"
+                            >
+                              {result.description}
+                            </button>
+                          </li>
+                        ))}
+                        {placeWarehouseResults.length === PLACE_WAREHOUSE_LIMIT && (
+                          <li class="text-fg-subtle px-4 py-2 text-xs">
+                            Показано перші {PLACE_WAREHOUSE_LIMIT}. Уточніть пошук, якщо
+                            потрібного немає.
+                          </li>
+                        )}
+                      </ul>
+                    )}
+                  </div>
+                  {npPlaceDraft !== null &&
+                    placeSettlement !== null &&
+                    placeWarehouseResults.length === 0 && (
+                      <p class="text-fg-subtle mt-1 text-xs">Нічого не знайдено.</p>
+                    )}
+                </div>
+
+              </div>
+            </form>
+          </div>
+
+          {/* --- the typed-in defaults ------------------------------------ */}
+          <form
+            method="post"
+            action={SELF_URL}
+            data-form="np-sender"
+            class="border-border mt-4 border-t pt-4"
+          >
+            <input type="hidden" name="intent" value="np_sender" />
+
+            <div class="w-full sm:w-56">
+              <label for="np-phone" class="text-fg-subtle text-xs">Телефон відправника</label>
+              {/* `/checkout`'s phone field: a fixed +380 drawn over the left
+                  end, nine local digits in the box. The mask script keeps it
+                  grouped; the schema swallows a pasted 0…/380…/+380… with the
+                  script off. */}
+              <div class="relative mt-1">
+                <span
+                  class="text-fg pointer-events-none absolute inset-y-0 left-4.5 flex items-center text-base sm:text-sm"
+                  aria-hidden="true"
+                >
+                  +380
+                </span>
+                <input
+                  id="np-phone"
+                  name="phone"
+                  type="tel"
+                  inputmode="numeric"
+                  placeholder="XX XXX XX XX"
+                  value={npRedraw('np_sender', 'phone', formatPhoneDigits(npPhoneDigits))}
+                  autocomplete="off"
+                  data-phone-input
+                  class:list={[
+                    'admin-field admin-field-phone',
+                    npFailed('phone') && 'border-danger',
+                  ]}
+                />
+              </div>
+            </div>
+
+            <fieldset class="mt-4">
+              <legend class="text-fg-subtle text-xs">
+                Типові розміри місця, см — форма ТТН підставить їх і надасть можливість змінити.
+              </legend>
+              <div class="mt-1 flex flex-wrap gap-3">
+                <div class="w-28">
+                  <label for="np-seat-length" class="text-fg-subtle text-xs">Довжина</label>
+                  <input
+                    id="np-seat-length"
+                    name="seatLength"
+                    type="text"
+                    inputmode="numeric"
+                    value={npRedraw(
+                      'np_sender',
+                      'seatLength',
+                      np.values.seatDimensionsCm ? String(np.values.seatDimensionsCm.length) : '',
+                    )}
+                    autocomplete="off"
+                    class:list={['admin-field mt-1', npFailed('seatLength') && 'border-danger']}
+                  />
+                </div>
+                <div class="w-28">
+                  <label for="np-seat-width" class="text-fg-subtle text-xs">Ширина</label>
+                  <input
+                    id="np-seat-width"
+                    name="seatWidth"
+                    type="text"
+                    inputmode="numeric"
+                    value={npRedraw(
+                      'np_sender',
+                      'seatWidth',
+                      np.values.seatDimensionsCm ? String(np.values.seatDimensionsCm.width) : '',
+                    )}
+                    autocomplete="off"
+                    class:list={['admin-field mt-1', npFailed('seatWidth') && 'border-danger']}
+                  />
+                </div>
+                <div class="w-28">
+                  <label for="np-seat-height" class="text-fg-subtle text-xs">Висота</label>
+                  <input
+                    id="np-seat-height"
+                    name="seatHeight"
+                    type="text"
+                    inputmode="numeric"
+                    value={npRedraw(
+                      'np_sender',
+                      'seatHeight',
+                      np.values.seatDimensionsCm ? String(np.values.seatDimensionsCm.height) : '',
+                    )}
+                    autocomplete="off"
+                    class:list={['admin-field mt-1', npFailed('seatHeight') && 'border-danger']}
+                  />
+                </div>
+
+                <div class="w-full sm:w-72">
+                  <label for="np-cargo" class="text-fg-subtle text-xs">Опис вантажу</label>
+                  <input
+                    id="np-cargo"
+                    name="cargoDescription"
+                    type="text"
+                    placeholder="Аксесуари зі шкіри"
+                    maxlength={NP_CARGO_DESCRIPTION_MAX}
+                    value={npRedraw('np_sender', 'cargoDescription', np.values.cargoDescription ?? '')}
+                    autocomplete="off"
+                    class:list={[
+                      'admin-field mt-1',
+                      npFailed('cargoDescription') && 'border-danger',
+                    ]}
+                  />
+                </div>
+              </div>
+            </fieldset>
+
+            <div class="mt-4 flex flex-wrap items-center gap-3">
+              <button type="submit" class="admin-btn admin-btn-primary">Зберегти</button>
+              <p class="text-fg-subtle text-xs">
+                {
+                  np.updatedAt
+                    ? `Востаннє змінено ${formatAdminDateTime(np.updatedAt)}.`
+                    : 'Ще не заповнювалося.'
+                }
+              </p>
+            </div>
+          </form>
+        </section>
+      )
+    }
+
     {/* Everyone's own password, whatever their role. */}
     <section class="admin-card mt-6 p-5">
       <h2 class="text-fg text-base font-semibold">Зміна пароля</h2>
@@ -354,12 +902,48 @@ const formFailed = (intent: string) => banner !== null && failedIntent === inten
 
   <script>
     import { enhanceAdminForms } from '@balier/lib/admin/forms';
+    import { applyPhoneMask } from '@balier/lib/phone';
 
     const editor = document.getElementById('settings-editor');
     const toastHost = document.getElementById('settings-toast');
 
     if (editor && toastHost) {
       enhanceAdminForms({ root: editor, toastHost, messageId: 'settings-message' });
+
+      let searchTimer: ReturnType<typeof setTimeout> | undefined;
+
+      // Delegated rather than bound to fields, because every reload-free save
+      // replaces the nodes.
+      editor.addEventListener('input', (event) => {
+        const field = event.target;
+        if (!(field instanceof HTMLInputElement)) return;
+
+        // The phone mask, the one `/checkout` wears. Local — no server needed.
+        if (field.hasAttribute('data-phone-input')) {
+          applyPhoneMask(field);
+          return;
+        }
+
+        // Search-as-you-type in the branch picker: the same render «Знайти»
+        // would ask for, without the button. `enhanceAdminForms` catches the
+        // submit, swaps in place and restores the caret.
+        if (field.type === 'search') {
+          clearTimeout(searchTimer);
+          searchTimer = setTimeout(() => field.form?.requestSubmit(), 300);
+        }
+      });
+
+      // Clicking away closes an open dropdown — the same dismissal `/checkout`
+      // has. Purely visual: the server renders the list again on the next
+      // search, so hiding it here can never disagree with saved state.
+      document.addEventListener('pointerdown', (event) => {
+        for (const list of editor.querySelectorAll('[role="listbox"]')) {
+          const box = list.parentElement;
+          if (event.target instanceof Node && !box?.contains(event.target)) {
+            list.classList.add('hidden');
+          }
+        }
+      });
     }
   </script>
 </AdminLayout>

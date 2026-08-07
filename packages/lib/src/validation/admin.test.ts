@@ -2,9 +2,15 @@ import { describe, expect, it } from 'vitest';
 import {
   COD_LIMIT_MAX_HRYVNIAS,
   COD_LIMIT_MIN_HRYVNIAS,
+  NP_SEAT_CM_MAX,
   PASSWORD_MAX_LENGTH,
   PASSWORD_MIN_LENGTH,
   adminIssueKey,
+  adminNpSettingsSchema,
+  adminOrderActionSchema,
+  adminOrderEditContactSchema,
+  adminOrderEditSchema,
+  adminOrderFieldErrors,
   adminPasswordChangeSchema,
   adminSettingsSchema,
   adminUserActionSchema,
@@ -97,6 +103,123 @@ function body(fields: Record<string, string>): Record<string, unknown> {
 }
 
 const GOOD_PASSWORD = 'correct horse battery';
+
+/**
+ * Every input the «Нова Пошта» defaults form renders, blank — which is that
+ * form's *normal* first submit, and exactly what has to save cleanly: the
+ * plan's one hard requirement for this screen is surviving a half-filled
+ * account. The sender refs are no longer typed anywhere — they are fetched
+ * from the API by a button with no fields, and the branch comes from
+ * `adminNpPlaceSchema`.
+ */
+const NP_BLANK = {
+  phone: '',
+  seatLength: '',
+  seatWidth: '',
+  seatHeight: '',
+  cargoDescription: '',
+};
+
+function parseNp(overrides: Record<string, string> = {}) {
+  return adminNpSettingsSchema.safeParse(body({ ...NP_BLANK, ...overrides }));
+}
+
+/** Every input the waybill form renders, as a browser would send it. */
+const WAYBILL = {
+  intent: 'waybill_create',
+  recipientName: 'Тестенко Тест',
+  weightGrams: '1250',
+  seats: '1',
+  seatLength: '30',
+  seatWidth: '20',
+  seatHeight: '10',
+  description: 'Аксесуари зі шкіри',
+  declaredValue: '1950',
+};
+
+function parseWaybill(overrides: Record<string, string> = {}) {
+  return adminOrderActionSchema.safeParse(body({ ...WAYBILL, ...overrides }));
+}
+
+describe('adminOrderActionSchema — waybill intents', () => {
+  it('parses the form and converts at the boundaries', () => {
+    const result = parseWaybill();
+    expect(result.success).toBe(true);
+    if (result.success && result.data.intent === 'waybill_create') {
+      expect(result.data.weightGrams).toBe(1250);
+      expect(result.data.seats).toBe(1);
+      expect(result.data.seatLength).toBe(30);
+      // Hryvnias → kopiykas happens here and nowhere else.
+      expect(result.data.declaredValue).toBe(195_000);
+    }
+  });
+
+  it('refuses a one-word recipient — «Аня» is a real order and not a waybill', () => {
+    const result = parseWaybill({ recipientName: 'Аня' });
+    expect(result.success).toBe(false);
+    expect(
+      result.error!.issues.some((issue) => issue.message === 'invalid_recipient_name'),
+    ).toBe(true);
+  });
+
+  it('refuses zeroes and absurdities where a parcel could not exist', () => {
+    expect(parseWaybill({ weightGrams: '0' }).success).toBe(false);
+    expect(parseWaybill({ seats: '0' }).success).toBe(false);
+    expect(parseWaybill({ seatLength: '0' }).success).toBe(false);
+    expect(parseWaybill({ seatLength: '501' }).success).toBe(false);
+    expect(parseWaybill({ description: '' }).success).toBe(false);
+    expect(parseWaybill({ declaredValue: '0' }).success).toBe(false);
+  });
+
+  it('parses the delete intent with no fields at all', () => {
+    expect(adminOrderActionSchema.safeParse(body({ intent: 'waybill_delete' })).success).toBe(true);
+  });
+});
+
+describe('adminNpSettingsSchema', () => {
+  it('accepts the whole form blank, as null for every value', () => {
+    const result = parseNp();
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual({
+      phone: null,
+      seatLength: null,
+      seatWidth: null,
+      seatHeight: null,
+      cargoDescription: null,
+    });
+  });
+
+  it('normalises the phone to +380 from every shape the field can hold', () => {
+    // What the masked field actually submits: nine local digits, grouped.
+    expect(parseNp({ phone: '98 897 40 64' }).data?.phone).toBe('+380988974064');
+    // What a paste or a script-off submit can carry.
+    expect(parseNp({ phone: '0988974064' }).data?.phone).toBe('+380988974064');
+    expect(parseNp({ phone: '+38 (098) 897-40-64' }).data?.phone).toBe('+380988974064');
+    const bad = parseNp({ phone: '12345' });
+    expect(bad.success).toBe(false);
+    expect(adminIssueKey(bad.error!)).toBe('invalid_np_phone');
+  });
+
+  it('takes the seat dimensions whole or not at all', () => {
+    const partial = parseNp({ seatLength: '30', seatWidth: '20' });
+    expect(partial.success).toBe(false);
+    expect(adminIssueKey(partial.error!)).toBe('np_dimensions_incomplete');
+
+    expect(parseNp({ seatLength: '0', seatWidth: '20', seatHeight: '10' }).success).toBe(false);
+    expect(
+      parseNp({ seatLength: String(NP_SEAT_CM_MAX + 1), seatWidth: '20', seatHeight: '10' })
+        .success,
+    ).toBe(false);
+  });
+
+  it('trims the cargo description and keeps blank as null', () => {
+    expect(parseNp({ cargoDescription: '  Аксесуари зі шкіри  ' }).data?.cargoDescription).toBe(
+      'Аксесуари зі шкіри',
+    );
+    expect(parseNp({ cargoDescription: '   ' }).data?.cargoDescription).toBeNull();
+    expect(parseNp({ cargoDescription: 'а'.repeat(101) }).success).toBe(false);
+  });
+});
 
 describe('adminPasswordChangeSchema', () => {
   const change = (fields: Record<string, string>) =>
@@ -273,5 +396,85 @@ describe('adminUserActionSchema', () => {
         body({ intent: 'user_purge', userId: id, email: '  Anna@Balier.UA ' }),
       ),
     ).toEqual({ intent: 'user_purge', userId: id, email: 'Anna@Balier.UA' });
+  });
+});
+
+/**
+ * `/orders/[n]/edit`'s save. Unlike the schemas above, its input is not a raw
+ * form body — the page composes it: the contact fields from the draft (with
+ * `+380` restored ahead of the digits, as `/orders/new` does) and `delivery`
+ * from the refs *resolved against the database*, so what is tested here is
+ * that composed shape. The field names still match what the form renders —
+ * they are `DRAFT_FIELDS`' targets, shared with `/orders/new`.
+ */
+describe('adminOrderEditSchema', () => {
+  const delivery = {
+    deliveryMethod: 'np_warehouse',
+    npSettlementRef: 'ref-city',
+    npSettlementName: 'Київ',
+    npWarehouseRef: 'ref-wh',
+    npWarehouseName: 'Відділення №1',
+  };
+
+  it('normalises the phone and lower-cases the email, like checkout does', () => {
+    const parsed = adminOrderEditSchema.parse({
+      customerName: '  Анна Коваль ',
+      customerPhone: '+380 50 123 45 67',
+      customerEmail: 'Anna@Balier.UA',
+      delivery,
+    });
+
+    expect(parsed.customerName).toBe('Анна Коваль');
+    expect(parsed.customerPhone).toBe('+380501234567');
+    expect(parsed.customerEmail).toBe('anna@balier.ua');
+  });
+
+  it('treats an emptied email as cleared, not as an error', () => {
+    // The page maps the resulting `undefined` to NULL — emptying the box is
+    // how a wrongly-recorded address is removed from the order.
+    const parsed = adminOrderEditSchema.parse({
+      customerName: 'Анна Коваль',
+      customerPhone: '0501234567',
+      customerEmail: '',
+      delivery,
+    });
+    expect(parsed.customerEmail).toBeUndefined();
+  });
+
+  it('maps a missing branch to the warehouse control, an un-picked city to the settlement one', () => {
+    const refused = adminOrderEditSchema.safeParse({
+      customerName: 'Анна Коваль',
+      customerPhone: '0501234567',
+      customerEmail: '',
+      delivery: { ...delivery, npWarehouseRef: '', npWarehouseName: '' },
+    });
+    expect(refused.success).toBe(false);
+    expect(adminOrderFieldErrors(refused.error!)).toEqual(new Set(['warehouse']));
+
+    const unpicked = adminOrderEditSchema.safeParse({
+      customerName: 'Анна Коваль',
+      customerPhone: '0501234567',
+      customerEmail: '',
+      delivery: {
+        deliveryMethod: 'np_warehouse',
+        npSettlementRef: '',
+        npSettlementName: '',
+        npWarehouseRef: '',
+        npWarehouseName: '',
+      },
+    });
+    expect(unpicked.success).toBe(false);
+    expect(adminOrderFieldErrors(unpicked.error!).has('settlement')).toBe(true);
+  });
+
+  it('has a contact-only variant that asks nothing about delivery', () => {
+    // The legacy-courier save: the stored street address stays as placed, so
+    // the schema must not force a branch pick on a phone-number fix.
+    const parsed = adminOrderEditContactSchema.parse({
+      customerName: 'Анна Коваль',
+      customerPhone: '380501234567',
+      customerEmail: '',
+    });
+    expect(parsed).toEqual({ customerName: 'Анна Коваль', customerPhone: '+380501234567' });
   });
 });
