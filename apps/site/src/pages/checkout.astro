@@ -356,7 +356,6 @@ const phoneInputClass = inputClass.replace('px-4', 'pl-16 pr-4');
 
     const settlementQuery = form.querySelector<HTMLInputElement>('[data-settlement-query]');
     const settlementResults = form.querySelector<HTMLUListElement>('[data-settlement-results]');
-    const suggestionChips = form.querySelector<HTMLElement>('[data-settlement-suggestions]');
     const warehouseLabel = form.querySelector<HTMLLabelElement>('[data-warehouse-label]');
     const warehouseQuery = form.querySelector<HTMLInputElement>('[data-warehouse-query]');
     const warehouseResultsList = form.querySelector<HTMLUListElement>('[data-warehouse-results]');
@@ -574,7 +573,6 @@ const phoneInputClass = inputClass.replace('px-4', 'pl-16 pr-4');
       selectedSettlement = settlement;
       if (settlementQuery) settlementQuery.value = settlementLabel(settlement);
       if (settlementResults) settlementResults.hidden = true;
-      if (suggestionChips) suggestionChips.hidden = true;
       clearWarehouses();
     };
 
@@ -617,9 +615,6 @@ const phoneInputClass = inputClass.replace('px-4', 'pl-16 pr-4');
       clearWarehouses();
       window.clearTimeout(settlementSearchDebounce);
       const value = settlementQuery.value.trim();
-      // Back to an empty field is back to the starting position, chips and
-      // all — clearing it is how someone changes their mind about the city.
-      if (suggestionChips) suggestionChips.hidden = value.length > 0;
       if (value.length < 2) {
         if (settlementResults) settlementResults.hidden = true;
         return;
