@@ -14,11 +14,13 @@ import type { OrderStatus, PaymentMethod } from '../db/schema';
  * rule 2), only `./create.ts` sets `confirmed` when the order is placed, only
  * creating a waybill sets `packed` (`./waybill.ts` — the act of packing *is*
  * the waybill), and only the carrier's own tracking moves `packed → shipped →
- * delivered` (`./applyCarrierStatus.ts`, fed by the cron; `carrierCanAdvance`
- * below is its rule). What the panel keeps is the way *out* — cancel or
- * refund — and the way back out of those. An order shipped outside Nova
- * Poshta therefore has no path forward at all; that risk was raised and
- * accepted, and the cron's stuck-order alert is the mitigation.
+ * arrived → delivered` (`./applyCarrierStatus.ts`, fed by the cron;
+ * `carrierCanAdvance` below is its rule). What the panel keeps is the way
+ * *out* — cancel or refund — and the way back out of those. An order shipped
+ * outside Nova Poshta therefore has no path forward at all; that risk was
+ * raised and accepted knowingly unmitigated — the stuck-order alert built for
+ * it was removed at the client's request (docs/plans/novaposhta.md,
+ * «Decisions»).
  *
  * `paid` and `confirmed` remain legal **revert** targets from exactly one
  * place: deleting `packed`'s waybill (`./waybill.ts` via `revertTarget`). A

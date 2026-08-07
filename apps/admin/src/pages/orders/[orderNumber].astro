@@ -135,6 +135,7 @@ if (Astro.request.method === 'POST') {
         recipient: {
           lastName: name.lastName,
           firstName: name.firstName,
+          middleName: name.middleName,
           phone: current.customerPhone,
           cityRef,
           warehouseRef: current.npWarehouseRef,
@@ -316,6 +317,9 @@ const FAILURES = new Set<AdminOrderMessage>([
   'bad_request',
   'edit_ttn_exists',
   'edit_locked',
+  'ttn_exists',
+  'waybill_invalid_state',
+  'no_waybill',
 ]);
 
 /** Whether the customer/delivery cards offer the edit page. */

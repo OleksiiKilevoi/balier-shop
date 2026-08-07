@@ -132,8 +132,10 @@ export function buildWaybillPayload(
 ): Record<string, unknown> {
   const weightKg = toKgString(input.weightGrams);
   /* Each seat carries the shared default dimensions and an equal share of the
-     weight — the panel asks for one weight and one box size, not per-box. */
-  const seatWeightKg = toKgString(Math.round(input.weightGrams / input.seats));
+     weight — the panel asks for one weight and one box size, not per-box. The
+     remainder grams go to the first seats so the seats sum exactly to `Weight`. */
+  const seatBaseGrams = Math.floor(input.weightGrams / input.seats);
+  const seatExtraGrams = input.weightGrams - seatBaseGrams * input.seats;
   const { length, width, height } = input.dimensionsCm;
 
   const payload: Record<string, unknown> = {
@@ -147,13 +149,15 @@ export function buildWaybillPayload(
 
     Weight: weightKg,
     SeatsAmount: String(input.seats),
-    OptionsSeat: Array.from({ length: input.seats }, () => ({
+    OptionsSeat: Array.from({ length: input.seats }, (_, seat) => ({
       volumetricLength: String(length),
       volumetricWidth: String(width),
       volumetricHeight: String(height),
-      /* Об'ємна вага, the carrier's own formula. */
-      volumetricVolume: String((length * width * height) / 4000),
-      weight: seatWeightKg,
+      /* Cubic METERS — the API documents this field in м³, not the /4000
+         volumetric-weight formula in kg. Confusing the two inflates the
+         declared volume 250× and the recipient's tariff with it. */
+      volumetricVolume: String((length * width * height) / 1_000_000),
+      weight: toKgString(seat < seatExtraGrams ? seatBaseGrams + 1 : seatBaseGrams),
     })),
 
     Description: input.description,
@@ -200,6 +204,7 @@ export async function createWaybill(
   const recipientRefs = await ensureRecipient(client, {
     lastName: input.recipient.lastName,
     firstName: input.recipient.firstName,
+    middleName: input.recipient.middleName,
     phone: input.recipient.phone,
   });
 

@@ -4,46 +4,35 @@
 
 ## 📍 CURRENT STATE (overwrite this block; keep tight)
 
-- **Last done:** **the `arrived` status — «Доставлено» vs «Отримано» split** (2026-08-07, asked
-  for after NP-5). Migration `0014` adds `arrived` between `shipped` and `delivered`; codes 7/8/14
-  now land there, `delivered` is relabelled «Отримано» (9/10/11 — the handover, and for COD the
-  money). The carrier chain is `packed → shipped → arrived → delivered` (skips allowed, tracked by
-  the cron as long as it lasts); COD `moneyCollected` stays `delivered`-only, so an `arrived` COD
-  order offers «Скасувати». Badge tone `attention` (waiting on the customer). Verified against the
-  dev server by flipping a test order to `arrived` and back: badge, carrier hint, correct exit,
-  list filter. 313 tests, gate green. **Uncommitted; the eventual deploy needs `pnpm cron:deploy`
-  too** — the tracking table and chain live in `@balier/lib` and the cron bundles them.
-- **Before that:** **NP-5 whole — the register of shipments — built and driven live end to end**
-  (2026-08-07, committed as `e29e9bd`). Migration `0013` (`np_scan_sheets`: ref PK, number, created_at; applied to dev);
-  `orders/register.ts` (`registerEligible` — strictly `packed` + panel-made waybill + no register
-  yet, property-tested; `attachRegister` re-checking each order **and its `np_ttn_ref`** under
-  `FOR UPDATE`; `removeFromRegister`/`deleteRegister`); `db/queries/scanSheets.ts`; checkbox
-  selection on `/orders` (one plain form to `/registers`, bar and column render only when an
-  eligible row is on the page, mobile/desktop duplicates deduped server-side); `/registers` list +
-  carrier-first create with `waitUntil` compensation; `/registers/[ref]` (contents, «Зняти з
-  реєстру», «Видалити реєстр», `enhanceAdminForms`); print proxy `/registers/[ref]/print`.
-  Driven against the real API: waybills `20451506102578`/`20451506102592` → register
-  **105-79180799** → detail/list/204 KB PDF → refusals (already-registered, empty, unknown) →
-  remove one (double submit refused) → delete register → both waybills deleted, orders reverted,
-  NP account clean. QA admin `qa-np5@balier.test` created for the drive, disabled after. Two edges
-  knowingly unverified — `insertDocuments` partial acceptance, a register deleted in the NP
-  cabinet — recorded in the plan's NP-5 notes. **Uncommitted, not deployed.**
-- **Context from before this session (client-verified):** NP-1..NP-4 are deployed and working
-  live — the client drove the NP-4 loop themselves: a waybill deleted in the NP cabinet was
-  detached by the cron tick and the order reverted. `NOVAPOSHTA_API_KEY` is on the admin Worker,
-  `balier-cron` carries the tracking tick, dev-DB admin accounts are now `admin@balier.com` +
-  `manager@balier.com` (both on).
-- **In progress:** nothing. The gate is green (`pnpm check && pnpm build`, **312 tests**).
-  Migrations `0006`–`0013` are all applied to the **dev** database.
-- **Next step:** **commit + push, then `pnpm cron:deploy`** — Workers Builds auto-deploys
-  `balier-dev`/`balier-admin-dev` on push; migrations `0013`/`0014` are already applied ahead of
-  it; the cron redeploy is required by the `arrived` change (the tracking table and status chain
-  are bundled into it — until then the deployed cron still maps 7/8/14 to `shipped`, which
-  `carrierCanAdvance` happily applies). That closes `docs/plans/novaposhta.md` whole. Then, in the
-  browser on `admin.balier.mlosko.dev`: the register flow end to end once with real parcels
-  (create → print at the branch), and the still-standing browser passes — `/checkout`'s delivery
-  step, `/categories`, `/settings`, `/users` — plus the flows curl cannot drive (image upload
-  preview, `/orders/new` card order). Then Phase 5.
+- **Last done:** **full review of the whole novaposhta.md build + fixes** (2026-08-07, after
+  everything shipped). The review found one real bug that survived every live drive:
+  `OptionsSeat.volumetricVolume` was sent as the /4000 volumetric-*weight* formula (kg) while the
+  API documents the field in **м³** — `InternetDocument.save` accepts the wrong value silently, and
+  it inflates the declared volume 250× (a 30×20×10 box declared as 1.5 м³ ≈ a 375 kg parcel if NP
+  prices off the field). Fixed to true cubic meters (`/1_000_000`); seat weights now also sum
+  exactly to `Weight` (remainder grams go to the first seats); the recipient's middle name now
+  reaches `Counterparty.save` (was silently dropped — `WaybillRecipient` grew `middleName`);
+  `ttn_exists`/`waybill_invalid_state`/`no_waybill` render red like other refusals; stale comments
+  fixed (`status.ts` stuck-order-alert claim, `ports.ts` COD-refusal claim); the plan now records
+  the code-2 alert removal (`435e6cf`), the volumetric finding, and a third knowingly-unverified
+  edge (deleting a waybill while its order is on a register). 315 tests, gate green.
+  **Uncommitted.**
+- **Context (client-verified, all deployed):** the whole of `docs/plans/novaposhta.md` — NP-1..NP-5
+  plus the `arrived` split (`packed → shipped → arrived → delivered`, migration `0014`) — is
+  committed through `a5a192c`, deployed and live; `balier-cron` was redeployed with it (verified:
+  deploy 15:58:44 UTC, two seconds after the commit). `NOVAPOSHTA_API_KEY` is on the admin Worker,
+  dev-DB admin accounts are `admin@balier.com` + `manager@balier.com` (both on).
+- **In progress:** nothing. The gate is green (`pnpm check && pnpm build`, **315 tests**).
+  Migrations `0006`–`0014` are all applied to the **dev** database.
+- **Next step:** **commit + push** (Workers Builds auto-deploys `balier-admin-dev`; no cron
+  redeploy needed — the fix touches the waybill payload, which only the admin Worker builds).
+  Then one **create-inspect-delete pass** on the dev key: create a waybill through the panel, open
+  the NP cabinet and compare the shown volume/tariff against the same parcel keyed in by hand,
+  delete it — the volumetric fix is the one change whose wrongness costs a customer money at the
+  counter. Then, in the browser on `admin.balier.mlosko.dev`: the register flow once with real
+  parcels (create → print at the branch), and the still-standing browser passes — `/checkout`'s
+  delivery step, `/categories`, `/settings`, `/users` — plus the flows curl cannot drive (image
+  upload preview, `/orders/new` card order). Then Phase 5.
   **A production deploy needs `pnpm db:migrate` against that database and one
   `pnpm admin:user role <email> admin`**; migrations `0008`/`0009` must land before that deploy —
   the gate reads `sessions_valid_from`/`archived_at` on every request, so code ahead of schema is
@@ -189,6 +178,17 @@
 > Empty by design. Everything through the end of Phase 4 was moved to **`docs/history.md`** on
 > 2026-08-05, not rewritten — this file is read in full at every session start and had reached
 > 852 lines. New session entries go here; move a phase's entries across once the phase is done.
+
+**2026-08-07 (post-ship review of novaposhta.md + fixes).** Asked to re-check the whole NP build
+after it went live, since NP has no test API. Read every module end to end. One real bug:
+`volumetricVolume` carried the /4000 volumetric-weight formula into a field the API documents in
+м³ — accepted silently by `save`, so every live drive passed; fixed to `/1_000_000` (test now
+asserts `0.006` for 30×20×10). Also: seat weights sum exactly to `Weight`; middle name reaches the
+counterparty; three waybill refusal keys got the red tone; stale comments in `status.ts`/`ports.ts`
+corrected; plan updated (code-2 alert removal `435e6cf`, the volumetric finding, third unverified
+edge). Verified the cron deploy timing (15:58:44 UTC, 2 s after `a5a192c` — `arrived` mapping is
+live). 315 tests; gate green; uncommitted. Follow-up owed: create-inspect-delete a waybill and
+compare the cabinet's volume/tariff.
 
 **2026-08-07 (the `arrived` status: «Доставлено» ≠ «Отримано»).** Asked to make the panel
 distinguish a parcel at the branch from a parcel handed over. Migration `0014` adds enum value

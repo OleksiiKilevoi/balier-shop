@@ -240,8 +240,10 @@ one triple). Three live findings:
       «статуси оновлюються автоматично» where the forward buttons used to be.
 - [x] Manager alerts to Telegram (`CarrierAlerts` on the Telegram notifier; none moves an order):
       refusal (102, 103, 108), storage ended (105), return (106), failed attempt (111),
-      «номер не знайдено» (3), and cabinet deletion (2, sent alongside the detach). Each fires
-      only on a **fresh** code — a 15-minute cron must not page 96 times a day.
+      «номер не знайдено» (3). Each fires only on a **fresh** code — a 15-minute cron must not
+      page 96 times a day. Cabinet deletion (2) was built with an alert alongside the detach and
+      the alert was **removed at the client's request** (2026-08-07, commit `435e6cf`) — the
+      detach itself is the whole handling, silently.
 - [x] ~~The stuck-order alert~~ — built, then **removed at the client's request** the same day
       (see the reversed decision under «Decisions» above). The daily 04:00 tick is back to the
       sync alone.
@@ -259,7 +261,7 @@ intent, the code is the truth:
 | NP status | meaning | order |
 | --- | --- | --- |
 | 1 | waybill created, parcel not handed over | stays `packed` |
-| 2 | deleted (in the NP cabinet — panel deletions clear our record themselves) | **detach**: clear the waybill columns and revert `packed` the way «Видалити ТТН» does; alert so the deletion is noticed. Asked for 2026-08-07 after a cabinet deletion left a dead record behind |
+| 2 | deleted (in the NP cabinet — panel deletions clear our record themselves) | **detach**: clear the waybill columns and revert `packed` the way «Видалити ТТН» does — silently: the alert first planned (and built) here was removed at the client's request the same day. Asked for 2026-08-07 after a cabinet deletion left a dead record behind |
 | 3 | number not found | no move, alert |
 | 12, 4, 41, 5, 6, 101, 104, 112 | in transit | `shipped` |
 | 7, 8, 14 | at the destination branch or locker (14 — «на огляді», still not received) | `arrived` («Доставлено» — split out of `shipped` 2026-08-07, see «Decisions») |
@@ -295,14 +297,16 @@ selection, unknown number → `register_orders_changed`/`register_no_selection`)
 (double submit → `not_on_register`) → register deleted with an order still on it → both waybills
 deleted through the panel, orders reverted («Оплачено»/«Підтверджено»), account clean.
 
-**Notes/decisions:** two edges knowingly left unverified. `ScanSheet.insertDocuments` reports
+**Notes/decisions:** three edges knowingly left unverified. `ScanSheet.insertDocuments` reports
 per-document errors alongside the sheet, and `createScanSheet` does not parse them — every batch
 the panel sends is pre-checked (fresh waybills, none on another register), so a partial acceptance
 has no known trigger; if one ever surfaces, the adapter is where to look. And a register deleted
 *in the NP cabinet* would refuse panel deletion forever with the verbatim banner — the waybill
 dead-end's shape — but unlike waybills there is no tracking call to ask «is it gone»; accepted
 until it happens (the register is a piece of paper, not an order's state — worst case is a stale
-row on `/registers`).
+row on `/registers`). And «Видалити ТТН» on an order that is *on a register* was never driven:
+NP either refuses (verbatim banner — take it off the register first) or accepts, and the detach
+clears `np_scan_sheet_ref` correctly either way, so the data model is safe whichever NP does.
 
 ## Deployment steps (not code)
 
@@ -324,7 +328,11 @@ row on `/registers`).
 
 - Does Nova Poshta offer a usable sandbox for `InternetDocument.save`? **Answered in NP-2: no.**
 - Exact `OptionsSeat` requirements for parcel-locker delivery — dimensions are required, the precise
-  field set is to be read off the API.
+  field set is to be read off the API. Found in review 2026-08-07: `volumetricVolume` was being sent
+  as the /4000 volumetric-*weight* formula while the API documents the field in **м³** — the create
+  call accepted it, which is how it survived every live drive; fixed to true cubic meters. Worth one
+  create-inspect-delete pass comparing the cabinet's shown volume/tariff before the first real
+  shipment.
 - ~~Stuck-order alert threshold~~ — moot: the alert itself was removed at the client's request
   (2026-08-07, «Decisions» above).
 

@@ -81,6 +81,8 @@ export interface Warehouse {
 export interface WaybillRecipient {
   lastName: string;
   firstName: string;
+  /** По батькові, when the operator typed one — the counterparty carries it. */
+  middleName: string | null;
   /** `+380XXXXXXXXX`, checkout's canonical form. */
   phone: string;
   /**
@@ -120,9 +122,10 @@ export interface CreateWaybillInput {
   declaredValueKopiykas: Kopiykas;
   /**
    * Cash on delivery: the money the carrier collects and transfers back, or
-   * null for a prepaid order. Requires a business contract on the NP account —
-   * the API refuses it for a plain personal key, and the waybill form refuses
-   * earlier with its own message (docs/plans/novaposhta.md, «Constraints»).
+   * null for a prepaid order. Creating such a waybill works even on a personal
+   * NP key (verified live 2026-08-07); whether the transfer actually pays out
+   * at handover without a business contract is still the open question in
+   * docs/plans/novaposhta.md, «Constraints».
    */
   codKopiykas: Kopiykas | null;
 }

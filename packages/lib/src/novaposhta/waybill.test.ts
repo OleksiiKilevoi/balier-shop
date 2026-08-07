@@ -29,6 +29,7 @@ const INPUT: CreateWaybillInput = {
   recipient: {
     lastName: 'Тестенко',
     firstName: 'Тест',
+    middleName: null,
     phone: '+380501234567',
     cityRef: 'recipient-city',
     warehouseRef: 'recipient-wh',
@@ -133,9 +134,17 @@ describe('buildWaybillPayload', () => {
       volumetricLength: '30',
       volumetricWidth: '20',
       volumetricHeight: '10',
-      volumetricVolume: '1.5',
+      // Cubic meters — 30×20×10 cm is 0.006 м³. The /4000 volumetric-weight
+      // formula here once inflated the declared volume 250×.
+      volumetricVolume: '0.006',
       weight: '1.25',
     });
+  });
+
+  it('seat weights sum exactly to Weight when the split is uneven', () => {
+    const payload = build({ seats: 3, weightGrams: 1000 });
+    const seats = payload.OptionsSeat as Record<string, string>[];
+    expect(seats.map((seat) => seat.weight)).toEqual(['0.334', '0.333', '0.333']);
   });
 
   it('adds backward delivery only for COD, with the exact amount', () => {
@@ -178,9 +187,27 @@ describe('createWaybill', () => {
     );
     expect(requests[0]!.modelName).toBe('Counterparty');
     expect(requests[0]!.calledMethod).toBe('save');
+    expect(requests[0]!.methodProperties.MiddleName).toBe('');
     expect(requests[1]!.modelName).toBe('InternetDocument');
     expect(requests[1]!.methodProperties.Recipient).toBe('recipient-cp');
     expect(requests[1]!.methodProperties.ContactRecipient).toBe('recipient-contact');
+  });
+
+  it('carries the middle name into the counterparty when one was typed', async () => {
+    const client = fakeClient([
+      [{ Ref: 'recipient-cp', ContactPerson: { data: [{ Ref: 'recipient-contact' }] } }],
+      [{ Ref: 'doc-ref', IntDocNumber: '20450000000001' }],
+    ]);
+
+    await createWaybill(client, {
+      ...INPUT,
+      recipient: { ...INPUT.recipient, middleName: 'Тестович' },
+    });
+
+    const first = (client.call as ReturnType<typeof vi.fn>).mock.calls[0]![0] as {
+      methodProperties: Record<string, unknown>;
+    };
+    expect(first.methodProperties.MiddleName).toBe('Тестович');
   });
 
   it('throws rather than shipping when the recipient refs are missing', async () => {
