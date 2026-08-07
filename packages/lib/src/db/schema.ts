@@ -343,6 +343,24 @@ export const payments = pgTable(
   (t) => [index('payments_order_idx').on(t.orderId)],
 );
 
+/**
+ * A register of shipments (реєстр відправлень / ScanSheet) — the one document
+ * for a whole handover batch, so the branch scans one barcode instead of
+ * accepting each parcel separately. Orders point at their register through
+ * `orders.np_scan_sheet_ref`; this row exists so the panel can list registers
+ * and print them offline from the carrier (`number` is what the API returns
+ * once, at creation, and `ScanSheet.getScanSheet` is otherwise the only way to
+ * get it back). Deliberately no FK from `orders` — every other `np_*` ref on an
+ * order is opaque carrier data, and this one stays consistent with them.
+ */
+export const npScanSheets = pgTable('np_scan_sheets', {
+  /** The carrier's own document Ref — deletion and printing take it. */
+  ref: text('ref').primaryKey(),
+  /** The printed register number, e.g. `105-…` — what the branch sees. */
+  number: text('number').notNull(),
+  createdAt,
+});
+
 /* ------------------------------------------------------- nova poshta cache */
 
 export const npSettlements = pgTable(

@@ -169,6 +169,26 @@ export function npErrorText(message: string): string {
 export const ADMIN_WAYBILL_MANUAL_NOTE =
   'Номер внесено вручну (ТТН створено в кабінеті Нової Пошти).';
 
+/* ------------------------------------------------- register of shipments --- */
+
+/**
+ * Result of a `/registers` POST, carried back through the redirect. The same
+ * map serves the list page and the register page — a delete lands its message
+ * on the list, a create lands on the fresh register.
+ */
+export const ADMIN_REGISTER_MESSAGES = {
+  register_created: 'Реєстр створено.',
+  register_deleted: 'Реєстр видалено. Накладні з нього не постраждали.',
+  register_order_removed: 'Замовлення знято з реєстру.',
+  register_no_selection: 'Оберіть хоча б одне замовлення зі створеною ТТН.',
+  register_orders_changed:
+    'Замовлення встигли змінитися, реєстр не створено. Оновіть список і спробуйте ще раз.',
+  not_on_register: 'Це замовлення вже не в цьому реєстрі.',
+  bad_request: 'Не вдалося виконати дію.',
+} as const;
+
+export type AdminRegisterMessage = keyof typeof ADMIN_REGISTER_MESSAGES;
+
 /**
  * The order a manager types in themselves — `/admin/orders/new`.
  *

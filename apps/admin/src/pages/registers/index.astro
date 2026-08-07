@@ -1,0 +1,193 @@
+---
+import { env } from 'cloudflare:workers';
+import AdminLayout from '~/layouts/AdminLayout.astro';
+import { createDb, createTxDb } from '@balier/lib/db';
+import { listOrdersByNumbers, listScanSheets } from '@balier/lib/db/queries/scanSheets';
+import {
+  ADMIN_REGISTER_MESSAGES,
+  ADMIN_WAYBILL_BLOCKERS,
+  formatAdminDateTime,
+  npErrorText,
+} from '@balier/lib/i18n/admin';
+import type { AdminRegisterMessage } from '@balier/lib/i18n/admin';
+import { pluralUk } from '@balier/lib/i18n/plural';
+import { createNovaPoshtaShipping } from '@balier/lib/novaposhta/shipping';
+import { attachRegister, registerEligible } from '@balier/lib/orders/register';
+import { adminRegisterCreateSchema } from '@balier/lib/validation/admin';
+
+/**
+ * The registers of shipments (реєстри відправлень / ScanSheet) — NP-5,
+ * docs/plans/novaposhta.md. This page lists them and *receives* the create
+ * POST: the selection itself lives on `/orders`, where the orders are, and
+ * lands here because the thing it makes belongs to this screen.
+ *
+ * Creation is carrier-first, like the waybill's: the register is made at Nova
+ * Poshta, then recorded in one transaction that re-checks every selected order
+ * under `FOR UPDATE` — and if the batch changed underneath the click, the
+ * fresh carrier document is compensated away rather than left describing
+ * parcels it does not contain.
+ */
+export const prerender = false;
+
+function done(message: AdminRegisterMessage): Response {
+  return Astro.redirect(`/registers?m=${message}`, 303);
+}
+
+/** The carrier's refusal, rendered in place — it cannot ride a `?m=` key. */
+let registerBanner: string | null = null;
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const parsed = adminRegisterCreateSchema.safeParse({
+    intent: form.get('intent'),
+    orders: form.getAll('orders'),
+  });
+
+  if (!parsed.success) {
+    const noSelection = parsed.error.issues.some(
+      (issue) => issue.message === 'register_no_selection',
+    );
+    return done(noSelection ? 'register_no_selection' : 'bad_request');
+  }
+
+  // The two hidden lists on `/orders` (phone cards and the desktop table) are
+  // copies of the same page, so a checked order can arrive twice.
+  const selected = [...new Set(parsed.data.orders)];
+  const db = createDb(env.DATABASE_URL);
+  const rows = await listOrdersByNumbers(db, selected);
+
+  if (rows.length !== selected.length || rows.some((row) => !registerEligible(row))) {
+    return done('register_orders_changed');
+  }
+
+  if (!env.NOVAPOSHTA_API_KEY) {
+    registerBanner = ADMIN_WAYBILL_BLOCKERS.noApiKey;
+  } else {
+    const shipping = createNovaPoshtaShipping(env.NOVAPOSHTA_API_KEY);
+
+    let sheet: Awaited<ReturnType<typeof shipping.createScanSheet>> | null = null;
+    try {
+      // `registerEligible` above guarantees every ref is present.
+      sheet = await shipping.createScanSheet(rows.map((row) => row.npTtnRef!));
+    } catch (err) {
+      registerBanner = npErrorText(err instanceof Error ? err.message : String(err));
+    }
+
+    if (sheet) {
+      const { db: txDb, close } = createTxDb(env.DATABASE_URL);
+      try {
+        const result = await attachRegister(
+          txDb,
+          sheet,
+          rows.map((row) => ({ orderNumber: row.orderNumber, npTtnRef: row.npTtnRef! })),
+        );
+        if (result.ok) {
+          return Astro.redirect(
+            `/registers/${encodeURIComponent(sheet.ref)}?m=register_created`,
+            303,
+          );
+        }
+
+        /*
+         * An order moved between the pre-check and the lock. The carrier
+         * document exists and describes a batch that does not: best-effort
+         * delete, off the response path — a stray register in the cabinet is
+         * visible and deletable by hand, and the waybills on it are unharmed.
+         */
+        Astro.locals.cfContext.waitUntil(
+          shipping.deleteScanSheet(sheet.ref).catch((err) => {
+            console.error(`Failed to delete orphaned register ${sheet!.number}`, err);
+          }),
+        );
+        return done('register_orders_changed');
+      } finally {
+        Astro.locals.cfContext.waitUntil(close());
+      }
+    }
+  }
+}
+
+const db = createDb(env.DATABASE_URL);
+const sheets = await listScanSheets(db);
+
+const messageParam = Astro.url.searchParams.get('m');
+const message =
+  messageParam && messageParam in ADMIN_REGISTER_MESSAGES
+    ? (messageParam as AdminRegisterMessage)
+    : null;
+
+const FAILURES = new Set<AdminRegisterMessage>([
+  'register_no_selection',
+  'register_orders_changed',
+  'not_on_register',
+  'bad_request',
+]);
+
+const countLabel = `${sheets.length} ${pluralUk(sheets.length, {
+  one: 'реєстр',
+  few: 'реєстри',
+  many: 'реєстрів',
+})}`;
+
+function ordersLabel(count: number): string {
+  return `${count} ${pluralUk(count, { one: 'замовлення', few: 'замовлення', many: 'замовлень' })}`;
+}
+---
+
+<AdminLayout title="Реєстри відправлень">
+  <a href="/orders" class="text-fg-muted hover:text-fg text-sm">← До замовлень</a>
+
+  <header class="mt-4 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+    <h1 class="text-fg text-2xl font-semibold sm:text-3xl">Реєстри відправлень</h1>
+    <p class="text-fg-muted text-sm">{countLabel}</p>
+  </header>
+
+  {
+    message && (
+      <p
+        role={FAILURES.has(message) ? 'alert' : 'status'}
+        class:list={[
+          'rounded-card mt-5 p-3 text-sm',
+          FAILURES.has(message) ? 'admin-tone-negative' : 'admin-card text-fg-muted',
+        ]}
+      >
+        {ADMIN_REGISTER_MESSAGES[message]}
+      </p>
+    )
+  }
+
+  {
+    registerBanner && (
+      <p role="alert" class="admin-tone-negative rounded-card mt-5 p-3 text-sm">
+        {registerBanner}
+      </p>
+    )
+  }
+
+  {
+    sheets.length === 0 ? (
+      <p class="text-fg-muted mt-8">
+        Реєстрів ще немає. Позначте замовлення зі створеною ТТН у
+        <a href="/orders" class="underline underline-offset-2"> списку замовлень</a> і натисніть
+        «Створити реєстр» — одна партія, один документ, одне сканування у відділенні.
+      </p>
+    ) : (
+      <ul class="mt-6 space-y-3">
+        {sheets.map((sheet) => (
+          <li class="admin-card hover:border-border-strong transition-colors">
+            <a
+              href={`/registers/${encodeURIComponent(sheet.ref)}`}
+              class="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 p-4"
+            >
+              <span class="text-fg font-mono text-sm font-medium">№ {sheet.number}</span>
+              <span class="text-fg-muted text-sm">{ordersLabel(sheet.orderCount)}</span>
+              <span class="text-fg-subtle w-full text-xs sm:w-auto">
+                {formatAdminDateTime(sheet.createdAt)}
+              </span>
+            </a>
+          </li>
+        ))}
+      </ul>
+    )
+  }
+</AdminLayout>

@@ -125,6 +125,9 @@ export interface OrderListRow {
   deliveryMethod: Order['deliveryMethod'];
   total: Kopiykas;
   npTtn: string | null;
+  /** With `npScanSheetRef` and `status`, what `registerEligible` reads. */
+  npTtnRef: string | null;
+  npScanSheetRef: string | null;
   itemCount: number;
   createdAt: Date;
 }
@@ -204,6 +207,8 @@ export async function listOrders(
         deliveryMethod: orders.deliveryMethod,
         total: orders.total,
         npTtn: orders.npTtn,
+        npTtnRef: orders.npTtnRef,
+        npScanSheetRef: orders.npScanSheetRef,
         itemCount,
         createdAt: orders.createdAt,
       })

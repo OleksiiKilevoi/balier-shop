@@ -121,6 +121,44 @@ export const adminOrderActionSchema = z.discriminatedUnion('intent', [
 
 export type AdminOrderAction = z.infer<typeof adminOrderActionSchema>;
 
+/* ------------------------------------------------- register of shipments --- */
+
+/**
+ * One carrier call carries the whole batch, so the ceiling is a typo guard
+ * against a hand-composed body, not a business rule — a real handover is a
+ * dozen parcels, and the create form can only offer what one page lists.
+ */
+export const REGISTER_ORDERS_MAX = 100;
+
+/** Order numbers are `B######-#####`; anything longer is a tampered body. */
+const registerOrderNumberSchema = z.string().trim().min(1).max(40);
+
+/**
+ * «Створити реєстр» — the selection posted from `/orders`. The page builds
+ * `orders` from `formData.getAll()`, so it arrives as a real array; everything
+ * about *which* orders qualify is checked against live rows, not here.
+ */
+export const adminRegisterCreateSchema = z.object({
+  intent: z.literal('register_create'),
+  orders: z
+    .array(registerOrderNumberSchema)
+    .min(1, 'register_no_selection')
+    .max(REGISTER_ORDERS_MAX, 'register_no_selection'),
+});
+
+export type AdminRegisterCreate = z.infer<typeof adminRegisterCreateSchema>;
+
+/** What one register's own page can POST to itself. */
+export const adminRegisterActionSchema = z.discriminatedUnion('intent', [
+  z.object({
+    intent: z.literal('register_remove_order'),
+    orderNumber: registerOrderNumberSchema,
+  }),
+  z.object({ intent: z.literal('register_delete') }),
+]);
+
+export type AdminRegisterAction = z.infer<typeof adminRegisterActionSchema>;
+
 /**
  * The cash-on-delivery limit, as `/admin/settings` submits it.
  *

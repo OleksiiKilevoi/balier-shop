@@ -1,0 +1,277 @@
+---
+import { env } from 'cloudflare:workers';
+import OrderStatusBadge from '~/components/OrderStatusBadge.astro';
+import AdminLayout from '~/layouts/AdminLayout.astro';
+import { createDb, createTxDb } from '@balier/lib/db';
+import { getScanSheet, listOrdersByNumbers } from '@balier/lib/db/queries/scanSheets';
+import {
+  ADMIN_REGISTER_MESSAGES,
+  ADMIN_WAYBILL_BLOCKERS,
+  formatAdminDateTime,
+  npErrorText,
+} from '@balier/lib/i18n/admin';
+import type { AdminRegisterMessage } from '@balier/lib/i18n/admin';
+import { pluralUk } from '@balier/lib/i18n/plural';
+import { formatPrice } from '@balier/lib/money';
+import { PAYMENT_METHOD_LABELS } from '@balier/lib/notify/format';
+import { createNovaPoshtaShipping } from '@balier/lib/novaposhta/shipping';
+import { deleteRegister, removeFromRegister } from '@balier/lib/orders/register';
+import { adminRegisterActionSchema } from '@balier/lib/validation/admin';
+
+/**
+ * One register of shipments: what goes to the branch in this batch, its print,
+ * and the two ways to shrink it — one order off, or the whole register gone.
+ *
+ * Both actions are carrier-first, like everything Nova Poshta here: their
+ * refusal renders verbatim and leaves our record standing, because a record
+ * that outlives the carrier's document is visible and fixable, and the
+ * opposite — a carrier document our panel has forgotten — is a parcel batch
+ * nobody can print.
+ */
+export const prerender = false;
+
+const ref = Astro.params.ref!;
+const selfUrl = `/registers/${encodeURIComponent(ref)}`;
+
+function done(message: AdminRegisterMessage): Response {
+  return Astro.redirect(`${selfUrl}?m=${message}`, 303);
+}
+
+/** The carrier's refusal, verbatim — it cannot ride a `?m=` key. */
+let registerBanner: string | null = null;
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const parsed = adminRegisterActionSchema.safeParse(Object.fromEntries(form));
+
+  if (!parsed.success) {
+    return done('bad_request');
+  } else if (!env.NOVAPOSHTA_API_KEY) {
+    registerBanner = ADMIN_WAYBILL_BLOCKERS.noApiKey;
+  } else if (parsed.data.intent === 'register_remove_order') {
+    const db = createDb(env.DATABASE_URL);
+    const [row] = await listOrdersByNumbers(db, [parsed.data.orderNumber]);
+    if (!row || row.npScanSheetRef !== ref) return done('not_on_register');
+
+    const shipping = createNovaPoshtaShipping(env.NOVAPOSHTA_API_KEY);
+    try {
+      /*
+       * A linked order without a waybill ref should not exist — every detach
+       * path clears the register link too — but if one turns up there is
+       * nothing at the carrier to remove, and the unlink below is the fix.
+       */
+      if (row.npTtnRef) await shipping.removeFromScanSheet(ref, [row.npTtnRef]);
+    } catch (err) {
+      registerBanner = npErrorText(err instanceof Error ? err.message : String(err));
+    }
+
+    if (!registerBanner) {
+      const { db: txDb, close } = createTxDb(env.DATABASE_URL);
+      try {
+        const result = await removeFromRegister(txDb, parsed.data.orderNumber, ref);
+        if (result.ok) return done('register_order_removed');
+        if (result.reason === 'not_found') {
+          return new Response('Замовлення не знайдено', { status: 404 });
+        }
+        return done(result.reason);
+      } finally {
+        Astro.locals.cfContext.waitUntil(close());
+      }
+    }
+  } else {
+    const shipping = createNovaPoshtaShipping(env.NOVAPOSHTA_API_KEY);
+    try {
+      await shipping.deleteScanSheet(ref);
+    } catch (err) {
+      registerBanner = npErrorText(err instanceof Error ? err.message : String(err));
+    }
+
+    if (!registerBanner) {
+      const { db: txDb, close } = createTxDb(env.DATABASE_URL);
+      try {
+        const result = await deleteRegister(txDb, ref);
+        if (!result.ok) return new Response('Реєстр не знайдено', { status: 404 });
+        return Astro.redirect('/registers?m=register_deleted', 303);
+      } finally {
+        Astro.locals.cfContext.waitUntil(close());
+      }
+    }
+  }
+}
+
+const db = createDb(env.DATABASE_URL);
+const sheet = await getScanSheet(db, ref);
+
+if (!sheet) Astro.response.status = 404;
+
+const messageParam = Astro.url.searchParams.get('m');
+const message =
+  messageParam && messageParam in ADMIN_REGISTER_MESSAGES
+    ? (messageParam as AdminRegisterMessage)
+    : null;
+
+const FAILURES = new Set<AdminRegisterMessage>([
+  'register_no_selection',
+  'register_orders_changed',
+  'not_on_register',
+  'bad_request',
+]);
+
+const countLabel = sheet
+  ? `${sheet.orders.length} ${pluralUk(sheet.orders.length, {
+      one: 'замовлення',
+      few: 'замовлення',
+      many: 'замовлень',
+    })}`
+  : '';
+---
+
+<AdminLayout title={sheet ? `Реєстр № ${sheet.number}` : 'Реєстр не знайдено'}>
+  <a href="/registers" class="text-fg-muted hover:text-fg text-sm">← До реєстрів</a>
+
+  {
+    !sheet ? (
+      <p class="text-fg mt-6">Реєстру з таким ідентифікатором немає.</p>
+    ) : (
+      <div
+        id="register-editor"
+        class="aria-busy:pointer-events-none aria-busy:opacity-60 transition-opacity"
+      >
+        <header class="mt-4 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+          <h1 class="text-fg font-mono text-2xl font-semibold sm:text-3xl">№ {sheet.number}</h1>
+          <p class="text-fg-muted text-sm">{countLabel}</p>
+        </header>
+        <p class="text-fg-subtle mt-1 text-sm">Створено {formatAdminDateTime(sheet.createdAt)}</p>
+
+        {message && (
+          <p
+            id="register-message"
+            data-tone={FAILURES.has(message) ? 'bad' : 'ok'}
+            role={FAILURES.has(message) ? 'alert' : 'status'}
+            class:list={[
+              'rounded-card mt-5 p-3 text-sm',
+              FAILURES.has(message) ? 'admin-tone-negative' : 'admin-card text-fg-muted',
+            ]}
+          >
+            {ADMIN_REGISTER_MESSAGES[message]}
+          </p>
+        )}
+
+        {registerBanner && (
+          <p role="alert" class="admin-tone-negative rounded-card mt-5 p-3 text-sm">
+            {registerBanner}
+          </p>
+        )}
+
+        <div class="mt-5">
+          {/* The proxy route — the carrier's print URL carries the API key and
+              never reaches this page. */}
+          <a
+            href={`${selfUrl}/print`}
+            target="_blank"
+            rel="noreferrer"
+            class="admin-btn admin-btn-primary w-full sm:w-auto"
+          >
+            Друк реєстру
+          </a>
+          <p class="text-fg-subtle mt-2 text-xs">
+            Один документ на всю партію — у відділенні сканують його, а не кожну посилку.
+          </p>
+        </div>
+
+        <section class="admin-card mt-6 p-5">
+          <h2 class="text-fg text-base font-semibold">Замовлення в реєстрі</h2>
+
+          {sheet.orders.length === 0 ? (
+            <p class="text-fg-muted mt-3 text-sm">
+              Реєстр порожній — усі замовлення з нього зняті. Його можна видалити нижче.
+            </p>
+          ) : (
+            <ul class="divide-border mt-3 divide-y text-sm">
+              {sheet.orders.map((row) => (
+                <li class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 py-3 first:pt-0 last:pb-0">
+                  <div class="min-w-0">
+                    <p class="flex flex-wrap items-center gap-x-3 gap-y-1">
+                      <a
+                        href={`/orders/${row.orderNumber}`}
+                        class="text-fg font-mono font-medium underline-offset-2 hover:underline"
+                      >
+                        {row.orderNumber}
+                      </a>
+                      <OrderStatusBadge status={row.status} />
+                    </p>
+                    <p class="text-fg mt-1">
+                      {row.customerName}
+                      <span class="text-fg-muted">
+                        {' '}
+                        · {PAYMENT_METHOD_LABELS[row.paymentMethod]} · {formatPrice(row.total)}
+                      </span>
+                    </p>
+                    <p class="text-fg-subtle mt-0.5 text-xs">
+                      {row.npSettlementName}
+                      {row.npWarehouseName && <>, {row.npWarehouseName}</>}
+                      {row.npTtn && <span class="font-mono"> · ТТН {row.npTtn}</span>}
+                    </p>
+                  </div>
+
+                  <form method="post" action={selfUrl}>
+                    <input type="hidden" name="intent" value="register_remove_order" />
+                    <input type="hidden" name="orderNumber" value={row.orderNumber} />
+                    <button type="submit" class="admin-btn admin-btn-secondary">
+                      Зняти з реєстру
+                    </button>
+                  </form>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
+        <details id="register-delete" class="admin-disclosure admin-disclosure-danger mt-6">
+          <summary>
+            Видалити реєстр
+            <svg
+              class="h-4 w-4 shrink-0"
+              viewBox="0 0 16 16"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d="m4 6 4 4 4-4" />
+            </svg>
+          </summary>
+          <form method="post" action={selfUrl} class="mt-3">
+            <input type="hidden" name="intent" value="register_delete" />
+            <p class="text-fg-subtle mb-2 text-sm">
+              Реєстр видалиться і в Новій Пошті. Накладні та замовлення не постраждають — вони
+              просто перестануть бути однією партією.
+            </p>
+            <button type="submit" class="admin-btn admin-btn-danger w-full sm:w-auto">
+              Видалити реєстр
+            </button>
+          </form>
+        </details>
+      </div>
+    )
+  }
+
+  <div id="register-toast" class="admin-toast-host" aria-live="polite" aria-atomic="true"></div>
+
+  <script>
+    import { enhanceAdminForms } from '@balier/lib/admin/forms';
+
+    const editor = document.getElementById('register-editor');
+    const toastHost = document.getElementById('register-toast');
+
+    if (editor && toastHost) {
+      enhanceAdminForms({
+        root: editor,
+        toastHost,
+        messageId: 'register-message',
+      });
+    }
+  </script>
+</AdminLayout>

@@ -10,6 +10,7 @@ import { ORDER_STATUS_LABELS, formatAdminDateTime } from '@balier/lib/i18n/admin
 import { pluralUk } from '@balier/lib/i18n/plural';
 import { formatPrice } from '@balier/lib/money';
 import { DELIVERY_METHOD_LABELS, PAYMENT_METHOD_LABELS } from '@balier/lib/notify/format';
+import { registerEligible } from '@balier/lib/orders/register';
 
 /**
  * The order list. Filter and search are a plain GET form, so the view lives in
@@ -51,6 +52,16 @@ const countLabel = `${total} ${pluralUk(total, {
   few: 'замовлення',
   many: 'замовлень',
 })}`;
+
+/**
+ * NP-5: which of the listed orders may go onto a new register of shipments —
+ * `packed`, panel-made waybill, not on a register yet. The checkboxes and the
+ * «Створити реєстр» bar render only when the page actually shows one; the POST
+ * goes to `/registers`, which re-checks every row against the live data.
+ */
+const registerable = new Set(
+  rows.filter((row) => registerEligible(row)).map((row) => row.orderNumber),
+);
 ---
 
 <AdminLayout title="Замовлення">
@@ -59,8 +70,12 @@ const countLabel = `${total} ${pluralUk(total, {
       <h1 class="text-fg text-2xl font-semibold sm:text-3xl">Замовлення</h1>
       <p class="text-fg-muted text-sm">{countLabel}</p>
     </div>
-    {/* For an order that arrived in a chat rather than through the shop. */}
-    <a href="/orders/new" class="admin-btn admin-btn-primary">Створити замовлення</a>
+    <div class="flex flex-wrap gap-2">
+      {/* The batch documents live on their own screen; this is the way there. */}
+      <a href="/registers" class="admin-btn admin-btn-secondary">Реєстри</a>
+      {/* For an order that arrived in a chat rather than through the shop. */}
+      <a href="/orders/new" class="admin-btn admin-btn-primary">Створити замовлення</a>
+    </div>
   </header>
 
   {/*
@@ -124,7 +139,21 @@ const countLabel = `${total} ${pluralUk(total, {
           : 'Замовлень поки немає.'}
       </p>
     ) : (
-      <>
+      <form method="post" action="/registers">
+        <input type="hidden" name="intent" value="register_create" />
+
+        {/* The selection bar, only when this page actually lists an order a
+            register could take. A plain form POST — the checkboxes below are
+            inside this same form, so it all works with no script. */}
+        {registerable.size > 0 && (
+          <div class="admin-card mt-6 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 p-4">
+            <p class="text-fg-muted text-sm">
+              Позначте замовлення зі створеною ТТН — вони поїдуть одним реєстром відправлень.
+            </p>
+            <button type="submit" class="admin-btn admin-btn-secondary">Створити реєстр</button>
+          </div>
+        )}
+
         {/* Phone: one card per order, the number and status on the first line —
             a table at 320px either scrolls sideways or crushes every column. */}
         <ul class="mt-6 space-y-3 md:hidden">
@@ -146,6 +175,14 @@ const countLabel = `${total} ${pluralUk(total, {
                 </p>
                 <p class="text-fg mt-2 font-medium tabular-nums">{formatPrice(row.total)}</p>
               </a>
+              {/* Outside the card's link — a checkbox inside an anchor would
+                  navigate instead of ticking. */}
+              {registerable.has(row.orderNumber) && (
+                <label class="border-border min-h-touch flex items-center gap-2.5 border-t px-4 py-2.5 text-sm">
+                  <input type="checkbox" name="orders" value={row.orderNumber} class="size-4" />
+                  <span class="text-fg-muted">До реєстру</span>
+                </label>
+              )}
             </li>
           ))}
         </ul>
@@ -154,6 +191,11 @@ const countLabel = `${total} ${pluralUk(total, {
           <table class="w-full border-collapse text-sm">
             <thead class="text-fg-subtle border-border border-b text-left text-xs">
               <tr>
+                {registerable.size > 0 && (
+                  <th scope="col" class="w-10 py-3 pl-4 font-medium">
+                    <span class="sr-only">До реєстру</span>
+                  </th>
+                )}
                 <th scope="col" class="px-4 py-3 font-medium">Номер</th>
                 <th scope="col" class="px-4 py-3 font-medium">Дата</th>
                 <th scope="col" class="px-4 py-3 font-medium">Клієнт</th>
@@ -166,6 +208,19 @@ const countLabel = `${total} ${pluralUk(total, {
             <tbody>
               {rows.map((row) => (
                 <tr class="border-border hover:bg-surface-hover border-b transition-colors last:border-b-0">
+                  {registerable.size > 0 && (
+                    <td class="py-3 pl-4">
+                      {registerable.has(row.orderNumber) && (
+                        <input
+                          type="checkbox"
+                          name="orders"
+                          value={row.orderNumber}
+                          aria-label={`До реєстру: ${row.orderNumber}`}
+                          class="size-4 align-middle"
+                        />
+                      )}
+                    </td>
+                  )}
                   <td class="px-4 py-3 whitespace-nowrap">
                     <a
                       href={`/orders/${row.orderNumber}`}
@@ -204,7 +259,7 @@ const countLabel = `${total} ${pluralUk(total, {
             </tbody>
           </table>
         </div>
-      </>
+      </form>
     )
   }
 

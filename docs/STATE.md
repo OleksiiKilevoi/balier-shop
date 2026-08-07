@@ -4,99 +4,43 @@
 
 ## 📍 CURRENT STATE (overwrite this block; keep tight)
 
-- **Last done:** **review of the whole NP working tree, four fixes from it, and NP-4 built**
-  (2026-08-07, late evening). The review found one real trap — `carrierStatusIntent` coded
-  carrier code 2 (cabinet deletion) as «quiet», with a test cementing it, contradicting the
-  plan's detach+alert decision — plus a misleading COD blocker («чекайте бізнес-акаунт» when
-  filling the sender settings is the actual fix, proven live in NP-3) and two stale comments
-  (`ports.ts` still naming dropped `delivery_city_ref`; the dead `ttn`-intent reference). All
-  four fixed. Then **NP-4 whole**: `carrierStatusIntent` grew `detach`; `decideCarrierStatus` +
-  `applyCarrierStatus` (`FOR UPDATE`, `waybill_changed` skip, columns written only on a changed
-  code, code 2 detaching via the shared `waybillDetachPatch`); `status.ts` rewritten —
-  `allowedTransitions` is exit-only for non-terminal statuses (asserted as a property),
-  `carrierCanAdvance` owns `packed → shipped → delivered` (skips allowed),
-  `revertCrossesPayment` deleted with the button that showed it; the cron's */15 tick tracks
-  waybills (batched, per-order transactions, Telegram `CarrierAlerts` firing only on a fresh
-  code). The **stuck-order alert was built and then removed the same evening at the client's
-  request** — the plan's «Decisions» records the reversal: the no-forward-buttons risk now
-  stands unmitigated, knowingly. The order page lost its forward buttons, says «статуси
-  оновлюються автоматично» instead, and the «Нова Пошта» card grew the «Грошовий переказ
-  зараховано» line (code 11's `npMoneyTransferAt` was stamped but shown nowhere). **Not driven
-  live** — needs a real waybill round trip (create → tick sees code 1 → delete in cabinet →
-  tick detaches + alerts); not deployed, not committed.
-- **Before that, same day:** three order-page fixes (no-reload via `enhanceAdminForms`,
-  «Упаковано» → «ТТН створено», manual ТТН entry removed end to end — a legacy hand-entered ТТН
-  now has no delete path, dev-only data); order editing (`/orders/[n]/edit`, `orderDetailsLock`,
-  driven live); and **NP-1..NP-3 whole** — migrations `0011`/`0012`, the sender section on
-  `/settings`, the carrier adapter (no sandbox exists for API 2.0), the «Нова Пошта» card with
-  carrier-first ТТН create/delete driven against the real API. Details in the session log.
-- **In progress:** nothing. The gate is green (`pnpm check && pnpm build`, **308 tests**).
-  Migrations `0006`–`0012` are all applied to the **dev** database. **Driven end to end locally**
-  against the dev server, every rendered control's `name` checked against the schema: archive →
-  archive tab → restore → archive again; a real purge (mixed-case address accepted, `normalizeEmail`
-  does the matching) and then **the same address re-used for a new account**; every refusal —
-  wrong address, blank address, `user_purge` aimed by hand at a **live** account (refused by the
-  query layer's `IS NOT NULL`, not by the screen), self-archive, self-demote, self-password,
-  `email_taken` naming the archive, a short password; a **manager** getting 403 on `/users` with no
-  row leaked and no nav item, and their hand-made `user_create` refused with no row written. The
-  one that matters most: a manager **signed in**, then archived, is turned away on their *next*
-  request (`session_expired`) and cannot log in — with `is_active` still `true` — and after a
-  restore signs in fresh while the pre-archive cookie stays dead. Not yet driven in a **browser**:
-  the `enhanceAdminForms` swap/toast on `/users` and the new disclosure CSS (curl runs no script and
-  paints nothing).
-- **Deployed 2026-08-06, admin Worker only** — `balier-admin-dev` **`7ff84793`**, verified over
-  HTTPS on `admin.balier.mlosko.dev`: a full create → archive → restore → archive → purge round
-  trip made *through the deployed panel*, the typed-address guard refusing a wrong one, both tabs
-  rendering with their counts, the nav's fourth item present, and the removed sentence gone.
-  `balier-dev` and `balier-cron` were **deliberately not redeployed** — nothing they import
-  changed (checked, not assumed: neither app references `queries/adminUsers`, `auth/session`,
-  `validation/admin` or `i18n/admin`). Migration `0009` was applied to the dev database **before**
-  the deploy, which is the required order — the gate reads `archived_at` on every request.
-  **Deployed but NOT committed**, like the sessions work before it: the working tree still holds
-  everything above.
-- **One loose end from this session's driving, unresolved:** `qa-live@balier.test` was found
-  switched **on** at 19:09 EEST with `sessions_valid_from` stamped in the same instant — the
-  signature of a `user_save` that changed the active flag — and **no command in this session
-  accounts for it**. Set back to disabled. It is a QA row in the dev database and no deployed code
-  depends on it, but it is written down rather than quietly tidied away, because the honest state of
-  things is that one write is unexplained.
-- **Deployed 2026-08-06, all three Workers, verified over HTTPS** — `balier-admin-dev`
-  (**`c8d656f2`**, the revocation build; `2f82ee50` was the users build earlier the same day),
-  `balier-dev` (`2fea0176`) and `balier-cron` (`39167a18`, all five secrets still
-  present after the «override remote configuration» warning). The panel's users section was driven
-  on `admin.balier.mlosko.dev`, not just locally: a user **created through the deployed panel**
-  signs in, the duplicate is refused, and a password was changed live — which is the check that
-  matters most, since the PBKDF2 iteration ceiling only bites on the deployed runtime and no local
-  gate can catch a breach of it. The storefront's NP search from the previous session is live too
-  («Киев»→Київ, «хркив»→Харків, «Lviv»→Львів against the deployed endpoint).
-  **Everything above is deployed but NOT committed** — the working tree still holds this session's
-  changes.
-- **Next step:** **drive NP-4 live, then NP-5** (register of shipments,
-  `docs/plans/novaposhta.md`). The NP-4 loop needs a real waybill: create one through the panel,
-  fire the cron tick by hand (`pnpm cron:dev`, hit `__scheduled?cron=*/15+*+*+*+*`), watch code 1
-  change nothing, delete the waybill in the NP cabinet, watch the next tick detach + Telegram-alert
-  — that verifies the code-2 path against the real API. Also drive the order page's new status card
-  in a browser (forward buttons gone, hint shown, exits still gated).
-  **Before deploying any of it**: `wrangler secret put NOVAPOSHTA_API_KEY` on `balier-admin-dev`,
-  migrations `0011`+`0012` on the target DB (dev has them), `balier-cron` redeploy — **now carrying
-  NP-4's tracking tick and alerts** — **plus one full sync** to fill `np_warehouses.city_ref`
-  country-wide (only Kyiv is backfilled in dev; the nightly 04:00 UTC tick does it once the cron is
-  redeployed; its five secrets incl. `TELEGRAM_*` are already set). Also worth knowing: the dev
-  sender settings point at Київ, Відділення №1 as a placeholder handover branch.
-  Still standing, and not replaced by the above: the **browser pass** — `/checkout`'s delivery step is the one to drive
-  first, since only curl/DB-level checks have been run against it; then `/categories` (rewritten,
-  never driven), `/settings`, and now `/users`, whose script layer and whose disclosure CSS are the
-  newest untested things in the panel, on `admin.balier.mlosko.dev`, plus the panel flows curl
-  cannot drive (image upload preview, `/orders/new` card order confirming the Monobank invoice's
-  URLs). Then Phase 5.
+- **Last done:** **NP-5 whole — the register of shipments — built and driven live end to end**
+  (2026-08-07). Migration `0013` (`np_scan_sheets`: ref PK, number, created_at; applied to dev);
+  `orders/register.ts` (`registerEligible` — strictly `packed` + panel-made waybill + no register
+  yet, property-tested; `attachRegister` re-checking each order **and its `np_ttn_ref`** under
+  `FOR UPDATE`; `removeFromRegister`/`deleteRegister`); `db/queries/scanSheets.ts`; checkbox
+  selection on `/orders` (one plain form to `/registers`, bar and column render only when an
+  eligible row is on the page, mobile/desktop duplicates deduped server-side); `/registers` list +
+  carrier-first create with `waitUntil` compensation; `/registers/[ref]` (contents, «Зняти з
+  реєстру», «Видалити реєстр», `enhanceAdminForms`); print proxy `/registers/[ref]/print`.
+  Driven against the real API: waybills `20451506102578`/`20451506102592` → register
+  **105-79180799** → detail/list/204 KB PDF → refusals (already-registered, empty, unknown) →
+  remove one (double submit refused) → delete register → both waybills deleted, orders reverted,
+  NP account clean. QA admin `qa-np5@balier.test` created for the drive, disabled after. Two edges
+  knowingly unverified — `insertDocuments` partial acceptance, a register deleted in the NP
+  cabinet — recorded in the plan's NP-5 notes. **Uncommitted, not deployed.**
+- **Context from before this session (client-verified):** NP-1..NP-4 are deployed and working
+  live — the client drove the NP-4 loop themselves: a waybill deleted in the NP cabinet was
+  detached by the cron tick and the order reverted. `NOVAPOSHTA_API_KEY` is on the admin Worker,
+  `balier-cron` carries the tracking tick, dev-DB admin accounts are now `admin@balier.com` +
+  `manager@balier.com` (both on).
+- **In progress:** nothing. The gate is green (`pnpm check && pnpm build`, **312 tests**).
+  Migrations `0006`–`0013` are all applied to the **dev** database.
+- **Next step:** **commit + push** — Workers Builds auto-deploys `balier-dev`/`balier-admin-dev`
+  on push; `0013` is already applied ahead of it, and `balier-cron` needs nothing (it imports none
+  of the register modules). That push closes `docs/plans/novaposhta.md` whole. Then, in the
+  browser on `admin.balier.mlosko.dev`: the register flow end to end once with real parcels
+  (create → print at the branch), and the still-standing browser passes — `/checkout`'s delivery
+  step, `/categories`, `/settings`, `/users` — plus the flows curl cannot drive (image upload
+  preview, `/orders/new` card order). Then Phase 5.
   **A production deploy needs `pnpm db:migrate` against that database and one
-  `pnpm admin:user role <email> admin`, or the panel ships with nobody able to add a user.**
-  Migrations `0008` **and `0009`** must land **before** that deploy — the gate reads
-  `sessions_valid_from` and now `archived_at` on every request, so code ahead of schema is a panel
-  nobody can open.
-  **Not yet deployed** — the two Workers need a push/deploy to pick this up, and **`balier-cron`
-  needs a redeploy too** this time: the sync changes live in `@balier/lib`, so the note below
-  about the split not requiring one no longer applies to this change.
+  `pnpm admin:user role <email> admin`**; migrations `0008`/`0009` must land before that deploy —
+  the gate reads `sessions_valid_from`/`archived_at` on every request, so code ahead of schema is
+  a panel nobody can open. The dev sender settings still point at **Київ, Відділення №1** as a
+  placeholder handover branch.
+- **Loose end, unresolved (2026-08-06):** `qa-live@balier.test` was once found switched on with
+  `sessions_valid_from` stamped, unexplained by any command of that session; set back to disabled
+  and written down rather than tidied away.
 - **Rules that bind any future panel screen** (now written up in `docs/CONVENTIONS.md` → «Admin
   panel»: the `admin.css` utilities, `src/components/admin/`, and the no-reload/toast contract):
   - **A schema is only verified against the body the form actually sends.** `curl -F` composes a
@@ -219,10 +163,11 @@
       creation; `/settings` for the COD limit; and the catalog — `/products`, its editor,
       `/categories` and image upload. Deployed; since the split the whole phase lives on
       `admin.balier.mlosko.dev`)
-- [ ] **Nova Poshta operations** — outside the phase numbering, planned 2026-08-07 in its own file
+- [~] **Nova Poshta operations** — outside the phase numbering, its own file
       `docs/plans/novaposhta.md`: waybills, the register of shipments, and carrier-driven order
-      statuses. Sits between Phase 4 and Phase 5 in practice — it finishes the panel, and Phase 5's
-      account migration has to carry its sender settings and API key across
+      statuses. NP-1..NP-4 deployed and client-verified live; NP-5 built and driven live
+      2026-08-07, awaiting commit+push. Phase 5's account migration has to carry the sender
+      settings and API key across
 - [ ] Phase 5 — Launch (incl. migrating off the dev Neon/Cloudflare accounts)
 - [ ] Phase 6 — Improvements
 
@@ -233,6 +178,20 @@
 > Empty by design. Everything through the end of Phase 4 was moved to **`docs/history.md`** on
 > 2026-08-05, not rewritten — this file is read in full at every session start and had reached
 > 852 lines. New session entries go here; move a phase's entries across once the phase is done.
+
+**2026-08-07 (NP-5: the register of shipments, driven live).** Opened on «нам что-то осталось по
+novaposhta.md?» — NP-4 turned out already client-verified live (cabinet deletion detached by the
+tick), everything deployed, so NP-5 was the whole remainder. Built it: migration `0013`
+(`np_scan_sheets` — ref/number/created_at; the order link stays `orders.np_scan_sheet_ref`),
+`registerEligible` (strictly `packed` + panel waybill + unregistered, property-tested),
+`attachRegister` re-checking rows *and their `np_ttn_ref`* under `FOR UPDATE` (a recreated waybill
+fails the batch and the fresh carrier register is compensated away), checkbox selection on
+`/orders` posting one plain form to `/registers`, the `/registers` list, `/registers/[ref]`
+(remove-one, delete-whole, `enhanceAdminForms`), and the key-server-side print proxy. Driven whole
+against the real API: two waybills → register 105-79180799 → 204 KB PDF → every refusal → remove →
+delete → waybills deleted, account and dev DB left clean (QA admin `qa-np5@` disabled after).
+Unverified on purpose: `insertDocuments` partial acceptance and a cabinet-deleted register (no
+tracking equivalent to ask) — both in the plan's NP-5 notes. 312 tests; gate green; uncommitted.
 
 **2026-08-07 (review + four fixes + NP-4 built).** Asked to review the uncommitted NP work before
 continuing. Found: `carrierStatusIntent` coding carrier code 2 as «quiet» *with a test asserting

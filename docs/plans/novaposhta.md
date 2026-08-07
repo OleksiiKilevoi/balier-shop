@@ -258,30 +258,58 @@ intent, the code is the truth:
 | 11 | received, money transfer credited | `delivered` + `np_money_transfer_at` |
 | 102, 103, 105, 106, 111 | refusal, storage ended, return, failed attempt | no move, alert |
 
-### Phase NP-5 — Register of shipments [todo]
+### Phase NP-5 — Register of shipments [done 2026-08-07, driven live end to end]
 
-- [ ] Selection on `/orders` (waybilled orders only) → «Створити реєстр».
-- [ ] Register storage and the order↔register link, print, delete, and removing a single order from
-      a register.
+- [x] Selection on `/orders`: eligible rows (strictly `packed` + panel-made waybill + not on a
+      register yet — `registerEligible`, property-tested) grow a checkbox, all inside one plain
+      form POSTing to `/registers`; the bar and the checkbox column render only when the page
+      actually lists an eligible order. The two row renderings (phone cards / desktop table) are
+      copies of the same form, so the handler dedupes the selection.
+- [x] Storage: migration `0013` (`0013_hard_lizard.sql`, applied to dev) — `np_scan_sheets`
+      (`ref` PK, `number`, `created_at`); the order↔register link stays the existing
+      `orders.np_scan_sheet_ref`, cleared by `waybillDetachPatch` like every other `np_*` column.
+- [x] `/registers` (list + the create handler) and `/registers/[ref]` (contents, «Зняти з
+      реєстру» per order, «Видалити реєстр» disclosure, `enhanceAdminForms`). Creation is
+      carrier-first with compensation, the waybill's own pattern: `attachRegister` re-checks every
+      order under `FOR UPDATE` — including that its `np_ttn_ref` is still the one the carrier was
+      handed, so a deleted-and-recreated waybill fails the batch — and on refusal the fresh carrier
+      register is deleted via `waitUntil`. Removal and deletion are carrier-first too; their
+      refusal renders verbatim and leaves our record standing.
+- [x] Print through the proxy route `/registers/[ref]/print`, key server-side, like the marking.
 
-**Notes/decisions:** this is the phase that answers the original request literally — what the seller
-hands over at the branch. It can swap places with NP-4 if the counter workflow matters more than
-removing manual statuses.
+**Driven 2026-08-07 against the dev server and the real API** (QA admin `qa-np5@balier.test`,
+disabled after): waybills `20451506102578`/`20451506102592` on `B260807-DNVYU` (card, поштомат ні —
+відділення) and `B260807-6HPQU` (COD, поштомат) → both checkboxes rendered on `/orders` → register
+**105-79180799** created with a duplicated order number in the body (deduped) → detail page, list
+page and a real 204 KB PDF through the proxy → refusals driven (already-registered order, empty
+selection, unknown number → `register_orders_changed`/`register_no_selection`) → one order removed
+(double submit → `not_on_register`) → register deleted with an order still on it → both waybills
+deleted through the panel, orders reverted («Оплачено»/«Підтверджено»), account clean.
+
+**Notes/decisions:** two edges knowingly left unverified. `ScanSheet.insertDocuments` reports
+per-document errors alongside the sheet, and `createScanSheet` does not parse them — every batch
+the panel sends is pre-checked (fresh waybills, none on another register), so a partial acceptance
+has no known trigger; if one ever surfaces, the adapter is where to look. And a register deleted
+*in the NP cabinet* would refuse panel deletion forever with the verbatim banner — the waybill
+dead-end's shape — but unlike waybills there is no tracking call to ask «is it gone»; accepted
+until it happens (the register is a piece of paper, not an order's state — worst case is a stale
+row on `/registers`).
 
 ## Deployment steps (not code)
 
-- [ ] `wrangler secret put NOVAPOSHTA_API_KEY` on `balier-admin-dev` (it is in
-      `apps/admin/.dev.vars` already, so local dev works today).
+- [x] `wrangler secret put NOVAPOSHTA_API_KEY` on `balier-admin-dev`. (Done by 2026-08-07 — NP-3/
+      NP-4 are deployed and working live, client-verified.)
 - [x] Migrations `0011` **and `0012`** applied **before** the admin deploy — the order screen reads
       the new columns on every request. (Both applied to the dev database 2026-08-07, ahead of any
       deploy of this code.)
 - [x] Sender settings filled in on `/settings` before the first waybill. (Dev: filled 2026-08-07
       through the form itself — sender city/warehouse currently point at **Київ, Відділення №1**
       as a working placeholder; correct them to the real handover branch before real shipments.)
-- [ ] **`balier-cron` redeploy, then one full sync** — needed *before* NP-4, and now also what
-      fills `np_warehouses.city_ref` country-wide (only Kyiv is backfilled in dev). Until a
-      settlement's branches have it, its orders show the «немає міста… синхронізація» blocker
-      instead of the create form.
+- [x] **`balier-cron` redeploy, then one full sync** — needed *before* NP-4, and now also what
+      fills `np_warehouses.city_ref` country-wide. (Done by 2026-08-07 — the NP-4 loop was
+      verified live: a cabinet deletion was detached by the tick.)
+- [x] Migration `0013` (`np_scan_sheets`) applied **before** any deploy of NP-5's code — the
+      `/registers` pages read it on every request. (Applied to the dev database 2026-08-07.)
 
 ## Open questions
 
