@@ -99,15 +99,16 @@ describe('carrierStatusIntent', () => {
     }
   });
 
-  it('detaches and alerts on deletion (2) — a cabinet-deleted waybill must not outlive its document', () => {
+  it('detaches silently on deletion (2) — a cabinet-deleted waybill must not outlive its document', () => {
     // Panel deletions clear our record before the sync could ever see code 2,
     // so seeing it means someone deleted the waybill in the NP cabinet — the
     // dead end found live on 2026-08-07, recorded in the plan's NP-4 table.
+    // No alert: the panel page showing the reverted order is notice enough.
     expect(carrierStatusIntent('2')).toEqual({
       move: null,
       detach: true,
       moneyTransfer: false,
-      alert: 'deleted',
+      alert: null,
       known: true,
     });
   });

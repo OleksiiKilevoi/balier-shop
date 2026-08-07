@@ -46,7 +46,7 @@ export function formatOrderMessage(heading: string, notification: OrderNotificat
  * `~/lib/novaposhta/tracking.ts` and this is just how a human hears about it.
  */
 export interface CarrierAlerts {
-  /** An unhappy (or cabinet-deleted) tracking code, first time it is seen. */
+  /** An unhappy tracking code, first time it is seen. */
   carrierAlert(input: {
     orderNumber: string;
     ttn: string;
@@ -57,8 +57,6 @@ export interface CarrierAlerts {
 }
 
 const CARRIER_ALERT_HEADINGS: Record<CarrierAlert, string> = {
-  deleted:
-    '⚠️ ТТН видалено в кабінеті Нової Пошти — запис у панелі знято, замовлення повернуто до попереднього статусу',
   not_found: '⚠️ Нова Пошта не знає номера ТТН',
   refused: '⚠️ Відмова від посилки',
   storage_ended: '⚠️ Термін зберігання посилки закінчується або закінчився',

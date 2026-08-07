@@ -176,9 +176,9 @@ async function syncNovaPoshta(env: Env): Promise<void> {
  * live waybill (see `listWaybillOrdersToTrack` for exactly which those are)
  * is asked about in one batched `TrackingDocument` call, and each answer is
  * applied in its own transaction by `applyCarrierStatus` — moves only ever
- * forward along `packed → shipped → delivered`, code 2 detaches a
- * cabinet-deleted waybill, every unhappy code is a Telegram alert and never
- * a transition, and an alert fires only the first tick its code appears.
+ * forward along `packed → shipped → delivered`, code 2 silently detaches a
+ * cabinet-deleted waybill, every other unhappy code is a Telegram alert and
+ * never a transition, and an alert fires only the first tick its code appears.
  *
  * The network call happens before any transaction opens, and one failed
  * order never stalls the rest — the next tick retries whatever this one

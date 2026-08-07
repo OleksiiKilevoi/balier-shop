@@ -61,7 +61,7 @@ describe('decideCarrierStatus', () => {
   it('detaches on code 2 — a cabinet-deleted waybill must not outlive its document', () => {
     const decision = decideCarrierStatus(order('packed', '1'), tracked('2'));
     expect(decision.detach).toBe(true);
-    expect(decision.alert).toBe('deleted');
+    expect(decision.alert).toBeNull();
     expect(decision.move).toBeNull();
     // The detach clears the status columns; writing them too would be absurd.
     expect(decision.recordStatus).toBe(false);

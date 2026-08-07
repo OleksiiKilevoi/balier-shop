@@ -59,7 +59,6 @@ export async function trackWaybills(
 
 /** The alerts NP-4 sends to Telegram. None of them moves an order forward. */
 export type CarrierAlert =
-  | 'deleted' // 2 — the waybill was deleted in the NP cabinet; see `detach`
   | 'not_found' // 3 — a mistyped or deleted waybill number
   | 'refused' // 102, 103, 108 — somebody declined the parcel
   | 'storage_ended' // 105 — the branch stopped holding it
@@ -96,7 +95,7 @@ export interface CarrierStatusIntent {
  * table is the intent, live driving in NP-4 is the confirmation.
  *
  *   1              created, parcel not handed over          stays `packed`
- *   2              deleted in the NP cabinet                 detach + alert
+ *   2              deleted in the NP cabinet                 detach, silent
  *   3              number not found                          alert
  *   4, 41, 5, 6,   in transit / arrived / with recipient     `shipped`
  *   7, 8, 12, 14,    for inspection (14 is NOT received)
@@ -137,7 +136,9 @@ export function carrierStatusIntent(statusCode: string): CarrierStatusIntent {
     };
   }
   if (code === '2') {
-    return { move: null, detach: true, moneyTransfer: false, alert: 'deleted', known: true };
+    // Silent by request: the detach itself is the whole handling — the panel
+    // page already shows the reverted status and the create-waybill form.
+    return { move: null, detach: true, moneyTransfer: false, alert: null, known: true };
   }
   const alert = ALERTS[code];
   if (alert) return { move: null, detach: false, moneyTransfer: false, alert, known: true };
