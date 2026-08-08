@@ -83,6 +83,13 @@ let email = '';
 let step: 'email' | 'code' = 'email';
 /** Minutes left on the lockout, so the message can name a number. */
 let retryAfterMinutes = 0;
+/**
+ * True when this render answers an `otp_send` POST — the moment the resend
+ * countdown starts. **Deliberately unconditional** within that intent: set
+ * whether or not a code actually went out, because a timer that only appeared
+ * for real sends would betray exactly what the neutral «надіслано» hides.
+ */
+let justSent = false;
 
 if (Astro.request.method === 'POST') {
   if (!env.ADMIN_SESSION_SECRET) {
@@ -144,6 +151,7 @@ if (Astro.request.method === 'POST') {
 
       message = 'otp_sent';
       step = 'code';
+      justSent = true;
     } else if (intent === 'otp_verify') {
       step = 'code';
 
@@ -279,11 +287,19 @@ const failed = message !== null && message !== 'otp_sent';
           </form>
 
           {/* A fresh code, same neutral answer. The throttle upstream decides
-              whether anything is actually sent. */}
+              whether anything is actually sent; the countdown the script draws
+              on this button is that throttle's cosmetic half — script-off, the
+              button stays active and the server swallows early asks silently. */}
           <form method="post" class="mt-3">
             <input type="hidden" name="intent" value="otp_send" />
             <input type="hidden" name="email" value={email} />
-            <button type="submit" class="admin-btn admin-btn-secondary w-full">
+            <button
+              type="submit"
+              id="otp-resend"
+              data-sent={justSent ? 'true' : undefined}
+              data-interval={OTP_RESEND_INTERVAL_SECONDS}
+              class="admin-btn admin-btn-secondary w-full"
+            >
               Надіслати новий код
             </button>
           </form>
@@ -297,4 +313,45 @@ const failed = message !== null && message !== 'otp_sent';
       </a>
     </p>
   </div>
+
+  <script>
+    /*
+     * The resend countdown — cosmetics over the server's 60-second throttle,
+     * never the throttle itself. It runs *unconditionally* after any send
+     * (`data-sent`, set for unknown addresses too), because a timer that only
+     * real sends produced would leak what the neutral answer hides. The send
+     * moment survives the full-page reload a failed code causes via
+     * sessionStorage; where storage is unavailable, the button simply stays
+     * active — the server swallows early asks either way.
+     */
+    const button = document.getElementById('otp-resend') as HTMLButtonElement | null;
+
+    if (button) {
+      const KEY = 'otp-sent-at';
+      const label = button.textContent!.trim();
+      const intervalMs = Number(button.dataset.interval ?? '60') * 1000;
+
+      let sentAt = 0;
+      try {
+        if (button.dataset.sent === 'true') sessionStorage.setItem(KEY, String(Date.now()));
+        sentAt = Number(sessionStorage.getItem(KEY) ?? '0');
+      } catch {
+        // Storage refused (locked-down browser): no countdown, active button.
+      }
+
+      const tick = () => {
+        const left = Math.ceil((sentAt + intervalMs - Date.now()) / 1000);
+        if (left > 0) {
+          button.disabled = true;
+          button.textContent = `${label} (${left})`;
+        } else {
+          button.disabled = false;
+          button.textContent = label;
+          clearInterval(timer);
+        }
+      };
+      const timer = setInterval(tick, 250);
+      tick();
+    }
+  </script>
 </AdminLayout>

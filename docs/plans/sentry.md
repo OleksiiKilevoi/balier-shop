@@ -76,9 +76,26 @@ with `console.error`/`warn`. Thanks to AsyncLocalStorage, a capture called from 
 
 - [ ] `createEmailNotifier` → `orderPaid` — `packages/lib/src/notify/email.ts:97` — customer
       email didn't send (captureException)
-- [ ] `createTelegramNotifier` → send — `packages/lib/src/notify/telegram.ts:100, 106` —
-      **Telegram alerts themselves failed**; Telegram is our alert channel, so when it is down
-      Sentry is the only place that shows it (captureException)
+- [ ] `sendTelegramMessage` — `packages/lib/src/notify/telegram.ts:100, 106` —
+      **Telegram sends themselves failed**; Telegram is our alert channel *and*, since
+      `792dc66`, the delivery channel for admin OTP login codes — when it is down Sentry is the
+      only place that shows it (captureException)
+
+**Admin OTP login via Telegram (`792dc66`):**
+
+- [ ] OTP dispatch — `apps/admin/src/pages/login/telegram.astro:140` — the
+      `issueOtp` + `sendTelegramMessage` chain runs off the response path with a bare
+      `.catch(() => {})`: on failure the operator sees «надіслано», no code ever arrives, and
+      today nothing is logged anywhere. The single most valuable capture in the feature —
+      `.catch((err) => Sentry.captureException(err))`
+- [ ] `recordAdminLogin` bookkeeping — `apps/admin/src/pages/login/telegram.astro:192` — same
+      bare `.catch(() => {})`; deliberately best-effort, but a silently failing DB write is
+      still worth one line (captureException, low priority)
+- [ ] *No capture needed* in `apps/admin/src/pages/telegram/webhook.ts` or
+      `packages/lib/src/db/queries/adminTelegram.ts`: the webhook deliberately lets a thrown
+      query escape as a 500 (Telegram retries), so the Phase 1 wrapper sees it — the route is
+      on the auth gate's allowlist, but the Sentry middleware runs regardless; the webhook's
+      best-effort reply goes through `sendTelegramMessage`, covered above
 
 **Storefront SSR:**
 

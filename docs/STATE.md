@@ -18,16 +18,16 @@
   `0015` (six columns on `admin_users`) is **applied to dev**. Driven end-to-end against
   `pnpm dev:admin` with real form bodies: 27 checks green, including webhook-without-secret → 401,
   group-chat `/start` ignored, attempts exhaustion, correct code → 303 with a working cookie, spent
-  code refused, unlink. Gate green, **334 tests**. **Uncommitted.**
+  code refused, unlink. Gate green, **334 tests**. **Pushed, deployed and client-verified live
+  (2026-08-08): webhook registered via `pnpm tg:webhook set` (had to happen after the deploy — the
+  first Start taps queued in Telegram until it was), the client linked their own chat and signed in
+  through `/login/telegram`.**
 - **Context:** the previous block's «uncommitted» NP review fix went out as `06cb31f`, on
   `origin/main`, auto-deployed by Workers Builds — the create-inspect-delete volume pass and the
   browser passes below remain untested. NP-1..NP-5 + `arrived` split live through `a5a192c`.
 - **In progress:** nothing. Migrations `0006`–`0015` are all applied to the **dev** database.
-- **Next step:** **commit + push** (auto-deploys `balier-admin-dev`; cron untouched), then
-  **`pnpm tg:webhook set`** — one webhook per bot, registered *after* the deploy so Telegram finds
-  the route — then the live pass: link your own Telegram in `/settings`, sign in via
-  `/login/telegram`, and check the OTP message lands in the private chat, not the managers' group.
-  Still owed from before: the NP **create-inspect-delete volume pass** on the dev key (the
+- **Next step:** back to what was owed before this feature: the NP **create-inspect-delete volume
+  pass** on the dev key (the
   volumetric fix is the one change whose wrongness costs money at the counter), the register flow
   with real parcels, and the browser passes — `/checkout`'s delivery step, `/categories`,
   `/settings`, `/users`, image upload preview, `/orders/new` card order. Then Phase 5.
@@ -184,6 +184,11 @@ cookie), migration `0015`, `PUBLIC_TELEGRAM_BOT` var, `pnpm tg:webhook` script. 
 the session secret, attempts counted in SQL, neutral answers on step one. Driven against dev with
 real form bodies — 27 checks, incl. the golden path via a planted code; disposable account
 removed after. Webhook deliberately not registered yet: the route deploys with the push.
+Post-verification same day: webhook registered (`pnpm tg:webhook set`, after the client's push),
+client linked and signed in live; then the resend button got a client-side 60 s countdown —
+drawn **unconditionally** after any send (sessionStorage-persisted across the reload a wrong code
+causes), because a timer only real sends produced would leak what «надіслано» hides. The server
+throttle stays the real fence. **The countdown is uncommitted.**
 
 **2026-08-07 (post-ship review of novaposhta.md + fixes).** Asked to re-check the whole NP build
 after it went live, since NP has no test API. Read every module end to end. One real bug:
