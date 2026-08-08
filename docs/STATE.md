@@ -188,7 +188,9 @@ Post-verification same day: webhook registered (`pnpm tg:webhook set`, after the
 client linked and signed in live; then the resend button got a client-side 60 s countdown —
 drawn **unconditionally** after any send (sessionStorage-persisted across the reload a wrong code
 causes), because a timer only real sends produced would leak what «надіслано» hides. The server
-throttle stays the real fence. **The countdown is uncommitted.**
+throttle stays the real fence; `admin-btn` also grew its first `:disabled` state (half-faded,
+`pointer-events: none` — silences every variant's hover at once) so the ticking button reads as
+inactive. **The countdown + disabled state are uncommitted.**
 
 **2026-08-07 (post-ship review of novaposhta.md + fixes).** Asked to re-check the whole NP build
 after it went live, since NP has no test API. Read every module end to end. One real bug:

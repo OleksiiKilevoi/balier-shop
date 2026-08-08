@@ -240,6 +240,15 @@
     background-color 0.15s ease,
     border-color 0.15s ease,
     color 0.15s ease;
+
+  /* On the base rather than per variant: half-faded and deaf to the pointer —
+     `pointer-events: none` is what silences every variant's `:hover` without
+     each of them having to remember a `:not(:disabled)` guard. First wearer:
+     the resend-code button on `/login/telegram` while its countdown runs. */
+  &:disabled {
+    opacity: 0.5;
+    pointer-events: none;
+  }
 }
 
 @utility admin-btn-primary {
