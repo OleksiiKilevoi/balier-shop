@@ -23,7 +23,11 @@ ADMIN_SESSION_SECRET=""
 # until Phase 5.
 MONOBANK_TOKEN=""
 
-# Telegram — the refund alert when a payment lands on a cancelled order.
+# Telegram — the refund alert when a payment lands on a cancelled order, and
+# the panel's Telegram sign-in (login codes + the /telegram/webhook handshake;
+# the webhook's secret_token is derived from this token, no extra secret).
+# The bot's public *username* is a var in wrangler.jsonc: PUBLIC_TELEGRAM_BOT.
+# Register the webhook once per environment: pnpm tg:webhook set <url>.
 TELEGRAM_BOT_TOKEN=""
 TELEGRAM_CHAT_ID=""
 

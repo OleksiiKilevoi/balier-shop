@@ -37,14 +37,16 @@ import { findActiveAdminById } from '@balier/lib/db/queries/adminUsers';
 export const LOGIN_PATH = '/login';
 
 /**
- * The routes that must answer without a session: the form itself (or nobody
- * could ever get one), sign-out (which only clears a cookie, and has to work
- * even when the session behind it has already lapsed), and `/media/**` — the
- * image previews the editor pages render. Media keys are content hashes from a
- * closed character set, and the same objects are public on the storefront
- * anyway, so an unauthenticated fetch here learns nothing.
+ * The routes that must answer without a session: the two sign-in forms (or
+ * nobody could ever get a session), sign-out (which only clears a cookie, and
+ * has to work even when the session behind it has already lapsed),
+ * `/telegram/webhook` — Telegram's deliveries, which cannot hold a session
+ * and carry their own `secret_token` authentication instead — and `/media/**`
+ * — the image previews the editor pages render. Media keys are content hashes
+ * from a closed character set, and the same objects are public on the
+ * storefront anyway, so an unauthenticated fetch here learns nothing.
  */
-const PUBLIC_PATHS = new Set<string>([LOGIN_PATH, '/logout']);
+const PUBLIC_PATHS = new Set<string>([LOGIN_PATH, '/login/telegram', '/logout', '/telegram/webhook']);
 const PUBLIC_PREFIXES = ['/media/'] as const;
 
 export const onRequest = defineMiddleware(async ({ url, cookies, locals }, next) => {

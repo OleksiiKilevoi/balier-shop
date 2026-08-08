@@ -9,6 +9,7 @@
  *   - `password.ts` — hashing, verification, and the email normalisation both
  *     sides of the lookup share.
  *   - `session.ts`  — minting and verifying the cookie the gate reads.
+ *   - `otp.ts`      — the Telegram sign-in's codes and the webhook secret.
  */
 
 export {
@@ -19,6 +20,19 @@ export {
   normalizeEmail,
   verifyPassword,
 } from './password';
+
+export {
+  OTP_MAX_ATTEMPTS,
+  OTP_RESEND_INTERVAL_SECONDS,
+  OTP_TTL_SECONDS,
+  TELEGRAM_LINK_TTL_SECONDS,
+  constantTimeEqual,
+  generateOtpCode,
+  generateTelegramLinkCode,
+  hashOtp,
+  telegramWebhookSecret,
+  verifyOtpHash,
+} from './otp';
 
 export {
   SESSION_COOKIE,

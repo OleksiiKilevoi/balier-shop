@@ -36,6 +36,15 @@ export interface AdminUserRecord {
   isActive: boolean;
   /** Always `null` here, and carried for the same reason as `isActive`. */
   archivedAt: Date | null;
+  /**
+   * The Telegram sign-in's account state, carried so `/settings` can render
+   * the «Вхід через Telegram» section from the row the gate already read.
+   * The *transient* half — the current code and its attempts — deliberately
+   * is not here; that lives in `./adminTelegram`, read only where it is used.
+   */
+  telegramChatId: string | null;
+  telegramLinkCode: string | null;
+  telegramLinkExpiresAt: Date | null;
 }
 
 /** The columns both login readers return. Written once so they cannot drift. */
@@ -48,6 +57,9 @@ const recordColumns = {
   sessionsValidFrom: adminUsers.sessionsValidFrom,
   isActive: adminUsers.isActive,
   archivedAt: adminUsers.archivedAt,
+  telegramChatId: adminUsers.telegramChatId,
+  telegramLinkCode: adminUsers.telegramLinkCode,
+  telegramLinkExpiresAt: adminUsers.telegramLinkExpiresAt,
 } as const;
 
 /**

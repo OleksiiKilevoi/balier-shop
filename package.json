@@ -23,6 +23,7 @@
     "media:ingest": "tsx scripts/ingest-images.ts",
     "media:push": "tsx scripts/media-push.ts",
     "np:sync": "tsx scripts/sync-novaposhta.ts",
+    "tg:webhook": "tsx scripts/telegram-webhook.ts",
     "cron:dev": "pnpm --filter @balier/cron run dev",
     "cron:deploy": "pnpm --filter @balier/cron run deploy"
   },

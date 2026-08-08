@@ -3,12 +3,15 @@ import { env } from 'cloudflare:workers';
 import AdminLayout from '~/layouts/AdminLayout.astro';
 import {
   SESSION_COOKIE,
+  TELEGRAM_LINK_TTL_SECONDS,
+  generateTelegramLinkCode,
   hashPassword,
   sessionCookieOptions,
   signSession,
   verifyPassword,
 } from '@balier/lib/auth';
 import { createDb } from '@balier/lib/db';
+import { setTelegramLinkCode, unlinkTelegram } from '@balier/lib/db/queries/adminTelegram';
 import {
   revokeAdminSessions,
   updateAdminPasswordHash,
@@ -34,6 +37,7 @@ import {
   ADMIN_PASSWORD_HINT,
   ADMIN_SETTINGS_FAILURES,
   ADMIN_SETTINGS_MESSAGES,
+  ADMIN_TELEGRAM_HINT,
   formatAdminDateTime,
   npErrorText,
 } from '@balier/lib/i18n/admin';
@@ -95,6 +99,13 @@ const me = Astro.locals.adminUser;
 if (!me) return Astro.redirect('/login', 303);
 
 const db = createDb(env.DATABASE_URL);
+
+/**
+ * The bot's public username, for the `t.me/…?start=` deep link. Blank (or an
+ * `@` typo, stripped here) means the Telegram section says so and offers no
+ * button — a link to nowhere is worse than no link.
+ */
+const telegramBot = (env.PUBLIC_TELEGRAM_BOT ?? '').trim().replace(/^@/, '');
 
 /** Set when a POST is answered in place rather than by a redirect. */
 let banner: AdminSettingsMessage | null = null;
@@ -249,6 +260,28 @@ if (Astro.request.method === 'POST') {
         return Astro.redirect(`${SELF_URL}?m=np_updated`, 303);
       }
     }
+  } else if (intent === 'telegram_link') {
+    /*
+     * Minting a link needs no field and no confirmation: the code is useless
+     * until *this* operator opens it in their own Telegram, and a new one
+     * simply replaces the old. Refused only when no bot is configured, since
+     * a link to nowhere is not a smaller version of the feature.
+     */
+    if (!telegramBot) {
+      banner = 'bad_request';
+    } else {
+      await setTelegramLinkCode(
+        db,
+        me.id,
+        generateTelegramLinkCode(),
+        new Date(Date.now() + TELEGRAM_LINK_TTL_SECONDS * 1000),
+      );
+      return Astro.redirect(`${SELF_URL}?m=telegram_link_created`, 303);
+    }
+  } else if (intent === 'telegram_unlink') {
+    // Also drops any pending link and any live login code — see the query.
+    await unlinkTelegram(db, me.id);
+    return Astro.redirect(`${SELF_URL}?m=telegram_unlinked`, 303);
   } else if (intent === 'password') {
     const budgetKey = `admin-password:${me.id}`;
     const limit = await peekRateLimit(
@@ -393,6 +426,21 @@ const npFailed = (name: string) =>
    than through `formatPrice`: this is a value to be edited, and a grouping
    separator in an input is a thing to delete before typing. */
 const codLimitHryvnias = Math.round(codLimit.kopiykas / 100);
+
+/* --- the Telegram section's three states ----------------------------------
+   Linked beats pending: a row can hold both a chat and a stale link code, and
+   the chat is the fact that matters. The pending link renders only while it
+   would still work, so the operator never copies a dead one. */
+const telegramLinked = me.telegramChatId !== null;
+const telegramPendingLink =
+  !telegramLinked &&
+  me.telegramLinkCode !== null &&
+  me.telegramLinkExpiresAt !== null &&
+  me.telegramLinkExpiresAt.getTime() > Date.now();
+const telegramDeepLink =
+  telegramPendingLink && telegramBot
+    ? `https://t.me/${telegramBot}?start=${me.telegramLinkCode}`
+    : null;
 
 const messageParam = Astro.url.searchParams.get('m');
 const redirectMessage =
@@ -813,6 +861,57 @@ const formFailed = (intent: string) => banner !== null && failedIntent === inten
         </section>
       )
     }
+
+    {/* The Telegram sign-in — your own account, whatever the role. */}
+    <section class="admin-card mt-6 p-5">
+      <h2 class="text-fg text-base font-semibold">Вхід через Telegram</h2>
+      <p class="text-fg-muted mt-1 text-sm">{ADMIN_TELEGRAM_HINT}</p>
+
+      {
+        telegramLinked ? (
+          <div class="mt-4">
+            <p class="text-fg text-sm">✅ Telegram прив’язано до цього акаунта.</p>
+            <form method="post" action={SELF_URL} data-form="telegram-unlink" class="mt-3">
+              <input type="hidden" name="intent" value="telegram_unlink" />
+              <button type="submit" class="admin-btn admin-btn-secondary">Відв’язати</button>
+            </form>
+          </div>
+        ) : !telegramBot ? (
+          <p class="text-fg-muted mt-4 text-sm">
+            Бот ще не налаштовано на цьому Worker (PUBLIC_TELEGRAM_BOT) — зверніться до
+            розробника.
+          </p>
+        ) : (
+          <div class="mt-4">
+            {telegramDeepLink && (
+              <div class="border-border mb-4 border-b pb-4">
+                <p class="text-fg text-sm">
+                  Відкрийте посилання на пристрої з Telegram і натисніть <strong>Start</strong>:
+                </p>
+                <a
+                  href={telegramDeepLink}
+                  target="_blank"
+                  rel="noopener"
+                  class="text-fg mt-2 block font-mono text-sm break-all underline underline-offset-2"
+                >
+                  {telegramDeepLink}
+                </a>
+                <p class="text-fg-subtle mt-2 text-xs">
+                  Діє до {formatAdminDateTime(me.telegramLinkExpiresAt!)}. Коли бот відповість,
+                  що акаунт прив’язано — оновіть цю сторінку.
+                </p>
+              </div>
+            )}
+            <form method="post" action={SELF_URL} data-form="telegram-link">
+              <input type="hidden" name="intent" value="telegram_link" />
+              <button type="submit" class="admin-btn admin-btn-secondary">
+                {telegramDeepLink ? 'Створити нове посилання' : 'Прив’язати Telegram'}
+              </button>
+            </form>
+          </div>
+        )
+      }
+    </section>
 
     {/* Everyone's own password, whatever their role. */}
     <section class="admin-card mt-6 p-5">

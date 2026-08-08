@@ -42,6 +42,25 @@ export const adminLoginSchema = z.object({
 
 export type AdminLogin = z.infer<typeof adminLoginSchema>;
 
+/**
+ * `/login/telegram`, both steps — the same deliberate looseness as
+ * `adminLoginSchema`, and for the same reason: these are shape checks, and a
+ * rejection must not say anything a wrong code would not. The code's `\d{6}`
+ * is not policy, just the one shape `generateOtpCode` ever produces; anything
+ * else can only be wrong, and fails with the same message.
+ */
+export const adminOtpRequestSchema = z.object({
+  email: z.string().trim().min(1).max(320),
+});
+
+export const adminOtpVerifySchema = z.object({
+  email: z.string().trim().min(1).max(320),
+  code: z
+    .string()
+    .trim()
+    .refine((value) => /^\d{6}$/.test(value)),
+});
+
 /* ------------------------------------------------------------- the waybill */
 
 /**

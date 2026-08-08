@@ -20,6 +20,7 @@ import {
 import { ADMIN_AUTH_MESSAGES, type AdminAuthMessage } from '@balier/lib/i18n/admin';
 import { peekRateLimit, recordRateLimitHit } from '@balier/lib/rateLimit';
 import { adminLoginSchema, PASSWORD_MAX_LENGTH } from '@balier/lib/validation/admin';
+import { safeNext } from '~/lib/safeNext';
 
 /**
  * The panel's front door — one of the two routes the gate lets through
@@ -51,24 +52,11 @@ const LOGIN_WINDOW_SECONDS = 900;
 /** Never cache a page that is either a login form or a fresh `Set-Cookie`. */
 Astro.response.headers.set('cache-control', 'no-store');
 
-/**
- * Where to go after signing in. Anything that is not a path inside the panel is
- * discarded rather than followed: `next` arrives in a URL, so an unchecked
- * value here is an open redirect — a link to our own login page that lands the
- * operator, freshly authenticated, on someone else's.
- */
-function safeNext(value: string | null): string {
-  if (!value) return '/';
-
-  // Every path on this hostname is inside the panel now, so "a local path" is
-  // the whole test: one leading `/`, not two — `//host` and `/\host` are
-  // protocol-relative URLs to another host rather than local paths at all.
-  if (!value.startsWith('/') || value.startsWith('//') || value.startsWith('/\\')) return '/';
-
-  return value;
-}
-
+/* Where to go after signing in — `~/lib/safeNext`, shared with `/login/telegram`. */
 const next = safeNext(Astro.url.searchParams.get('next'));
+
+/** The other door, with the destination carried along. */
+const telegramLoginHref = `/login/telegram${next !== '/' ? `?next=${encodeURIComponent(next)}` : ''}`;
 
 // Already signed in? Then this page is a dead end — send them where they were
 // going. The gate cannot do this for us: it lets this route through untouched.
@@ -221,5 +209,14 @@ if (Astro.request.method === 'POST') {
 
       <button type="submit" class="admin-btn admin-btn-primary w-full">Увійти</button>
     </form>
+
+    <p class="mt-6 text-center text-sm">
+      <a
+        href={telegramLoginHref}
+        class="text-fg-muted hover:text-fg underline underline-offset-2"
+      >
+        Увійти через Telegram
+      </a>
+    </p>
   </div>
 </AdminLayout>

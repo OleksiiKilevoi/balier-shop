@@ -578,6 +578,30 @@ export const adminUsers = pgTable('admin_users', {
    */
   archivedAt: timestamp('archived_at', { withTimezone: true }),
   lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
+  /**
+   * The private chat the bot may send login codes to, set only by the
+   * `/telegram/webhook` handshake — never typed in. Unique because a chat that
+   * answers codes for two accounts would let either sign in as the other.
+   * NULL means Telegram sign-in is simply not offered for this account.
+   */
+  telegramChatId: text('telegram_chat_id').unique(),
+  /**
+   * One pending deep-link handshake (`t.me/<bot>?start=<code>`), minted on
+   * `/settings` and consumed by the webhook. A new link replaces the old one —
+   * an account has one pending invitation, not a collection.
+   */
+  telegramLinkCode: text('telegram_link_code').unique(),
+  telegramLinkExpiresAt: timestamp('telegram_link_expires_at', { withTimezone: true }),
+  /**
+   * The current sign-in code, HMAC'd under `ADMIN_SESSION_SECRET` — never the
+   * six digits themselves, so a database read alone cannot sign anybody in.
+   * `otpAttempts` is counted *in SQL* on every guess (`claimOtpAttempt`), which
+   * is what makes five attempts mean five: checking in JS and writing after
+   * would let parallel guesses share one attempt.
+   */
+  otpHash: text('otp_hash'),
+  otpExpiresAt: timestamp('otp_expires_at', { withTimezone: true }),
+  otpAttempts: integer('otp_attempts').notNull().default(0),
   createdAt,
   updatedAt,
 });

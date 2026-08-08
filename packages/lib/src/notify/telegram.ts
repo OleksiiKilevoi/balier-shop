@@ -77,25 +77,43 @@ export function formatCarrierAlert(input: {
   ].join('\n');
 }
 
+/**
+ * One Bot API `sendMessage`, best-effort: never throws, reports success as a
+ * boolean and failure to the log. Shared by the notifier below (which ignores
+ * the boolean — an outage must not fail order placement) and the Telegram
+ * sign-in (login codes and webhook replies, which also carry on either way).
+ */
+export async function sendTelegramMessage(
+  botToken: string,
+  chatId: string,
+  text: string,
+): Promise<boolean> {
+  try {
+    const response = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, text }),
+    });
+
+    if (!response.ok) {
+      const body = await response.text().catch(() => '');
+      console.error(`Telegram sendMessage failed: ${response.status} ${body}`);
+      return false;
+    }
+
+    return true;
+  } catch (err) {
+    console.error('Telegram sendMessage threw', err);
+    return false;
+  }
+}
+
 export function createTelegramNotifier(
   botToken: string,
   chatId: string,
 ): NotifierPort & CarrierAlerts {
   async function send(text: string): Promise<void> {
-    try {
-      const response = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ chat_id: chatId, text }),
-      });
-
-      if (!response.ok) {
-        const body = await response.text().catch(() => '');
-        console.error(`Telegram sendMessage failed: ${response.status} ${body}`);
-      }
-    } catch (err) {
-      console.error('Telegram sendMessage threw', err);
-    }
+    await sendTelegramMessage(botToken, chatId, text);
   }
 
   return {

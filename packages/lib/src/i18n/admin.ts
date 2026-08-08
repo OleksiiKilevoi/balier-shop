@@ -284,6 +284,11 @@ export const ADMIN_SETTINGS_MESSAGES = {
   invalid_np_dimensions: `Розміри місця — цілі сантиметри, від 1 до ${NP_SEAT_CM_MAX}.`,
   np_dimensions_incomplete: 'Вкажіть усі три розміри місця — або залиште всі три порожніми.',
   invalid_np_description: 'Опис вантажу задовгий.',
+
+  /* The Telegram sign-in — your own account, whatever the role. */
+  telegram_link_created:
+    'Посилання створено. Відкрийте його на пристрої з Telegram і натисніть Start.',
+  telegram_unlinked: 'Telegram відв’язано. Вхід за кодом для цього акаунта вимкнено.',
 } as const;
 
 export type AdminSettingsMessage = keyof typeof ADMIN_SETTINGS_MESSAGES;
@@ -425,6 +430,36 @@ export const ADMIN_COD_LIMIT_HINT =
  */
 export const ADMIN_NP_SENDER_HINT =
   'Дані відправника для створення ТТН. Відправник підтягується з акаунта, відділення обирається пошуком.';
+
+/**
+ * The «Вхід через Telegram» section of `/settings`. Says what linking buys and
+ * where the codes will arrive, because a button called «Створити посилання»
+ * explains neither.
+ */
+export const ADMIN_TELEGRAM_HINT =
+  'Прив’яжіть особистий Telegram — і зможете входити в панель за одноразовим кодом замість пароля. Коди надходитимуть від бота у ваш особистий чат.';
+
+/* ------------------------------------------------- what the bot itself says */
+
+/**
+ * Sent into the operator's private chat by the webhook and the login page —
+ * the bot's entire vocabulary. Kept here with the rest of the panel's
+ * Ukrainian rather than inline in the route, same rule as every screen.
+ */
+export function telegramLinkedText(email: string): string {
+  return `✅ Telegram прив’язано до ${email}. Тепер на сторінці входу в панель можна отримувати сюди одноразові коди.`;
+}
+
+/** One sentence for «unknown», «expired» and «account gone» alike — a stranger probing codes learns nothing from the wording. */
+export const TELEGRAM_LINK_INVALID_TEXT =
+  'Посилання недійсне або протерміноване. Створіть нове в панелі: Налаштування → Вхід через Telegram.';
+
+export const TELEGRAM_CHAT_TAKEN_TEXT =
+  'Цей Telegram уже прив’язано до іншого облікового запису панелі. Спершу відв’яжіть його там.';
+
+export function telegramOtpText(code: string): string {
+  return `Код входу в панель: ${code}\nДіє 5 хвилин. Якщо це не ви — нічого не робіть, без коду ніхто не ввійде.`;
+}
 
 /* ------------------------------------------------------------- the catalog */
 
@@ -609,6 +644,13 @@ export const ADMIN_AUTH_MESSAGES = {
   session_expired: 'Сесія завершилася. Увійдіть ще раз.',
   signed_out: 'Ви вийшли з панелі.',
   unavailable: 'Вхід тимчасово недоступний. Зверніться до розробника.',
+
+  /* `/login/telegram`. `otp_sent` is worded conditionally on purpose — the
+     same sentence whether a code went out or the address matched nothing, so
+     the form cannot be used to list the admins (`invalid_credentials`'s rule,
+     applied to the other door). */
+  otp_sent: 'Якщо такий акаунт існує і Telegram прив’язано — код надіслано. Він діє 5 хвилин.',
+  invalid_code: 'Невірний або протермінований код. Можна запросити новий.',
 } as const;
 
 export type AdminAuthMessage = keyof typeof ADMIN_AUTH_MESSAGES;

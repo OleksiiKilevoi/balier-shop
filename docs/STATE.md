@@ -4,40 +4,38 @@
 
 ## 📍 CURRENT STATE (overwrite this block; keep tight)
 
-- **Last done:** **full review of the whole novaposhta.md build + fixes** (2026-08-07, after
-  everything shipped). The review found one real bug that survived every live drive:
-  `OptionsSeat.volumetricVolume` was sent as the /4000 volumetric-*weight* formula (kg) while the
-  API documents the field in **м³** — `InternetDocument.save` accepts the wrong value silently, and
-  it inflates the declared volume 250× (a 30×20×10 box declared as 1.5 м³ ≈ a 375 kg parcel if NP
-  prices off the field). Fixed to true cubic meters (`/1_000_000`); seat weights now also sum
-  exactly to `Weight` (remainder grams go to the first seats); the recipient's middle name now
-  reaches `Counterparty.save` (was silently dropped — `WaybillRecipient` grew `middleName`);
-  `ttn_exists`/`waybill_invalid_state`/`no_waybill` render red like other refusals; stale comments
-  fixed (`status.ts` stuck-order-alert claim, `ports.ts` COD-refusal claim); the plan now records
-  the code-2 alert removal (`435e6cf`), the volumetric finding, and a third knowingly-unverified
-  edge (deleting a waybill while its order is on a register). 315 tests, gate green.
-  **Uncommitted.**
-- **Context (client-verified, all deployed):** the whole of `docs/plans/novaposhta.md` — NP-1..NP-5
-  plus the `arrived` split (`packed → shipped → arrived → delivered`, migration `0014`) — is
-  committed through `a5a192c`, deployed and live; `balier-cron` was redeployed with it (verified:
-  deploy 15:58:44 UTC, two seconds after the commit). `NOVAPOSHTA_API_KEY` is on the admin Worker,
-  dev-DB admin accounts are `admin@balier.com` + `manager@balier.com` (both on).
-- **In progress:** nothing. The gate is green (`pnpm check && pnpm build`, **315 tests**).
-  Migrations `0006`–`0014` are all applied to the **dev** database.
-- **Next step:** **commit + push** (Workers Builds auto-deploys `balier-admin-dev`; no cron
-  redeploy needed — the fix touches the waybill payload, which only the admin Worker builds).
-  Then one **create-inspect-delete pass** on the dev key: create a waybill through the panel, open
-  the NP cabinet and compare the shown volume/tariff against the same parcel keyed in by hand,
-  delete it — the volumetric fix is the one change whose wrongness costs a customer money at the
-  counter. Then, in the browser on `admin.balier.mlosko.dev`: the register flow once with real
-  parcels (create → print at the branch), and the still-standing browser passes — `/checkout`'s
-  delivery step, `/categories`, `/settings`, `/users` — plus the flows curl cannot drive (image
-  upload preview, `/orders/new` card order). Then Phase 5.
+- **Last done:** **Telegram OTP sign-in for the panel** (2026-08-08) — the second door next to the
+  password form, on the bot already in env (`@balierua_bot`). Linking is a deep-link handshake:
+  `/settings` grew a «Вхід через Telegram» section that mints `t.me/…?start=<code>` (15 min, one
+  pending per account), and a new webhook route `/telegram/webhook` (on the gate's allowlist,
+  authenticated by a `secret_token` *derived from the bot token* — no new secret) consumes the
+  `/start` and binds the private chat to `admin_users.telegram_chat_id` (unique). `/login/telegram`
+  then does email → 6-digit code into that chat → the same session cookie `/login` mints. Codes:
+  HMAC under `ADMIN_SESSION_SECRET`, 5 min TTL, **5 attempts counted in SQL**
+  (`claimOtpAttempt`'s `UPDATE … RETURNING`, so parallel guesses cannot share an attempt),
+  one use, 60 s resend throttle, `admin-otp:<ip>` KV budget 10/15 min, and step one always answers
+  «код надіслано» — the login-form anti-enumeration rule applied to the other door. Migration
+  `0015` (six columns on `admin_users`) is **applied to dev**. Driven end-to-end against
+  `pnpm dev:admin` with real form bodies: 27 checks green, including webhook-without-secret → 401,
+  group-chat `/start` ignored, attempts exhaustion, correct code → 303 with a working cookie, spent
+  code refused, unlink. Gate green, **334 tests**. **Uncommitted.**
+- **Context:** the previous block's «uncommitted» NP review fix went out as `06cb31f`, on
+  `origin/main`, auto-deployed by Workers Builds — the create-inspect-delete volume pass and the
+  browser passes below remain untested. NP-1..NP-5 + `arrived` split live through `a5a192c`.
+- **In progress:** nothing. Migrations `0006`–`0015` are all applied to the **dev** database.
+- **Next step:** **commit + push** (auto-deploys `balier-admin-dev`; cron untouched), then
+  **`pnpm tg:webhook set`** — one webhook per bot, registered *after* the deploy so Telegram finds
+  the route — then the live pass: link your own Telegram in `/settings`, sign in via
+  `/login/telegram`, and check the OTP message lands in the private chat, not the managers' group.
+  Still owed from before: the NP **create-inspect-delete volume pass** on the dev key (the
+  volumetric fix is the one change whose wrongness costs money at the counter), the register flow
+  with real parcels, and the browser passes — `/checkout`'s delivery step, `/categories`,
+  `/settings`, `/users`, image upload preview, `/orders/new` card order. Then Phase 5.
   **A production deploy needs `pnpm db:migrate` against that database and one
-  `pnpm admin:user role <email> admin`**; migrations `0008`/`0009` must land before that deploy —
-  the gate reads `sessions_valid_from`/`archived_at` on every request, so code ahead of schema is
-  a panel nobody can open. The dev sender settings still point at **Київ, Відділення №1** as a
-  placeholder handover branch.
+  `pnpm admin:user role <email> admin`**; migrations `0008`/`0009` (and now `0015`) must land
+  before that deploy — the gate reads `sessions_valid_from`/`archived_at` on every request, so code
+  ahead of schema is a panel nobody can open. The dev sender settings still point at **Київ,
+  Відділення №1** as a placeholder handover branch.
 - **Loose end, unresolved (2026-08-06):** `qa-live@balier.test` was once found switched on with
   `sessions_valid_from` stamped, unexplained by any command of that session; set back to disabled
   and written down rather than tidied away.
@@ -178,6 +176,14 @@
 > Empty by design. Everything through the end of Phase 4 was moved to **`docs/history.md`** on
 > 2026-08-05, not rewritten — this file is read in full at every session start and had reached
 > 852 lines. New session entries go here; move a phase's entries across once the phase is done.
+
+**2026-08-08 (Telegram OTP sign-in).** Built the second login door on the existing bot: deep-link
+handshake (`/settings` section → `t.me/…?start=` → new `/telegram/webhook` route, `secret_token`
+derived from the bot token so nothing new to provision), `/login/telegram` (email → code → same
+cookie), migration `0015`, `PUBLIC_TELEGRAM_BOT` var, `pnpm tg:webhook` script. Codes hashed under
+the session secret, attempts counted in SQL, neutral answers on step one. Driven against dev with
+real form bodies — 27 checks, incl. the golden path via a planted code; disposable account
+removed after. Webhook deliberately not registered yet: the route deploys with the push.
 
 **2026-08-07 (post-ship review of novaposhta.md + fixes).** Asked to re-check the whole NP build
 after it went live, since NP has no test API. Read every module end to end. One real bug:

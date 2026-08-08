@@ -53,6 +53,11 @@
     "SITE_ORIGIN": "https://balier.mlosko.dev",
     // `from` address for order-confirmation emails, same value as the site
     // Worker's — the customer cannot tell which Worker created their order.
-    "ORDER_EMAIL_FROM": "noreply@mail.mlosko.dev"
+    "ORDER_EMAIL_FROM": "noreply@mail.mlosko.dev",
+    // The bot's public username — `/settings` builds the account-linking deep
+    // link (`t.me/<bot>?start=…`) from it. A username is public by nature,
+    // hence a var; the *token* stays a secret. Blank would just switch the
+    // Telegram sign-in section into its "not configured" state.
+    "PUBLIC_TELEGRAM_BOT": "balierua_bot"
   }
 }

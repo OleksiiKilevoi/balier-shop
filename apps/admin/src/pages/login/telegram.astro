@@ -1,0 +1,300 @@
+---
+import { env } from 'cloudflare:workers';
+import AdminLayout from '~/layouts/AdminLayout.astro';
+import {
+  OTP_RESEND_INTERVAL_SECONDS,
+  OTP_TTL_SECONDS,
+  SESSION_COOKIE,
+  generateOtpCode,
+  hashOtp,
+  sessionCookieOptions,
+  signSession,
+  verifyOtpHash,
+  verifySession,
+} from '@balier/lib/auth';
+import { createDb } from '@balier/lib/db';
+import {
+  claimOtpAttempt,
+  clearOtp,
+  findOtpAccountByEmail,
+  issueOtp,
+} from '@balier/lib/db/queries/adminTelegram';
+import { recordAdminLogin } from '@balier/lib/db/queries/adminUsers';
+import {
+  ADMIN_AUTH_MESSAGES,
+  telegramOtpText,
+  type AdminAuthMessage,
+} from '@balier/lib/i18n/admin';
+import { sendTelegramMessage } from '@balier/lib/notify/telegram';
+import { peekRateLimit, recordRateLimitHit } from '@balier/lib/rateLimit';
+import { adminOtpRequestSchema, adminOtpVerifySchema } from '@balier/lib/validation/admin';
+import { safeNext } from '~/lib/safeNext';
+
+/**
+ * The panel's other door: email → a six-digit code in the operator's own
+ * Telegram chat → the same session cookie `/login` mints. No password
+ * involved; what stands in for it is possession of a chat that was bound to
+ * the account by the `/settings` handshake.
+ *
+ * Two steps, one page, both plain forms in `/login`'s mould — no script, POST
+ * to self, 303 out on success. A failed step re-renders in place exactly as a
+ * wrong password does, so a refresh may re-POST; for the send step that is
+ * harmless by construction (the resend throttle answers it with silence).
+ *
+ * THE ANSWER IS ALWAYS «НАДІСЛАНО»
+ * Step one answers with the same sentence whether a code went out, the
+ * address matched nothing, or the account never linked Telegram —
+ * `invalid_credentials`' anti-enumeration rule, applied here. The real work
+ * happens off the response path (`waitUntil`) for the same reason: a reply
+ * whose *timing* says "that one exists" would undo what the wording hides.
+ */
+export const prerender = false;
+
+/**
+ * One budget for both steps, spent differently: every send-shaped POST costs
+ * (each one may fire a Telegram message — the form must not be anyone's free
+ * notification cannon), but only a *wrong* code costs, so a person slow to
+ * retype six digits is never locked out by their own successes. Ten per
+ * quarter-hour is invisible to a person; five wrong codes already kill a code
+ * on their own (`claimOtpAttempt`), so the budget is the outer fence.
+ */
+const OTP_LIMIT = 10;
+const OTP_WINDOW_SECONDS = 900;
+
+/** Never cache a page that is either a login form or a fresh `Set-Cookie`. */
+Astro.response.headers.set('cache-control', 'no-store');
+
+const next = safeNext(Astro.url.searchParams.get('next'));
+
+/** Back to the password form, destination in hand. */
+const passwordLoginHref = `/login${next !== '/' ? `?next=${encodeURIComponent(next)}` : ''}`;
+
+// Already signed in? Same as `/login`: this page is a dead end, move along.
+const existing = await verifySession(
+  env.ADMIN_SESSION_SECRET,
+  Astro.cookies.get(SESSION_COOKIE)?.value,
+);
+if (existing && Astro.request.method === 'GET') return Astro.redirect(next, 303);
+
+let message: AdminAuthMessage | null = null;
+/** Carried between the steps in a hidden field; kept on a failed POST too. */
+let email = '';
+/** Which of the two forms to render. `code` after any send, however it went. */
+let step: 'email' | 'code' = 'email';
+/** Minutes left on the lockout, so the message can name a number. */
+let retryAfterMinutes = 0;
+
+if (Astro.request.method === 'POST') {
+  if (!env.ADMIN_SESSION_SECRET) {
+    // Nothing can be hashed or signed without it. Say so plainly — the gate
+    // would refuse the session this page minted anyway.
+    message = 'unavailable';
+  } else {
+    const budgetKey = `admin-otp:${Astro.request.headers.get('cf-connecting-ip') ?? 'unknown'}`;
+    const limit = await peekRateLimit(env.RATE_LIMIT, budgetKey, OTP_LIMIT, OTP_WINDOW_SECONDS);
+
+    const form = await Astro.request.formData();
+    const intent = String(form.get('intent') ?? '');
+
+    if (!limit.allowed) {
+      message = 'too_many_attempts';
+      retryAfterMinutes = Math.max(1, Math.ceil(limit.retryAfterSeconds / 60));
+    } else if (intent === 'otp_send') {
+      // Spent before anything is looked up: the cost is the *ask*, not the
+      // outcome — an outcome-priced budget would price the two answers apart.
+      await recordRateLimitHit(env.RATE_LIMIT, budgetKey, OTP_WINDOW_SECONDS);
+
+      const parsed = adminOtpRequestSchema.safeParse(Object.fromEntries(form));
+      // A body only a hand-made request can produce still gets the neutral
+      // answer — it will fail step two the same as any wrong guess.
+      email = parsed.success ? parsed.data.email : '';
+
+      const db = createDb(env.DATABASE_URL);
+      const account = email === '' ? null : await findOtpAccountByEmail(db, email);
+
+      if (account?.telegramChatId) {
+        /*
+         * The resend throttle, derived rather than stored: a code's send
+         * moment is its expiry minus its lifetime. Inside the window the
+         * form answers «надіслано» and sends nothing — true enough, since
+         * the code it refers to is still on its way or already there.
+         */
+        const sentAt = account.otpExpiresAt
+          ? account.otpExpiresAt.getTime() - OTP_TTL_SECONDS * 1000
+          : 0;
+
+        if (Date.now() - sentAt >= OTP_RESEND_INTERVAL_SECONDS * 1000) {
+          const code = generateOtpCode();
+          const otpHash = await hashOtp(env.ADMIN_SESSION_SECRET, account.id, code);
+          const chatId = account.telegramChatId;
+
+          /*
+           * Off the response path — see the header. The row is written before
+           * the message goes out, so a code that arrives is always one the
+           * database can honour; the reverse order could hand somebody six
+           * digits the verify step has never heard of.
+           */
+          const dispatch = (async () => {
+            await issueOtp(db, account.id, otpHash, new Date(Date.now() + OTP_TTL_SECONDS * 1000));
+            await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, telegramOtpText(code));
+          })().catch(() => {});
+          Astro.locals.cfContext?.waitUntil?.(dispatch);
+        }
+      }
+
+      message = 'otp_sent';
+      step = 'code';
+    } else if (intent === 'otp_verify') {
+      step = 'code';
+
+      /** A wrong answer, and the only verify outcome that costs budget. */
+      const reject = async () => {
+        await recordRateLimitHit(env.RATE_LIMIT, budgetKey, OTP_WINDOW_SECONDS);
+        message = 'invalid_code';
+      };
+
+      const parsed = adminOtpVerifySchema.safeParse(Object.fromEntries(form));
+
+      if (!parsed.success) {
+        email = String(form.get('email') ?? '').slice(0, 320);
+        await reject();
+      } else {
+        email = parsed.data.email;
+
+        const db = createDb(env.DATABASE_URL);
+        const account = await findOtpAccountByEmail(db, email);
+        // One claimed attempt per guess, counted in SQL — `claimOtpAttempt`
+        // is what makes five mean five even for parallel guesses.
+        const storedHash = account ? await claimOtpAttempt(db, account.id) : null;
+
+        if (
+          !account ||
+          !storedHash ||
+          !(await verifyOtpHash(env.ADMIN_SESSION_SECRET, account.id, parsed.data.code, storedHash))
+        ) {
+          await reject();
+        } else {
+          // Spent before the redirect: a code that signed somebody in is dead.
+          await clearOtp(db, account.id);
+
+          const token = await signSession(env.ADMIN_SESSION_SECRET, {
+            sub: account.id,
+            email: account.email,
+          });
+
+          if (!token) {
+            message = 'unavailable';
+          } else {
+            Astro.cookies.set(SESSION_COOKIE, token, sessionCookieOptions());
+
+            // Bookkeeping, never a reason to delay or fail a login — same as
+            // `/login`.
+            Astro.locals.cfContext?.waitUntil?.(recordAdminLogin(db, account.id).catch(() => {}));
+
+            return Astro.redirect(next, 303);
+          }
+        }
+      }
+    }
+  }
+}
+
+/** `otp_sent` is information, not a refusal — the only grey message here. */
+const failed = message !== null && message !== 'otp_sent';
+---
+
+<AdminLayout title="Вхід через Telegram" bare>
+  <div class="mx-auto w-full max-w-sm py-8 sm:py-16">
+    <h1 class="text-fg text-center text-2xl font-semibold">Вхід через Telegram</h1>
+    <p class="text-fg-muted mt-2 text-center text-sm">
+      {
+        step === 'email'
+          ? 'Введіть пошту — бот надішле одноразовий код у прив’язаний Telegram.'
+          : 'Введіть код із повідомлення бота.'
+      }
+    </p>
+
+    {
+      message && (
+        <p
+          class:list={[
+            'admin-card mt-6 px-4 py-3 text-sm',
+            failed ? 'admin-tone-negative' : 'admin-tone-neutral',
+          ]}
+          role={failed ? 'alert' : 'status'}
+        >
+          {ADMIN_AUTH_MESSAGES[message]}
+          {retryAfterMinutes > 0 && ` Спробуйте за ${retryAfterMinutes} хв.`}
+        </p>
+      )
+    }
+
+    {
+      step === 'email' ? (
+        <form method="post" class="mt-6 space-y-4">
+          <input type="hidden" name="intent" value="otp_send" />
+          <div>
+            <label for="otp-email" class="text-fg mb-1.5 block text-sm font-medium">Пошта</label>
+            <input
+              id="otp-email"
+              name="email"
+              type="email"
+              value={email}
+              required
+              autocomplete="username"
+              autocapitalize="none"
+              spellcheck="false"
+              maxlength={320}
+              class="admin-field"
+            />
+          </div>
+          <button type="submit" class="admin-btn admin-btn-primary w-full">Надіслати код</button>
+        </form>
+      ) : (
+        <>
+          <form method="post" class="mt-6 space-y-4">
+            <input type="hidden" name="intent" value="otp_verify" />
+            <input type="hidden" name="email" value={email} />
+            <div>
+              <label for="otp-code" class="text-fg mb-1.5 block text-sm font-medium">
+                Код із Telegram
+              </label>
+              {/* `one-time-code` lets a phone offer the six digits it can see;
+                  `text` + numeric keypad for the same reasons every numeric
+                  field in the panel is. */}
+              <input
+                id="otp-code"
+                name="code"
+                type="text"
+                inputmode="numeric"
+                autocomplete="one-time-code"
+                required
+                maxlength={6}
+                pattern="\d{6}"
+                autofocus
+                class="admin-field text-center tracking-[0.5em]"
+              />
+            </div>
+            <button type="submit" class="admin-btn admin-btn-primary w-full">Увійти</button>
+          </form>
+
+          {/* A fresh code, same neutral answer. The throttle upstream decides
+              whether anything is actually sent. */}
+          <form method="post" class="mt-3">
+            <input type="hidden" name="intent" value="otp_send" />
+            <input type="hidden" name="email" value={email} />
+            <button type="submit" class="admin-btn admin-btn-secondary w-full">
+              Надіслати новий код
+            </button>
+          </form>
+        </>
+      )
+    }
+
+    <p class="mt-6 text-center text-sm">
+      <a href={passwordLoginHref} class="text-fg-muted hover:text-fg underline underline-offset-2">
+        Увійти з паролем
+      </a>
+    </p>
+  </div>
+</AdminLayout>
