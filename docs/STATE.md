@@ -4,24 +4,20 @@
 
 ## 📍 CURRENT STATE (overwrite this block; keep tight)
 
-- **Last done:** **Telegram OTP sign-in for the panel** (2026-08-08) — the second door next to the
-  password form, on the bot already in env (`@balierua_bot`). Linking is a deep-link handshake:
-  `/settings` grew a «Вхід через Telegram» section that mints `t.me/…?start=<code>` (15 min, one
-  pending per account), and a new webhook route `/telegram/webhook` (on the gate's allowlist,
-  authenticated by a `secret_token` *derived from the bot token* — no new secret) consumes the
-  `/start` and binds the private chat to `admin_users.telegram_chat_id` (unique). `/login/telegram`
-  then does email → 6-digit code into that chat → the same session cookie `/login` mints. Codes:
-  HMAC under `ADMIN_SESSION_SECRET`, 5 min TTL, **5 attempts counted in SQL**
-  (`claimOtpAttempt`'s `UPDATE … RETURNING`, so parallel guesses cannot share an attempt),
-  one use, 60 s resend throttle, `admin-otp:<ip>` KV budget 10/15 min, and step one always answers
-  «код надіслано» — the login-form anti-enumeration rule applied to the other door. Migration
-  `0015` (six columns on `admin_users`) is **applied to dev**. Driven end-to-end against
-  `pnpm dev:admin` with real form bodies: 27 checks green, including webhook-without-secret → 401,
-  group-chat `/start` ignored, attempts exhaustion, correct code → 303 with a working cookie, spent
-  code refused, unlink. Gate green, **334 tests**. **Pushed, deployed and client-verified live
-  (2026-08-08): webhook registered via `pnpm tg:webhook set` (had to happen after the deploy — the
-  first Start taps queued in Telegram until it was), the client linked their own chat and signed in
-  through `/login/telegram`.**
+- **Last done:** **PRG fix for `/login/telegram`'s refresh bugs** (2026-08-08, same day the OTP
+  door shipped and was client-verified — that build's full story is in the session log). The code
+  step was a POST render, so F5 re-posted `otp_send`: the resend countdown reset on every refresh
+  and, once the 60 s throttle window had passed, a refresh sent a *real* second code (and every
+  refresh spent IP budget). Now **every POST answers 303 back to the page**: the step lives in an
+  `admin_otp_email` cookie (httpOnly, `path=/login/telegram`, 5 min = the code's own TTL, set
+  **unconditionally** on any send so its presence can't say which addresses exist), messages travel
+  in `?message=` exactly like `/login`'s `signed_out`, and the countdown start is stamped into
+  sessionStorage on the *submit* of either send form (`data-sent` is gone), so it survives the
+  redirect and any number of reloads. New `otp_change` intent («Змінити пошту») clears the cookie —
+  without it a typo'd address would hold the code form for its five minutes. Gate green; **30
+  checks against `pnpm dev:admin` with real form bodies** (send → refresh → wrong code → change
+  email → `?next=` round-trip; note for future drivers: hand-made POSTs must send an `Origin`
+  header or Astro's CSRF check answers 403). **Uncommitted.**
 - **Context:** the previous block's «uncommitted» NP review fix went out as `06cb31f`, on
   `origin/main`, auto-deployed by Workers Builds — the create-inspect-delete volume pass and the
   browser passes below remain untested. NP-1..NP-5 + `arrived` split live through `a5a192c`.
@@ -176,6 +172,17 @@
 > Empty by design. Everything through the end of Phase 4 was moved to **`docs/history.md`** on
 > 2026-08-05, not rewritten — this file is read in full at every session start and had reached
 > 852 lines. New session entries go here; move a phase's entries across once the phase is done.
+
+**2026-08-08 (OTP refresh bugs → PRG).** Two client-found bugs, one root: the code step rendered
+straight in the `otp_send` POST response, so F5 re-posted it — countdown reset every time
+(`data-sent` re-stamped sessionStorage), and past the 60 s window a real second code went out,
+each refresh spending IP budget besides. `/login/telegram` now answers every POST with a 303 to
+itself: step carried by a scoped 5-min `admin_otp_email` cookie (set unconditionally — the
+anti-enumeration rule extended to the cookie), messages via `?message=` in `/login`'s mould
+(`too_many_attempts` re-peeks the budget on GET, so the minutes count down and the message dies
+with the window), countdown stamped on the *submit* of either send form. New `otp_change` intent
+(«Змінити пошту») clears the cookie, the escape a typo'd address now needs. Gate green, 30 checks
+with real form bodies (server-driven POSTs need `Origin` or Astro's CSRF 403s). Uncommitted.
 
 **2026-08-08 (Telegram OTP sign-in).** Built the second login door on the existing bot: deep-link
 handshake (`/settings` section → `t.me/…?start=` → new `/telegram/webhook` route, `secret_token`

@@ -36,17 +36,21 @@ import { safeNext } from '~/lib/safeNext';
  * involved; what stands in for it is possession of a chat that was bound to
  * the account by the `/settings` handshake.
  *
- * Two steps, one page, both plain forms in `/login`'s mould — no script, POST
- * to self, 303 out on success. A failed step re-renders in place exactly as a
- * wrong password does, so a refresh may re-POST; for the send step that is
- * harmless by construction (the resend throttle answers it with silence).
+ * Two steps, one page, both plain forms in `/login`'s mould — and **every POST
+ * answers with a 303 back to this page** (PRG), success and failure alike, so
+ * a refresh on either step is always a harmless GET: it cannot re-ask for a
+ * code, re-spend a guess attempt, or reset the resend countdown. Which step a
+ * GET renders lives in a short cookie (`admin_otp_email`, the code's own
+ * lifetime); what it says arrives in `?message=`, the same channel `/login`
+ * uses for `signed_out`.
  *
  * THE ANSWER IS ALWAYS «НАДІСЛАНО»
- * Step one answers with the same sentence whether a code went out, the
- * address matched nothing, or the account never linked Telegram —
- * `invalid_credentials`' anti-enumeration rule, applied here. The real work
- * happens off the response path (`waitUntil`) for the same reason: a reply
- * whose *timing* says "that one exists" would undo what the wording hides.
+ * Step one answers with the same sentence — and sets the step cookie —
+ * whether a code went out, the address matched nothing, or the account never
+ * linked Telegram: `invalid_credentials`' anti-enumeration rule, applied
+ * here. The real work happens off the response path (`waitUntil`) for the
+ * same reason: a reply whose *timing* says "that one exists" would undo what
+ * the wording hides.
  */
 export const prerender = false;
 
@@ -61,6 +65,23 @@ export const prerender = false;
 const OTP_LIMIT = 10;
 const OTP_WINDOW_SECONDS = 900;
 
+/**
+ * The step marker a redirect cannot carry in a form body: its presence means
+ * "render the code form", its value fills the verify form's hidden email.
+ * Scoped to this page and given the code's own lifetime, so an abandoned
+ * attempt falls back to the email form on its own. Not `__Host-` — that
+ * prefix forbids a `path`, and this cookie has no business travelling with
+ * every panel request.
+ */
+const EMAIL_COOKIE = 'admin_otp_email';
+const emailCookieOptions = {
+  path: '/login/telegram',
+  httpOnly: true,
+  secure: true,
+  sameSite: 'lax',
+  maxAge: OTP_TTL_SECONDS,
+} as const;
+
 /** Never cache a page that is either a login form or a fresh `Set-Cookie`. */
 Astro.response.headers.set('cache-control', 'no-store');
 
@@ -69,6 +90,15 @@ const next = safeNext(Astro.url.searchParams.get('next'));
 /** Back to the password form, destination in hand. */
 const passwordLoginHref = `/login${next !== '/' ? `?next=${encodeURIComponent(next)}` : ''}`;
 
+/** Where every POST bounces back to, `?next=` preserved, message on board. */
+const selfHref = (message?: AdminAuthMessage) => {
+  const params = new URLSearchParams();
+  if (next !== '/') params.set('next', next);
+  if (message) params.set('message', message);
+  const qs = params.toString();
+  return `/login/telegram${qs ? `?${qs}` : ''}`;
+};
+
 // Already signed in? Same as `/login`: this page is a dead end, move along.
 const existing = await verifySession(
   env.ADMIN_SESSION_SECRET,
@@ -76,135 +106,145 @@ const existing = await verifySession(
 );
 if (existing && Astro.request.method === 'GET') return Astro.redirect(next, 303);
 
-let message: AdminAuthMessage | null = null;
-/** Carried between the steps in a hidden field; kept on a failed POST too. */
-let email = '';
-/** Which of the two forms to render. `code` after any send, however it went. */
-let step: 'email' | 'code' = 'email';
-/** Minutes left on the lockout, so the message can name a number. */
-let retryAfterMinutes = 0;
-/**
- * True when this render answers an `otp_send` POST — the moment the resend
- * countdown starts. **Deliberately unconditional** within that intent: set
- * whether or not a code actually went out, because a timer that only appeared
- * for real sends would betray exactly what the neutral «надіслано» hides.
- */
-let justSent = false;
+const budgetKey = `admin-otp:${Astro.request.headers.get('cf-connecting-ip') ?? 'unknown'}`;
 
 if (Astro.request.method === 'POST') {
   if (!env.ADMIN_SESSION_SECRET) {
     // Nothing can be hashed or signed without it. Say so plainly — the gate
     // would refuse the session this page minted anyway.
-    message = 'unavailable';
-  } else {
-    const budgetKey = `admin-otp:${Astro.request.headers.get('cf-connecting-ip') ?? 'unknown'}`;
-    const limit = await peekRateLimit(env.RATE_LIMIT, budgetKey, OTP_LIMIT, OTP_WINDOW_SECONDS);
+    return Astro.redirect(selfHref('unavailable'), 303);
+  }
 
-    const form = await Astro.request.formData();
-    const intent = String(form.get('intent') ?? '');
+  const form = await Astro.request.formData();
+  const intent = String(form.get('intent') ?? '');
 
-    if (!limit.allowed) {
-      message = 'too_many_attempts';
-      retryAfterMinutes = Math.max(1, Math.ceil(limit.retryAfterSeconds / 60));
-    } else if (intent === 'otp_send') {
-      // Spent before anything is looked up: the cost is the *ask*, not the
-      // outcome — an outcome-priced budget would price the two answers apart.
-      await recordRateLimitHit(env.RATE_LIMIT, budgetKey, OTP_WINDOW_SECONDS);
+  if (intent === 'otp_change') {
+    // A typo'd address must not hold the code form for the cookie's five
+    // minutes. Costs nothing, so it sits above the budget check — being
+    // locked out of *sending* is no reason to be locked onto a step.
+    Astro.cookies.delete(EMAIL_COOKIE, { path: emailCookieOptions.path });
+    return Astro.redirect(selfHref(), 303);
+  }
 
-      const parsed = adminOtpRequestSchema.safeParse(Object.fromEntries(form));
-      // A body only a hand-made request can produce still gets the neutral
-      // answer — it will fail step two the same as any wrong guess.
-      email = parsed.success ? parsed.data.email : '';
+  const limit = await peekRateLimit(env.RATE_LIMIT, budgetKey, OTP_LIMIT, OTP_WINDOW_SECONDS);
+  if (!limit.allowed) return Astro.redirect(selfHref('too_many_attempts'), 303);
 
-      const db = createDb(env.DATABASE_URL);
-      const account = email === '' ? null : await findOtpAccountByEmail(db, email);
+  if (intent === 'otp_send') {
+    // Spent before anything is looked up: the cost is the *ask*, not the
+    // outcome — an outcome-priced budget would price the two answers apart.
+    await recordRateLimitHit(env.RATE_LIMIT, budgetKey, OTP_WINDOW_SECONDS);
 
-      if (account?.telegramChatId) {
+    const parsed = adminOtpRequestSchema.safeParse(Object.fromEntries(form));
+    // A body only a hand-made request can produce still gets the neutral
+    // answer — it will fail step two the same as any wrong guess.
+    const email = parsed.success ? parsed.data.email : '';
+
+    const db = createDb(env.DATABASE_URL);
+    const account = email === '' ? null : await findOtpAccountByEmail(db, email);
+
+    if (account?.telegramChatId) {
+      /*
+       * The resend throttle, derived rather than stored: a code's send
+       * moment is its expiry minus its lifetime. Inside the window the
+       * form answers «надіслано» and sends nothing — true enough, since
+       * the code it refers to is still on its way or already there.
+       */
+      const sentAt = account.otpExpiresAt
+        ? account.otpExpiresAt.getTime() - OTP_TTL_SECONDS * 1000
+        : 0;
+
+      if (Date.now() - sentAt >= OTP_RESEND_INTERVAL_SECONDS * 1000) {
+        const code = generateOtpCode();
+        const otpHash = await hashOtp(env.ADMIN_SESSION_SECRET, account.id, code);
+        const chatId = account.telegramChatId;
+
         /*
-         * The resend throttle, derived rather than stored: a code's send
-         * moment is its expiry minus its lifetime. Inside the window the
-         * form answers «надіслано» and sends nothing — true enough, since
-         * the code it refers to is still on its way or already there.
+         * Off the response path — see the header. The row is written before
+         * the message goes out, so a code that arrives is always one the
+         * database can honour; the reverse order could hand somebody six
+         * digits the verify step has never heard of.
          */
-        const sentAt = account.otpExpiresAt
-          ? account.otpExpiresAt.getTime() - OTP_TTL_SECONDS * 1000
-          : 0;
-
-        if (Date.now() - sentAt >= OTP_RESEND_INTERVAL_SECONDS * 1000) {
-          const code = generateOtpCode();
-          const otpHash = await hashOtp(env.ADMIN_SESSION_SECRET, account.id, code);
-          const chatId = account.telegramChatId;
-
-          /*
-           * Off the response path — see the header. The row is written before
-           * the message goes out, so a code that arrives is always one the
-           * database can honour; the reverse order could hand somebody six
-           * digits the verify step has never heard of.
-           */
-          const dispatch = (async () => {
-            await issueOtp(db, account.id, otpHash, new Date(Date.now() + OTP_TTL_SECONDS * 1000));
-            await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, telegramOtpText(code));
-          })().catch(() => {});
-          Astro.locals.cfContext?.waitUntil?.(dispatch);
-        }
-      }
-
-      message = 'otp_sent';
-      step = 'code';
-      justSent = true;
-    } else if (intent === 'otp_verify') {
-      step = 'code';
-
-      /** A wrong answer, and the only verify outcome that costs budget. */
-      const reject = async () => {
-        await recordRateLimitHit(env.RATE_LIMIT, budgetKey, OTP_WINDOW_SECONDS);
-        message = 'invalid_code';
-      };
-
-      const parsed = adminOtpVerifySchema.safeParse(Object.fromEntries(form));
-
-      if (!parsed.success) {
-        email = String(form.get('email') ?? '').slice(0, 320);
-        await reject();
-      } else {
-        email = parsed.data.email;
-
-        const db = createDb(env.DATABASE_URL);
-        const account = await findOtpAccountByEmail(db, email);
-        // One claimed attempt per guess, counted in SQL — `claimOtpAttempt`
-        // is what makes five mean five even for parallel guesses.
-        const storedHash = account ? await claimOtpAttempt(db, account.id) : null;
-
-        if (
-          !account ||
-          !storedHash ||
-          !(await verifyOtpHash(env.ADMIN_SESSION_SECRET, account.id, parsed.data.code, storedHash))
-        ) {
-          await reject();
-        } else {
-          // Spent before the redirect: a code that signed somebody in is dead.
-          await clearOtp(db, account.id);
-
-          const token = await signSession(env.ADMIN_SESSION_SECRET, {
-            sub: account.id,
-            email: account.email,
-          });
-
-          if (!token) {
-            message = 'unavailable';
-          } else {
-            Astro.cookies.set(SESSION_COOKIE, token, sessionCookieOptions());
-
-            // Bookkeeping, never a reason to delay or fail a login — same as
-            // `/login`.
-            Astro.locals.cfContext?.waitUntil?.(recordAdminLogin(db, account.id).catch(() => {}));
-
-            return Astro.redirect(next, 303);
-          }
-        }
+        const dispatch = (async () => {
+          await issueOtp(db, account.id, otpHash, new Date(Date.now() + OTP_TTL_SECONDS * 1000));
+          await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, telegramOtpText(code));
+        })().catch(() => {});
+        Astro.locals.cfContext?.waitUntil?.(dispatch);
       }
     }
+
+    // Unconditional, like the message it travels with: a cookie only real
+    // sends produced would betray exactly what «надіслано» hides.
+    Astro.cookies.set(EMAIL_COOKIE, email, emailCookieOptions);
+    return Astro.redirect(selfHref('otp_sent'), 303);
   }
+
+  if (intent === 'otp_verify') {
+    /** A wrong answer, and the only verify outcome that costs budget. */
+    const reject = async () => {
+      await recordRateLimitHit(env.RATE_LIMIT, budgetKey, OTP_WINDOW_SECONDS);
+      return Astro.redirect(selfHref('invalid_code'), 303);
+    };
+
+    const parsed = adminOtpVerifySchema.safeParse(Object.fromEntries(form));
+    if (!parsed.success) return reject();
+
+    const db = createDb(env.DATABASE_URL);
+    const account = await findOtpAccountByEmail(db, parsed.data.email);
+    // One claimed attempt per guess, counted in SQL — `claimOtpAttempt`
+    // is what makes five mean five even for parallel guesses.
+    const storedHash = account ? await claimOtpAttempt(db, account.id) : null;
+
+    if (
+      !account ||
+      !storedHash ||
+      !(await verifyOtpHash(env.ADMIN_SESSION_SECRET, account.id, parsed.data.code, storedHash))
+    ) {
+      return reject();
+    }
+
+    // Spent before the redirect: a code that signed somebody in is dead.
+    await clearOtp(db, account.id);
+
+    const token = await signSession(env.ADMIN_SESSION_SECRET, {
+      sub: account.id,
+      email: account.email,
+    });
+    if (!token) return Astro.redirect(selfHref('unavailable'), 303);
+
+    Astro.cookies.set(SESSION_COOKIE, token, sessionCookieOptions());
+    Astro.cookies.delete(EMAIL_COOKIE, { path: emailCookieOptions.path });
+
+    // Bookkeeping, never a reason to delay or fail a login — same as `/login`.
+    Astro.locals.cfContext?.waitUntil?.(recordAdminLogin(db, account.id).catch(() => {}));
+
+    return Astro.redirect(next, 303);
+  }
+
+  // An intent no form on this page renders: nothing to do, nothing to say.
+  return Astro.redirect(selfHref(), 303);
+}
+
+/* From here down only GETs render — every POST above returned a redirect. */
+
+const pendingEmail = Astro.cookies.get(EMAIL_COOKIE)?.value;
+/** Which of the two forms to render. `code` after any send, however it went. */
+const step: 'email' | 'code' = pendingEmail !== undefined ? 'code' : 'email';
+/** Fills the verify form's hidden field, the same job `/login` gives `email`. */
+const email = pendingEmail ?? '';
+
+const queryMessage = Astro.url.searchParams.get('message');
+let message: AdminAuthMessage | null =
+  queryMessage && queryMessage in ADMIN_AUTH_MESSAGES ? (queryMessage as AdminAuthMessage) : null;
+
+/** Minutes left on the lockout, so the message can name a number. */
+let retryAfterMinutes = 0;
+if (message === 'too_many_attempts') {
+  // The number belongs to *now*, not to the POST that minted the URL — a
+  // refresh must count down, and once the window has passed the message goes
+  // with it rather than warning about a lockout that no longer exists.
+  const limit = await peekRateLimit(env.RATE_LIMIT, budgetKey, OTP_LIMIT, OTP_WINDOW_SECONDS);
+  if (limit.allowed) message = null;
+  else retryAfterMinutes = Math.max(1, Math.ceil(limit.retryAfterSeconds / 60));
 }
 
 /** `otp_sent` is information, not a refusal — the only grey message here. */
@@ -239,7 +279,7 @@ const failed = message !== null && message !== 'otp_sent';
 
     {
       step === 'email' ? (
-        <form method="post" class="mt-6 space-y-4">
+        <form method="post" class="mt-6 space-y-4" data-otp-send>
           <input type="hidden" name="intent" value="otp_send" />
           <div>
             <label for="otp-email" class="text-fg mb-1.5 block text-sm font-medium">Пошта</label>
@@ -290,17 +330,28 @@ const failed = message !== null && message !== 'otp_sent';
               whether anything is actually sent; the countdown the script draws
               on this button is that throttle's cosmetic half — script-off, the
               button stays active and the server swallows early asks silently. */}
-          <form method="post" class="mt-3">
+          <form method="post" class="mt-3" data-otp-send>
             <input type="hidden" name="intent" value="otp_send" />
             <input type="hidden" name="email" value={email} />
             <button
               type="submit"
               id="otp-resend"
-              data-sent={justSent ? 'true' : undefined}
               data-interval={OTP_RESEND_INTERVAL_SECONDS}
               class="admin-btn admin-btn-secondary w-full"
             >
               Надіслати новий код
+            </button>
+          </form>
+
+          {/* The way off a mistyped address — without it the step cookie holds
+              this form up for its full five minutes. */}
+          <form method="post" class="mt-4 text-center">
+            <input type="hidden" name="intent" value="otp_change" />
+            <button
+              type="submit"
+              class="text-fg-muted hover:text-fg text-sm underline underline-offset-2"
+            >
+              Змінити пошту
             </button>
           </form>
         </>
@@ -317,26 +368,37 @@ const failed = message !== null && message !== 'otp_sent';
   <script>
     /*
      * The resend countdown — cosmetics over the server's 60-second throttle,
-     * never the throttle itself. It runs *unconditionally* after any send
-     * (`data-sent`, set for unknown addresses too), because a timer that only
-     * real sends produced would leak what the neutral answer hides. The send
-     * moment survives the full-page reload a failed code causes via
-     * sessionStorage; where storage is unavailable, the button simply stays
-     * active — the server swallows early asks either way.
+     * never the throttle itself. Its start is stamped into sessionStorage the
+     * moment either send-shaped form is *submitted* — unconditionally, before
+     * any outcome is known, because a timer that only real sends produced
+     * would leak what the neutral «надіслано» hides — so it survives the 303
+     * that answers the POST and any number of reloads after it. Where storage
+     * is unavailable, the button simply stays active — the server swallows
+     * early asks either way.
      */
+    const KEY = 'otp-sent-at';
+
+    for (const form of document.querySelectorAll<HTMLFormElement>('form[data-otp-send]')) {
+      form.addEventListener('submit', () => {
+        try {
+          sessionStorage.setItem(KEY, String(Date.now()));
+        } catch {
+          // Storage refused (locked-down browser): no countdown, active button.
+        }
+      });
+    }
+
     const button = document.getElementById('otp-resend') as HTMLButtonElement | null;
 
     if (button) {
-      const KEY = 'otp-sent-at';
       const label = button.textContent!.trim();
       const intervalMs = Number(button.dataset.interval ?? '60') * 1000;
 
       let sentAt = 0;
       try {
-        if (button.dataset.sent === 'true') sessionStorage.setItem(KEY, String(Date.now()));
         sentAt = Number(sessionStorage.getItem(KEY) ?? '0');
       } catch {
-        // Storage refused (locked-down browser): no countdown, active button.
+        // Same locked-down browser as above.
       }
 
       const tick = () => {
