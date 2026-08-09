@@ -58,6 +58,11 @@
     // link (`t.me/<bot>?start=…`) from it. A username is public by nature,
     // hence a var; the *token* stays a secret. Blank would just switch the
     // Telegram sign-in section into its "not configured" state.
-    "PUBLIC_TELEGRAM_BOT": "balierua_bot"
+    "PUBLIC_TELEGRAM_BOT": "balierua_bot",
+    // Sentry (`docs/plans/sentry.md`) — a DSN is a public project identifier,
+    // not a secret. Same single project as the site and cron Workers; the
+    // wrapper in `src/middleware.ts` tags events `worker:admin`.
+    "SENTRY_DSN": "https://10cc802695139cc28dd32cf305de6f34@o4504565189378049.ingest.us.sentry.io/4511881341370368",
+    "SENTRY_ENVIRONMENT": "development"
   }
 }

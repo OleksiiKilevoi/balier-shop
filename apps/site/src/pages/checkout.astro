@@ -7,6 +7,7 @@
 // suggestions below need `env` too, so restoring Turnstile only has to add
 // `PUBLIC_TURNSTILE_SITE_KEY` back, not the import.)
 import { env } from 'cloudflare:workers';
+import * as Sentry from '@sentry/cloudflare';
 import BaseLayout from '~/layouts/BaseLayout.astro';
 import Container from '~/components/Container.astro';
 import Breadcrumbs from '~/components/Breadcrumbs.astro';
@@ -39,6 +40,7 @@ try {
   );
 } catch (error) {
   console.error('Settlement suggestions unavailable:', error);
+  Sentry.captureException(error);
 }
 
 const inputClass =

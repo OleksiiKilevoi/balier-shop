@@ -1,3 +1,4 @@
+import * as Sentry from '@sentry/cloudflare';
 import { eq, sql } from 'drizzle-orm';
 import type { TxDb } from '../db';
 import { lockCheckoutVariants } from '../db/queries/cart';
@@ -290,7 +291,9 @@ export async function createOrder(
     // `validitySeconds`, so a failed removal narrows the window, not safety.
     if (createdInvoiceId) {
       await deps.payment.removeInvoice(createdInvoiceId).catch((err) => {
+        // A live payment link with no order behind it (`sentry.md`).
         console.error(`Failed to remove Monobank invoice ${createdInvoiceId}`, err);
+        Sentry.captureException(err);
       });
     }
 

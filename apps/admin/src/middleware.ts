@@ -1,6 +1,7 @@
-import { defineMiddleware } from 'astro:middleware';
+import { defineMiddleware, sequence } from 'astro:middleware';
 import type { AstroCookies } from 'astro';
 import { env } from 'cloudflare:workers';
+import * as Sentry from '@sentry/cloudflare';
 import {
   SESSION_COOKIE,
   sessionCookieOptions,
@@ -49,7 +50,32 @@ export const LOGIN_PATH = '/login';
 const PUBLIC_PATHS = new Set<string>([LOGIN_PATH, '/login/telegram', '/logout', '/telegram/webhook']);
 const PUBLIC_PREFIXES = ['/media/'] as const;
 
-export const onRequest = defineMiddleware(async ({ url, cookies, locals }, next) => {
+/**
+ * Ahead of the gate on purpose, so it also sees the routes the gate lets
+ * through without a session (`/login`, `/telegram/webhook` — whose deliberate
+ * 500-on-thrown-query is exactly what Sentry must catch). Captured errors are
+ * **rethrown**, never swallowed (`docs/plans/sentry.md`); options are built
+ * per request from `env` — no module-scope state (hard rule 4).
+ */
+const sentry = defineMiddleware((context, next) => {
+  return Sentry.wrapRequestHandler(
+    {
+      options: {
+        dsn: env.SENTRY_DSN,
+        environment: env.SENTRY_ENVIRONMENT,
+        // Errors only — no performance tracing.
+        tracesSampleRate: 0,
+        // One Sentry project for all three Workers; this tag tells them apart.
+        initialScope: { tags: { worker: 'admin' } },
+      },
+      request: context.request,
+      context: context.locals.cfContext,
+    },
+    () => next(),
+  );
+});
+
+const gate = defineMiddleware(async ({ url, cookies, locals }, next) => {
   const pathname = url.pathname;
   if (PUBLIC_PATHS.has(pathname) || PUBLIC_PREFIXES.some((p) => pathname.startsWith(p))) {
     return next();
@@ -86,6 +112,8 @@ export const onRequest = defineMiddleware(async ({ url, cookies, locals }, next)
   locals.adminUser = user;
   return next();
 });
+
+export const onRequest = sequence(sentry, gate);
 
 /**
  * Land on the form, with the address the operator was trying to reach carried

@@ -1,3 +1,4 @@
+import * as Sentry from '@sentry/cloudflare';
 import { and, eq, inArray, lt, sql } from 'drizzle-orm';
 import { createDb, createTxDb } from '@balier/lib/db';
 import { listWaybillOrdersToTrack } from '@balier/lib/db/queries/orders';
@@ -22,20 +23,32 @@ import { confirmPayment } from '@balier/lib/orders/confirmPayment';
  *
  * Deploy: pnpm cron:deploy
  * Dev:    pnpm cron:dev, then hit the printed `__scheduled` URL with a cron= param.
+ *
+ * The jobs are awaited rather than handed to `ctx.waitUntil` — a rejection
+ * inside a waitUntil promise never reaches the Sentry wrapper (or the
+ * invocation's own failure status), it only dies in the runtime's logs. The
+ * lifetime is the same either way; only the error path moved. With two jobs
+ * on one trigger, `allSettled` keeps one job's failure from hiding the
+ * other's run, and the first rejection is rethrown so the wrapper reports it.
  */
-export default {
-  async scheduled(event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+const handler = {
+  async scheduled(event: ScheduledController, env: Env): Promise<void> {
     switch (event.cron) {
       // Every 15 minutes — release reservations for orders that were never
       // paid, and follow every live waybill's carrier status (NP-4).
-      case '*/15 * * * *':
-        ctx.waitUntil(releaseExpiredReservations(env));
-        ctx.waitUntil(trackWaybillStatuses(env));
+      case '*/15 * * * *': {
+        const results = await Promise.allSettled([
+          releaseExpiredReservations(env),
+          trackWaybillStatuses(env),
+        ]);
+        const failed = results.find((r) => r.status === 'rejected');
+        if (failed) throw failed.reason;
         break;
+      }
 
       // 04:00 UTC daily — refresh the Nova Poshta settlement/warehouse cache.
       case '0 4 * * *':
-        ctx.waitUntil(syncNovaPoshta(env));
+        await syncNovaPoshta(env);
         break;
 
       default:
@@ -43,6 +56,23 @@ export default {
     }
   },
 } satisfies ExportedHandler<Env>;
+
+export default Sentry.withSentry(
+  (env: Env) => ({
+    dsn: env.SENTRY_DSN,
+    environment: env.SENTRY_ENVIRONMENT,
+    // Stamped per deploy by `deploy.mjs` (`--var SENTRY_RELEASE:<sha>`) and
+    // absent on a bare `wrangler deploy`. Unlike the Astro apps, whose maps
+    // match by injected debug IDs, a wrangler bundle's maps match by release —
+    // no release, no readable stack traces, everything else still works.
+    release: env.SENTRY_RELEASE,
+    // Errors only — no performance tracing.
+    tracesSampleRate: 0,
+    // One Sentry project for all three Workers; this tag tells them apart.
+    initialScope: { tags: { worker: 'cron' } },
+  }),
+  handler,
+);
 
 /**
  * A 30-minute reservation TTL is meaningless without this: a card checkout
@@ -149,6 +179,10 @@ async function reconcileAwaitingPayment(
         // webhook or operator) and the money landed anyway — same alert the
         // webhook route raises: a person has to refund.
         console.error(`Reconciliation: payment received for cancelled order ${row.orderNumber}`);
+        Sentry.captureMessage(
+          `Reconciliation: payment received for cancelled order ${row.orderNumber} — manual refund owed`,
+          'error',
+        );
         await notifier.paymentAfterCancellation({ order: result.order, items: result.items });
       }
       // 'unchanged' (created/processing/hold): the invoice is still live —
@@ -157,6 +191,7 @@ async function reconcileAwaitingPayment(
       // One unreachable invoice must not stall the rest of the sweep; the
       // order stays `awaiting_payment` and the next sweep retries it.
       console.error(`Reconciliation failed for invoice ${row.invoiceId}`, err);
+      Sentry.captureException(err);
     }
   }
 }
@@ -212,6 +247,10 @@ async function trackWaybillStatuses(env: Env): Promise<void> {
             `Unknown NP status code ${status.statusCode} for order ${row.orderNumber}: ` +
               `${status.statusText}`,
           );
+          Sentry.captureMessage(
+            `Unknown NP status code ${status.statusCode}: ${status.statusText}`,
+            'warning',
+          );
         }
         if (decision.move) {
           console.log(`Order ${row.orderNumber} → ${decision.move} (NP code ${status.statusCode})`);
@@ -230,6 +269,7 @@ async function trackWaybillStatuses(env: Env): Promise<void> {
       } catch (err) {
         // One failed order must not stall the sweep; the next tick retries it.
         console.error(`Carrier status apply failed for order ${row.orderNumber}`, err);
+        Sentry.captureException(err);
       }
     }
   } finally {

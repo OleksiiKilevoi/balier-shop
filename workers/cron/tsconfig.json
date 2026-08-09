@@ -1,6 +1,6 @@
 {
   "extends": "../../tsconfig.base.json",
-  "include": ["index.ts", "worker-configuration.d.ts"],
+  "include": ["index.ts", "env.d.ts", "worker-configuration.d.ts"],
   "compilerOptions": {
     // Runtime globals (Env, ScheduledController, ExportedHandler, fetch, …)
     // come from the generated worker-configuration.d.ts, same as the apps.

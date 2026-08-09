@@ -1,5 +1,6 @@
 ---
 import { env } from 'cloudflare:workers';
+import * as Sentry from '@sentry/cloudflare';
 import OrderStatusBadge from '~/components/OrderStatusBadge.astro';
 import AdminLayout from '~/layouts/AdminLayout.astro';
 import { createDb, createTxDb } from '@balier/lib/db';
@@ -176,7 +177,10 @@ if (Astro.request.method === 'POST') {
          */
         Astro.locals.cfContext.waitUntil(
           shipping.deleteWaybill(created.ref).catch((err) => {
+            // A live carrier document our DB knows nothing about — worth a
+            // Sentry event even though the cabinet shows it (`sentry.md`).
             console.error(`Failed to delete orphaned waybill ${created!.number}`, err);
+            Sentry.captureException(err);
           }),
         );
         if (result.reason === 'not_found') {

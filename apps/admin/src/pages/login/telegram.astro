@@ -1,5 +1,6 @@
 ---
 import { env } from 'cloudflare:workers';
+import * as Sentry from '@sentry/cloudflare';
 import AdminLayout from '~/layouts/AdminLayout.astro';
 import {
   OTP_RESEND_INTERVAL_SECONDS,
@@ -167,7 +168,11 @@ if (Astro.request.method === 'POST') {
         const dispatch = (async () => {
           await issueOtp(db, account.id, otpHash, new Date(Date.now() + OTP_TTL_SECONDS * 1000));
           await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, telegramOtpText(code));
-        })().catch(() => {});
+        })().catch((err) => {
+          // The operator has already been told «надіслано» and no code will
+          // ever arrive — off the response path, Sentry is the only witness.
+          Sentry.captureException(err);
+        });
         Astro.locals.cfContext?.waitUntil?.(dispatch);
       }
     }
@@ -215,7 +220,9 @@ if (Astro.request.method === 'POST') {
     Astro.cookies.delete(EMAIL_COOKIE, { path: emailCookieOptions.path });
 
     // Bookkeeping, never a reason to delay or fail a login — same as `/login`.
-    Astro.locals.cfContext?.waitUntil?.(recordAdminLogin(db, account.id).catch(() => {}));
+    Astro.locals.cfContext?.waitUntil?.(
+      recordAdminLogin(db, account.id).catch((err) => Sentry.captureException(err)),
+    );
 
     return Astro.redirect(next, 303);
   }

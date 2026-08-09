@@ -1,5 +1,6 @@
 import { env } from 'cloudflare:workers';
 import type { APIRoute } from 'astro';
+import * as Sentry from '@sentry/cloudflare';
 import { createTxDb } from '@balier/lib/db';
 import { createMonobankPayment } from '@balier/lib/monobank';
 import { createEmailNotifier } from '@balier/lib/notify/email';
@@ -66,6 +67,10 @@ export const POST: APIRoute = async ({ request, locals }) => {
       // order stays cancelled; a person has to refund — so this goes to the
       // manager chat and never to the customer as a confirmation.
       console.error(`Monobank webhook: payment received for cancelled order ${result.order.orderNumber}`);
+      Sentry.captureMessage(
+        `Payment received for cancelled order ${result.order.orderNumber} — manual refund owed`,
+        'error',
+      );
       const notifier = createTelegramNotifier(env.TELEGRAM_BOT_TOKEN, env.TELEGRAM_CHAT_ID);
       locals.cfContext.waitUntil(
         notifier.paymentAfterCancellation({ order: result.order, items: result.items }),

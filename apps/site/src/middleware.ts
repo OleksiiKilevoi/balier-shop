@@ -1,6 +1,34 @@
 import { defineMiddleware, sequence } from 'astro:middleware';
 import { env } from 'cloudflare:workers';
+import * as Sentry from '@sentry/cloudflare';
 import { checkRateLimit } from '@balier/lib/rateLimit';
+
+/* ------------------------------------------------------------------ sentry */
+
+/**
+ * First in the sequence on purpose: every unhandled error from any page or
+ * API route below is captured and **rethrown** — the customer still gets
+ * their 500, Sentry only observes (`docs/plans/sentry.md`). Options are built
+ * per request from `env` because the SDK holds no module-scope state (hard
+ * rule 4), and the ExecutionContext lets it flush via `waitUntil`.
+ */
+const sentry = defineMiddleware((context, next) => {
+  return Sentry.wrapRequestHandler(
+    {
+      options: {
+        dsn: env.SENTRY_DSN,
+        environment: env.SENTRY_ENVIRONMENT,
+        // Errors only — no performance tracing.
+        tracesSampleRate: 0,
+        // One Sentry project for all three Workers; this tag tells them apart.
+        initialScope: { tags: { worker: 'site' } },
+      },
+      request: context.request,
+      context: context.locals.cfContext,
+    },
+    () => next(),
+  );
+});
 
 /* ---------------------------------------------------------- admin redirect */
 
@@ -77,4 +105,4 @@ const rateLimit = defineMiddleware(async ({ request }, next) => {
   return next();
 });
 
-export const onRequest = sequence(adminRedirect, rateLimit);
+export const onRequest = sequence(sentry, adminRedirect, rateLimit);

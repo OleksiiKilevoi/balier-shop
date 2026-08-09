@@ -1,5 +1,6 @@
 ---
 import { env } from 'cloudflare:workers';
+import * as Sentry from '@sentry/cloudflare';
 import AdminLayout from '~/layouts/AdminLayout.astro';
 import { createDb, createTxDb } from '@balier/lib/db';
 import { listOrdersByNumbers, listScanSheets } from '@balier/lib/db/queries/scanSheets';
@@ -97,6 +98,7 @@ if (Astro.request.method === 'POST') {
         Astro.locals.cfContext.waitUntil(
           shipping.deleteScanSheet(sheet.ref).catch((err) => {
             console.error(`Failed to delete orphaned register ${sheet!.number}`, err);
+            Sentry.captureException(err);
           }),
         );
         return done('register_orders_changed');

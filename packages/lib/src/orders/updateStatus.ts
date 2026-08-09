@@ -1,3 +1,4 @@
+import * as Sentry from '@sentry/cloudflare';
 import { eq, inArray, sql } from 'drizzle-orm';
 import type { Db, TxDb } from '../db';
 import type { Order, OrderStatus } from '../db/schema';
@@ -178,7 +179,9 @@ export async function removeCancelledOrderInvoices(
     try {
       await payment.removeInvoice(row.invoiceId);
     } catch (err) {
+      // The cancelled order's invoice is still payable (`sentry.md`).
       console.error(`Failed to remove Monobank invoice ${row.invoiceId}`, err);
+      Sentry.captureException(err);
     }
   }
 }

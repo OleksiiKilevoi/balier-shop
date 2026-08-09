@@ -4,5 +4,8 @@ packages:
   - workers/*
 
 allowBuilds:
+  # The postinstall is only a fallback downloader — the actual binary ships as
+  # the platform-specific optional dependency (@sentry/cli-win32-x64 here).
+  '@sentry/cli': false
   esbuild: true
   workerd: true

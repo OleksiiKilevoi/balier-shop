@@ -14,12 +14,14 @@
   "dependencies": {
     "@astrojs/cloudflare": "^14.1.7",
     "@balier/lib": "workspace:*",
+    "@sentry/cloudflare": "^10.69.0",
     "@tailwindcss/vite": "^4.3.3",
     "astro": "^7.1.6",
     "tailwindcss": "^4.3.3"
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.10",
+    "@sentry/vite-plugin": "^5.4.0",
     "typescript": "^6.0.3",
     "wrangler": "^4.118.0"
   }

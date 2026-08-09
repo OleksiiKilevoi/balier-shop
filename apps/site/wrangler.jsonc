@@ -87,7 +87,13 @@
     // CURRENTLY UNUSED: Turnstile is commented out (2026-08-05, on request) —
     // see the `Turnstile:` markers in `src/pages/checkout.astro`. Both values
     // are kept set so uncommenting is all it takes to bring it back.
-    "PUBLIC_TURNSTILE_SITE_KEY": "0x4AAAAAAEF8vF0-cXNWdOOY"
+    "PUBLIC_TURNSTILE_SITE_KEY": "0x4AAAAAAEF8vF0-cXNWdOOY",
+    // Sentry (`docs/plans/sentry.md`) — a DSN is a public project identifier,
+    // not a secret. One project (`balier`) for all three Workers; the wrapper
+    // in `src/middleware.ts` tags events `worker:site`. The environment tag
+    // flips to `production` at Phase 5 — the Sentry org itself stays ours.
+    "SENTRY_DSN": "https://10cc802695139cc28dd32cf305de6f34@o4504565189378049.ingest.us.sentry.io/4511881341370368",
+    "SENTRY_ENVIRONMENT": "development"
   },
 
   // CACHE is not created yet — nothing needs it. RATE_LIMIT backs the

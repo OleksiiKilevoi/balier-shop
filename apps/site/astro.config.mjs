@@ -2,6 +2,31 @@
 import { defineConfig, fontProviders } from 'astro/config';
 import cloudflare from '@astrojs/cloudflare';
 import tailwindcss from '@tailwindcss/vite';
+import { sentryVitePlugin } from '@sentry/vite-plugin';
+
+/**
+ * Sourcemap upload to Sentry (`docs/plans/sentry.md` Phase 3). Gated on the
+ * auth token, which exists only in the Workers Builds build environment (and
+ * a developer's own shell if they set it): without it this build is exactly
+ * what it was before Sentry — no sourcemaps generated, nothing uploaded,
+ * nothing to delete. `hidden` keeps the `sourceMappingURL` comment out of the
+ * bundles; `filesToDeleteAfterUpload` keeps the maps themselves out of the
+ * deploy — client maps would otherwise ship as public static assets.
+ */
+const sentryUpload = process.env.SENTRY_AUTH_TOKEN
+  ? [
+      sentryVitePlugin({
+        org: process.env.SENTRY_ORG,
+        project: process.env.SENTRY_PROJECT,
+        authToken: process.env.SENTRY_AUTH_TOKEN,
+        telemetry: false,
+        sourcemaps: { filesToDeleteAfterUpload: ['./dist/**/*.map'] },
+        // A failed upload must warn, not fail the build: this runs inside the
+        // Workers Builds deploy, and shipping the store beats readable traces.
+        errorHandler: (err) => console.warn('[sentry-vite-plugin]', err.message),
+      }),
+    ]
+  : [];
 
 // https://astro.build/config
 export default defineConfig({
@@ -57,7 +82,9 @@ export default defineConfig({
     // never loaded here, just as the storefront's two never load there.
   ],
   vite: {
-    plugins: [tailwindcss()],
+    // Sentry's plugin goes after all others (its own requirement).
+    plugins: [tailwindcss(), ...sentryUpload],
+    build: { sourcemap: process.env.SENTRY_AUTH_TOKEN ? 'hidden' : false },
     // `@balier/lib` ships raw TypeScript source (no build step); it must be
     // bundled and transformed, never externalized to Node resolution.
     ssr: { noExternal: ['@balier/lib'] },

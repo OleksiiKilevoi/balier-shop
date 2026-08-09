@@ -2,6 +2,23 @@
 import { defineConfig, fontProviders } from 'astro/config';
 import cloudflare from '@astrojs/cloudflare';
 import tailwindcss from '@tailwindcss/vite';
+import { sentryVitePlugin } from '@sentry/vite-plugin';
+
+// Sourcemap upload to Sentry, token-gated — the full story of the gating and
+// the map deletion is on the same block in `apps/site/astro.config.mjs`.
+const sentryUpload = process.env.SENTRY_AUTH_TOKEN
+  ? [
+      sentryVitePlugin({
+        org: process.env.SENTRY_ORG,
+        project: process.env.SENTRY_PROJECT,
+        authToken: process.env.SENTRY_AUTH_TOKEN,
+        telemetry: false,
+        sourcemaps: { filesToDeleteAfterUpload: ['./dist/**/*.map'] },
+        // A failed upload must warn, not fail the build — see apps/site.
+        errorHandler: (err) => console.warn('[sentry-vite-plugin]', err.message),
+      }),
+    ]
+  : [];
 
 // https://astro.build/config
 export default defineConfig({
@@ -29,7 +46,9 @@ export default defineConfig({
     },
   ],
   vite: {
-    plugins: [tailwindcss()],
+    // Sentry's plugin goes after all others (its own requirement).
+    plugins: [tailwindcss(), ...sentryUpload],
+    build: { sourcemap: process.env.SENTRY_AUTH_TOKEN ? 'hidden' : false },
     // `@balier/lib` ships raw TypeScript source (no build step); it must be
     // bundled and transformed, never externalized to Node resolution.
     ssr: { noExternal: ['@balier/lib'] },

@@ -1,3 +1,4 @@
+import * as Sentry from '@sentry/cloudflare';
 import { and, eq, sql } from 'drizzle-orm';
 import type { Db } from '../db';
 import { npSettlements, npSyncSeen, npWarehouses } from '../db/schema';
@@ -366,6 +367,11 @@ async function retireUnseenWarehouses(db: Db, seen: number): Promise<number> {
     console.warn(
       `Nova Poshta sync saw ${seen} warehouses against ${total} active rows — ` +
         'treating the feed as truncated and retiring nothing.',
+    );
+    Sentry.captureMessage(
+      `Nova Poshta sync saw ${seen} warehouses against ${total} active rows — ` +
+        'treating the feed as truncated and retiring nothing.',
+      'warning',
     );
     return 0;
   }

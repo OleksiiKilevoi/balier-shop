@@ -1,3 +1,4 @@
+import * as Sentry from '@sentry/cloudflare';
 import { formatPrice } from '../money';
 import type { CarrierAlert } from '../novaposhta/tracking';
 import type { NotifierPort, OrderNotification } from '../ports';
@@ -96,14 +97,18 @@ export async function sendTelegramMessage(
     });
 
     if (!response.ok) {
+      // Telegram is the alert channel *and* the OTP delivery channel — when
+      // it fails, Sentry is the only place that shows it (`sentry.md`).
       const body = await response.text().catch(() => '');
       console.error(`Telegram sendMessage failed: ${response.status} ${body}`);
+      Sentry.captureMessage(`Telegram sendMessage failed: ${response.status} ${body}`, 'error');
       return false;
     }
 
     return true;
   } catch (err) {
     console.error('Telegram sendMessage threw', err);
+    Sentry.captureException(err);
     return false;
   }
 }

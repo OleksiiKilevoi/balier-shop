@@ -1,3 +1,4 @@
+import * as Sentry from '@sentry/cloudflare';
 import { formatPrice } from '../money';
 import type { NotifierPort, OrderNotification } from '../ports';
 import { DELIVERY_METHOD_LABELS, deliveryDestination, PAYMENT_METHOD_LABELS } from './format';
@@ -95,6 +96,7 @@ export function createEmailNotifier(email: SendEmail, fromAddress: string): Noti
       });
     } catch (err) {
       console.error('Order confirmation email failed to send', err);
+      Sentry.captureException(err);
     }
   }
 
