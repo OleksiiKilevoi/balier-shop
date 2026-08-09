@@ -13,3 +13,12 @@ DATABASE_URL_NONPOOL=""
 
 # Nova Poshta API key — `pnpm np:sync` (scripts/sync-novaposhta.ts)
 NOVAPOSHTA_API_KEY=""
+
+# Sentry sourcemap upload — `pnpm cron:deploy` (workers/cron/deploy.mjs).
+# Build-time credentials, not Worker runtime config: the same three values
+# also live in the Workers Builds build variables of balier-dev and
+# balier-admin-dev, where the site/admin uploads run. Without them the cron
+# deploy still works, it just skips the upload (stack traces stay minified).
+SENTRY_AUTH_TOKEN=""
+SENTRY_ORG=""
+SENTRY_PROJECT="balier"

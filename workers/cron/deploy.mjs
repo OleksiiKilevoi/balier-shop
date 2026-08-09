@@ -16,8 +16,11 @@
  *      must never be hostage to the error tracker.
  *
  * Credentials: SENTRY_AUTH_TOKEN / SENTRY_ORG / SENTRY_PROJECT are read from
- * the environment, falling back to the repo root `.env` (gitignored, already
- * home to DATABASE_URL for drizzle-kit).
+ * the environment, falling back to the repo root `.dev.vars` — the same file
+ * drizzle-kit and every `scripts/*` helper load (`.env` honoured after it,
+ * same as they do). The per-worker `.dev.vars` next to this file is *runtime*
+ * dev config and deliberately not consulted: an upload token is a build-time
+ * credential and has no business inside the Worker's env.
  *
  * `--dry-run` is passed through to wrangler (build only, no deploy) and skips
  * the upload — there is no release to attach maps to.
@@ -28,9 +31,9 @@ import { resolve } from 'node:path';
 
 const dryRun = process.argv.includes('--dry-run');
 
-// Minimal .env fallback: KEY=VALUE lines, no quoting rules — the three
-// SENTRY_* values never need any.
-for (const file of [resolve(import.meta.dirname, '../../.env')]) {
+// Minimal KEY=VALUE parsing, no quoting rules — the three SENTRY_* values
+// never need any.
+for (const file of ['../../.dev.vars', '../../.env'].map((p) => resolve(import.meta.dirname, p))) {
   let text;
   try {
     text = readFileSync(file, 'utf8');
@@ -39,7 +42,10 @@ for (const file of [resolve(import.meta.dirname, '../../.env')]) {
   }
   for (const line of text.split('\n')) {
     const match = /^\s*(SENTRY_[A-Z_]+)\s*=\s*(.+?)\s*$/.exec(line);
-    if (match && !process.env[match[1]]) process.env[match[1]] = match[2];
+    if (match && !process.env[match[1]]) {
+      // The root .dev.vars quotes its values — strip a matching pair.
+      process.env[match[1]] = match[2].replace(/^(["'])(.*)\1$/, '$2');
+    }
   }
 }
 
@@ -58,7 +64,7 @@ if (dryRun) {
 } else if (!process.env.SENTRY_AUTH_TOKEN) {
   console.warn(
     `[deploy.mjs] SENTRY_AUTH_TOKEN not set — deployed release ${release} WITHOUT uploading ` +
-      'sourcemaps; its Sentry stack traces will be minified. Token goes in the repo root .env.',
+      'sourcemaps; its Sentry stack traces will be minified. Token goes in the repo root .dev.vars.',
   );
 } else {
   run(`pnpm exec sentry-cli sourcemaps upload --release=${release} dist`);

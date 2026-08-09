@@ -151,8 +151,8 @@ costs more code for no behaviour difference; revisit only if the lib dependency 
 just minified. Credentials come from env: `SENTRY_AUTH_TOKEN` + `SENTRY_ORG` + `SENTRY_PROJECT`
 (project slug is `balier`; org slug visible in the Sentry URL). They go in **two places**: the
 Workers Builds build variables of both `balier-dev` and `balier-admin-dev` (site/admin upload
-runs on git push), and the repo root `.env` (cron uploads run locally — `deploy.mjs` falls back
-to it). **Unverified until the token exists:** a real upload from all three builds, and — the
+runs on git push), and the repo root `.dev.vars` — the same file drizzle-kit and `scripts/*`
+read (cron uploads run locally — `deploy.mjs` falls back to it, then to `.env`). **Unverified until the token exists:** a real upload from all three builds, and — the
 one to re-check on the first real cron error — that the cron's frame paths actually match the
 uploaded artifact names (release-based matching is pickier than debug IDs; if traces stay
 minified, `sentry-cli sourcemaps upload --strip-common-prefix` or a `~/` url-prefix is the

@@ -4,23 +4,24 @@
 
 ## 📍 CURRENT STATE (overwrite this block; keep tight)
 
-- **Last done:** **PRG fix for `/login/telegram`'s refresh bugs** (2026-08-08, same day the OTP
-  door shipped and was client-verified — that build's full story is in the session log). The code
-  step was a POST render, so F5 re-posted `otp_send`: the resend countdown reset on every refresh
-  and, once the 60 s throttle window had passed, a refresh sent a *real* second code (and every
-  refresh spent IP budget). Now **every POST answers 303 back to the page**: the step lives in an
-  `admin_otp_email` cookie (httpOnly, `path=/login/telegram`, 5 min = the code's own TTL, set
-  **unconditionally** on any send so its presence can't say which addresses exist), messages travel
-  in `?message=` exactly like `/login`'s `signed_out`, and the countdown start is stamped into
-  sessionStorage on the *submit* of either send form (`data-sent` is gone), so it survives the
-  redirect and any number of reloads. New `otp_change` intent («Змінити пошту») clears the cookie —
-  without it a typo'd address would hold the code form for its five minutes. Gate green; **30
-  checks against `pnpm dev:admin` with real form bodies** (send → refresh → wrong code → change
-  email → `?next=` round-trip; note for future drivers: hand-made POSTs must send an `Origin`
-  header or Astro's CSRF check answers 403). **Uncommitted.**
-- **Context:** the previous block's «uncommitted» NP review fix went out as `06cb31f`, on
-  `origin/main`, auto-deployed by Workers Builds — the create-inspect-delete volume pass and the
-  browser passes below remain untested. NP-1..NP-5 + `arrived` split live through `a5a192c`.
+- **Last done:** **Sentry error tracking, all three phases of `docs/plans/sentry.md`**
+  (2026-08-09, committed as `8d103f6` by the client, deployed everywhere the same day). One
+  project `balier` in the **`drizzle-team` org** (client's decision: the org stays ours after
+  release — Sentry is off the Phase 5 swap list); events tagged `worker: site|admin|cron`.
+  Phase 1: `wrapRequestHandler` first in both middlewares, `withSentry` around the cron — whose
+  jobs moved from `ctx.waitUntil` to `await` so their failures reach the wrapper. Phase 2: 15
+  captures in the deliberately-swallowed catches (dangling invoices, refund-owed payments, NP
+  sweep/sync, email/Telegram sends, the OTP dispatch's bare `.catch(() => {})`). Phase 3:
+  token-gated `@sentry/vite-plugin` in both Astro builds (upload in Workers Builds, maps deleted
+  after, failed upload warns instead of failing the deploy), and `deploy.mjs` behind
+  `pnpm cron:deploy` (release = git SHA, `sentry-cli` upload, verified live: bundle
+  `8d103f6` in Sentry). Credentials: 3 build vars on both Workers + `SENTRY_*` in root
+  `.dev.vars`. **Uncommitted tail:** `deploy.mjs`'s `.env`→`.dev.vars` fix +
+  `.dev.vars.example` + plan updates. **Unverified on purpose:** cron frame-path matching until
+  its first real error (first knob recorded in the plan), and the site/admin artifact bundles —
+  check Sentry → Settings → Projects → balier → Source Maps once.
+- **Context:** the OTP PRG fix went out as `95060e7` before this session; NP-1..NP-5 + `arrived`
+  split live through `a5a192c`.
 - **In progress:** nothing. Migrations `0006`–`0015` are all applied to the **dev** database.
 - **Next step:** back to what was owed before this feature: the NP **create-inspect-delete volume
   pass** on the dev key (the
@@ -106,12 +107,10 @@
     `localhost` and the `workers.dev` URL were the only allowed hosts, so its hostname allowlist may
     not include `balier.mlosko.dev`. Never tested either way; it matters again the moment Turnstile
     is uncommented.
-- **Active branch:** `main`, clean, with the `workspace-split` branch merged in. (The previous
-  block's «uncommitted image work» was stale — all of it was committed and deployed as
-  `5a8bfae`…`04adb85` before this session started; verified against `wrangler deployments list`,
-  the deploy landed one minute after `04adb85`.) **A push to `main` currently deploys nothing but
-  a failed build** — Workers Builds still runs the old root `pnpm run build`; see «Next step».
-  Both Workers were deployed manually from the merge commit and verified.
+- **Active branch:** `main` at `8d103f6`, in sync with origin. **Workers Builds works**: today's
+  push auto-deployed `balier-dev` and `balier-admin-dev` (15:06 UTC, verified via
+  `wrangler deployments list` — the list prints oldest-first, read the bottom). Only
+  `balier-cron` deploys by hand (`pnpm cron:deploy`, now also the sourcemap-upload path).
 - **Dev DB state (real rows, harmless, deliberately not cleaned up):** ten orders. From the Phase 3
   and admin passes: `B260805-XVFYQ` (COD, placed by curl with no captcha token — the proof Turnstile
   is off), `B260804-6DN8Q` (card, paid through the real webhook), `B260804-BYP3K` / `B260804-S86Y7`
@@ -172,6 +171,19 @@
 > Empty by design. Everything through the end of Phase 4 was moved to **`docs/history.md`** on
 > 2026-08-05, not rewritten — this file is read in full at every session start and had reached
 > 852 lines. New session entries go here; move a phase's entries across once the phase is done.
+
+**2026-08-09 (Sentry, planned → built → deployed in one day).** Session opened on «что нам нужно,
+чтобы начать» over `docs/plans/sentry.md`. Decisions along the way, all recorded in the plan: the
+org is the existing `drizzle-team` org we were invited into and **stays ours after release**; one
+project `balier` instead of three (worker told apart by tag; DSN-key rate limit guards the shared
+quota). Phase 1 verified end-to-end with a temporary throwing route (event captured, 500 still
+surfaced, ingest answered 200); Phase 2's 15 captures pass all 334 tests unmocked (no client in
+vitest → captures are no-ops); Phase 3 verified as far as tokenless: fake-token build survives a
+401 upload, cron `--dry-run` emits bundle+map+release. Client created the token, set 3 build vars
+on both Workers, pushed (auto-deploy) and ran `cron:deploy` — first run skipped upload because
+`deploy.mjs` read a root `.env` this repo doesn't have (its files are `.dev.vars`; fixed, quotes
+stripped), second run uploaded bundle for release `8d103f6`. Traps for next time: root
+`.dev.vars` feeds Node tooling and is quoted; `wrangler deployments list` prints oldest-first.
 
 **2026-08-08 (OTP refresh bugs → PRG).** Two client-found bugs, one root: the code step rendered
 straight in the `otp_send` POST response, so F5 re-posted it — countdown reset every time
