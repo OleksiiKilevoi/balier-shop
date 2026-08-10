@@ -1,9 +1,9 @@
 import * as Sentry from '@sentry/cloudflare';
 import { eq, sql } from 'drizzle-orm';
 import type { TxDb } from '../db';
-import { lockCheckoutVariants } from '../db/queries/cart';
+import { findCheckoutVariants } from '../db/queries/cart';
 import type { Order, OrderItem } from '../db/schema';
-import { orderItems, orders, payments, productVariants, stockReservations } from '../db/schema';
+import { orderItems, orders, payments } from '../db/schema';
 import type { Kopiykas } from '../money';
 import type { Invoice, NotifierPort, PaymentPort } from '../ports';
 import type { CartItemInput } from '../validation/cart';
@@ -12,14 +12,19 @@ import { type CheckoutLine, type CheckoutNotice, resolveCheckoutCart } from './c
 import { generateOrderNumber } from './orderNumber';
 
 /**
- * Places an order: resolve-and-lock the cart, reserve stock, and (for card)
- * create the Monobank invoice — the transactional shape described in
+ * Places an order: reprice the cart against the database and (for card) create
+ * the Monobank invoice — the transactional shape described in
  * `docs/CONVENTIONS.md` ("Orders" + "Idempotency") and in the checkout plan.
+ *
+ * Nothing here touches inventory. Availability is a flag a manager sets
+ * (`~/lib/db/schema.ts`, `productVariants.inStock`); an order reads it and
+ * never writes it, which is why there is no reservation, no decrement, and no
+ * compensating restock anywhere in this file.
  *
  * The order row is always inserted `pending` first, *before* Monobank is ever
  * called — required by the hard rule, and also what makes the payment-failure
- * path below safe to build: there is always an order to cancel and a
- * reservation to release, never a half-created order.
+ * path below safe to build: there is always an order to cancel, never a
+ * half-created one.
  */
 
 export interface CreateOrderInput {
@@ -63,7 +68,13 @@ export interface CreateOrderDeps {
    * without one.
    */
   webhookUrl: string;
-  reservationTtlMinutes: number;
+  /**
+   * How long an unpaid card order stays payable: the Monobank invoice's own
+   * validity, and the age at which the cron sweeps the order (`workers/cron`).
+   * Called `reservationTtlMinutes` until 2026-08-10, when there stopped being
+   * a reservation for it to be the TTL of.
+   */
+  paymentTtlMinutes: number;
   codLimitKopiykas: Kopiykas;
 }
 
@@ -115,7 +126,7 @@ export async function createOrder(
 
     try {
       created = await txDb.transaction(async (tx) => {
-        const variants = await lockCheckoutVariants(tx, variantIds);
+        const variants = await findCheckoutVariants(tx, variantIds);
         const resolved = resolveCheckoutCart(input.items, variants);
 
         if (!resolved.ok) {
@@ -178,27 +189,11 @@ export async function createOrder(
           )
           .returning();
 
-        const expiresAt = new Date(Date.now() + deps.reservationTtlMinutes * 60_000);
-        await tx.insert(stockReservations).values(
-          resolved.lines.map((line) => ({
-            orderId: order.id,
-            variantId: line.variantId,
-            quantity: line.quantity,
-            expiresAt,
-          })),
-        );
-
-        // Cash on delivery waits on nothing — commit the sale immediately
-        // instead of holding a reservation for a payment that never happens.
+        // Cash on delivery waits on nothing: there is no payment to sit
+        // `pending` for, so the order is confirmed in the same transaction
+        // that created it.
         let finalOrder = order;
         if (input.paymentMethod === 'cod') {
-          for (const line of resolved.lines) {
-            await tx
-              .update(productVariants)
-              .set({ stock: sql`${productVariants.stock} - ${line.quantity}`, updatedAt: sql`now()` })
-              .where(eq(productVariants.id, line.variantId));
-          }
-          await tx.delete(stockReservations).where(eq(stockReservations.orderId, order.id));
           const [updated] = await tx
             .update(orders)
             .set({ status: 'confirmed', updatedAt: sql`now()` })
@@ -237,7 +232,7 @@ export async function createOrder(
     };
   }
 
-  // Card: the order sits `pending` with its reservation. Monobank is called
+  // Card: the order sits `pending` until the invoice exists. Monobank is called
   // *outside* the transaction above — a network call must never hold a DB
   // transaction open. The id survives outside the `try` so the catch can tell
   // the two failure shapes apart: no invoice (Monobank refused) versus an
@@ -256,7 +251,7 @@ export async function createOrder(
       })),
       redirectUrl: successUrl(deps.redirectBaseUrl, created.orderNumber),
       webhookUrl: deps.webhookUrl,
-      validitySeconds: deps.reservationTtlMinutes * 60,
+      validitySeconds: deps.paymentTtlMinutes * 60,
     });
     createdInvoiceId = invoice.invoiceId;
 
@@ -297,15 +292,12 @@ export async function createOrder(
       });
     }
 
-    // The invoice call failed — release the hold rather than leave stock
-    // silently reserved against a payment that was never actually offered.
-    await txDb.transaction(async (tx) => {
-      await tx.delete(stockReservations).where(eq(stockReservations.orderId, created!.orderId));
-      await tx
-        .update(orders)
-        .set({ status: 'cancelled', cancelledAt: sql`now()`, updatedAt: sql`now()` })
-        .where(eq(orders.id, created!.orderId));
-    });
+    // The invoice call failed — close the order rather than leave a `pending`
+    // row for a payment that was never actually offered.
+    await txDb
+      .update(orders)
+      .set({ status: 'cancelled', cancelledAt: sql`now()`, updatedAt: sql`now()` })
+      .where(eq(orders.id, created!.orderId));
 
     return { ok: false, reason: 'payment_failed' };
   }

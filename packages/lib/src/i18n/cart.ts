@@ -31,10 +31,5 @@ export function cartNoticeText(notice: CartNotice): string {
       return `${name} більше не продається — ми прибрали його з кошика.`;
     case 'out_of_stock':
       return `${name} закінчився — ми прибрали його з кошика.`;
-    // «шт.» rather than an inflected noun: the count is a running number the
-    // stepper can land anywhere on, and the abbreviation is both idiomatic in
-    // Ukrainian retail and immune to the 1/2–4/5+ agreement it would otherwise need.
-    case 'reduced':
-      return `${name}: у наявності лише ${notice.quantity} шт. — кількість зменшено.`;
   }
 }

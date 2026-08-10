@@ -39,7 +39,8 @@ would shadow it. Package manager is pnpm, pinned in `packageManager`. Full comma
 1. Money is **integer kopiykas**, and the server recalculates every total from DB prices — client
    amounts are intent, never truth.
 2. An order becomes `paid` **only** in the Monobank webhook handler, never on the success page.
-3. Cart items, order items and reservations reference **`variantId`**, never `productId`.
+3. Cart items and order items reference **`variantId`**, never `productId`. Availability is the
+   variant's **`in_stock` flag** — no counts, no reservations; only a manager ever writes it.
 4. Workers runtime: no Node APIs, no `process.env`, no module-scope state — env comes from
    `import { env } from 'cloudflare:workers'`.
 5. Do not expand a phase's scope from `docs/plans/roadmap.md` without discussion, and do not build

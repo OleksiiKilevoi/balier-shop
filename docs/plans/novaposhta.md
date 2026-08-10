@@ -330,9 +330,9 @@ clears `np_scan_sheet_ref` correctly either way, so the data model is safe which
 - Exact `OptionsSeat` requirements for parcel-locker delivery — dimensions are required, the precise
   field set is to be read off the API. Found in review 2026-08-07: `volumetricVolume` was being sent
   as the /4000 volumetric-*weight* formula while the API documents the field in **м³** — the create
-  call accepted it, which is how it survived every live drive; fixed to true cubic meters. Worth one
-  create-inspect-delete pass comparing the cabinet's shown volume/tariff before the first real
-  shipment.
+  call accepted it, which is how it survived every live drive; fixed to true cubic meters. The
+  create-inspect-delete pass comparing the cabinet's shown volume/tariff was run by the client
+  (confirmed 2026-08-09) — the volumetric fix is verified against the cabinet.
 - ~~Stuck-order alert threshold~~ — moot: the alert itself was removed at the client's request
   (2026-08-07, «Decisions» above).
 

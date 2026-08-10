@@ -3,7 +3,6 @@ import type { Db, Tx } from '../index';
 import { productImages, productTranslations, productVariants, products } from '../schema';
 import type { CartVariantData } from '../../cart';
 import { LOCALE } from './locale';
-import { availableStock } from './stock';
 
 /**
  * The authoritative half of the cart: everything the customer's variant ids
@@ -30,7 +29,7 @@ export async function findCartVariants(
       variantHex: productVariants.colorHex,
       sku: productVariants.sku,
       unitPrice: sql<number>`coalesce(${productVariants.priceOverride}, ${products.basePrice})`,
-      available: availableStock(),
+      inStock: productVariants.inStock,
     })
     .from(productVariants)
     .innerJoin(products, eq(products.id, productVariants.productId))
@@ -84,7 +83,7 @@ export async function findCartVariants(
       variantHex: row.variantHex,
       sku: row.sku,
       unitPrice: row.unitPrice,
-      available: row.available,
+      inStock: row.inStock,
       imageUrl: image?.url ?? null,
       imageAlt: image?.alt ?? null,
     };
@@ -92,14 +91,19 @@ export async function findCartVariants(
 }
 
 /**
- * The order-creation half of the same resolution, run inside the
- * create-order transaction: locks the requested variant rows with
- * `FOR UPDATE` so a second checkout for the same variant blocks until this
- * one commits (or rolls back) its reservation, rather than both reading the
- * same "available" number and overselling it. No images — order items
- * snapshot text and price, never a photo.
+ * The order-creation half of the same resolution, run inside the create-order
+ * transaction so the price an order is written with is read in the same
+ * transaction that writes it. No images — order items snapshot text and price,
+ * never a photo.
+ *
+ * This took `FOR UPDATE` over the variant rows until 2026-08-10, so that two
+ * checkouts for the same variant could not both read the same available count
+ * and oversell it. With availability a flag that no order decrements, there is
+ * no count to race for: two customers ordering the last bag is now the
+ * accepted outcome (`~/lib/db/schema.ts`, `productVariants.inStock`), so the
+ * lock was buying nothing and is gone.
  */
-export async function lockCheckoutVariants(
+export async function findCheckoutVariants(
   tx: Tx,
   variantIds: readonly string[],
 ): Promise<CartVariantData[]> {
@@ -114,7 +118,7 @@ export async function lockCheckoutVariants(
       variantHex: productVariants.colorHex,
       sku: productVariants.sku,
       unitPrice: sql<number>`coalesce(${productVariants.priceOverride}, ${products.basePrice})`,
-      available: availableStock(),
+      inStock: productVariants.inStock,
     })
     .from(productVariants)
     .innerJoin(products, eq(products.id, productVariants.productId))
@@ -128,8 +132,7 @@ export async function lockCheckoutVariants(
         eq(productVariants.isActive, true),
         eq(products.status, 'active'),
       ),
-    )
-    .for('update', { of: productVariants });
+    );
 
   return rows.map((row) => ({ ...row, imageUrl: null, imageAlt: null }));
 }

@@ -8,7 +8,6 @@ interface Props {
   /** Category name, shown under the title. */
   category?: string | null;
   price: Kopiykas;
-  compareAtPrice?: Kopiykas | null;
   imageUrl?: string | null;
   imageAlt?: string | null;
   /** Colour swatches, rendered only when the product genuinely has a choice. */
@@ -23,7 +22,6 @@ const {
   title,
   category,
   price,
-  compareAtPrice,
   imageUrl,
   imageAlt,
   swatches = [],
@@ -70,7 +68,7 @@ const {
       <h3 class="font-display text-ink text-base leading-snug font-bold sm:text-lg">{title}</h3>
       {category && <p class="text-ink-muted text-xs sm:text-sm">{category}</p>}
 
-      <Price amount={price} compareAt={compareAtPrice} class="pt-1.5" />
+      <Price amount={price} class="pt-1.5" />
 
       {
         swatches.length > 1 && (

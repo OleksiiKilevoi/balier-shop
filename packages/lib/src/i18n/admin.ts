@@ -51,14 +51,19 @@ export const ADMIN_STATUS_CARRIER_HINT =
 
 /**
  * Shown under a transition button before it is pressed, where the consequence
- * is not obvious from the label. Both undo actions put stock back, and neither
- * touches money — that has to be said, because «Позначити поверненим» sounds
- * like it might issue the refund itself. It does not: the money is returned in
- * Monobank's own dashboard.
+ * is not obvious from the label. Neither undo touches money — that has to be
+ * said, because «Позначити поверненим» sounds like it might issue the refund
+ * itself. It does not: the money is returned in Monobank's own dashboard.
+ *
+ * Both hints used to promise «товар повернеться в наявність» as well. They no
+ * longer do, and must not: since 2026-08-10 availability is a flag on the
+ * variant that no order writes, so cancelling changes nothing about what the
+ * shop is selling — if the piece is free again, somebody says so in the
+ * catalog.
  */
 export const ORDER_TRANSITION_HINTS: Partial<Record<OrderStatus, string>> = {
-  cancelled: 'Товар повернеться в наявність.',
-  refunded: 'Кошти повертаються вручну в Monobank. Товар повернеться в наявність.',
+  cancelled: 'Наявність товару це не змінює — за потреби увімкніть її в каталозі.',
+  refunded: 'Кошти повертаються вручну в Monobank. Наявність товару це не змінює.',
 };
 
 /**
@@ -111,7 +116,6 @@ export const ADMIN_ORDER_MESSAGES = {
   created: 'Замовлення створено.',
   status_updated: 'Статус замовлення оновлено.',
   invalid_transition: 'Цей перехід недоступний для замовлення в такому статусі.',
-  insufficient_stock: 'Недостатньо товару на складі, щоб повернути це замовлення — частину вже продано.',
   stale: 'Замовлення вже змінилося — сторінку оновлено, спробуйте ще раз.',
   bad_request: 'Не вдалося виконати дію.',
   order_updated: 'Дані замовлення оновлено.',
@@ -229,16 +233,16 @@ export const ADMIN_NEW_ORDER_MESSAGES = {
 /**
  * Shown next to the «карткою» option and again above a created card order's
  * link. Both halves matter and neither is obvious: the link stops working, and
- * the order does not just sit there unpaid afterwards — the cron that releases
- * expired reservations cancels it.
+ * the order does not just sit there unpaid afterwards — the cron's sweep of
+ * unpaid orders cancels it.
  */
 export function cardLinkValidityText(minutes: number): string {
-  return `Посилання на оплату дійсне ${minutes} хв. Якщо клієнт не оплатить за цей час, замовлення скасується автоматично й товар повернеться в наявність.`;
+  return `Посилання на оплату дійсне ${minutes} хв. Якщо клієнт не оплатить за цей час, замовлення скасується автоматично.`;
 }
 
 /** The same deadline on the order page, where the exact moment is known. */
 export function cardLinkExpiryText(deadline: string): string {
-  return `Дійсне до ${deadline}. Після цього замовлення скасується автоматично й товар повернеться в наявність.`;
+  return `Дійсне до ${deadline}. Після цього замовлення скасується автоматично.`;
 }
 
 export const ADMIN_CARD_LINK_EXPIRED =
@@ -582,7 +586,6 @@ export const ADMIN_CATALOG_ERRORS: Record<CatalogField, string> = {
   metaTitle: 'Заголовок для пошукових систем задовгий.',
   metaDescription: 'Опис для пошукових систем задовгий.',
   basePrice: `Вкажіть ціну цілими гривнями — від ${PRODUCT_PRICE_MIN_HRYVNIAS} до ${new Intl.NumberFormat('uk-UA').format(PRODUCT_PRICE_MAX_HRYVNIAS)} ₴.`,
-  compareAtPrice: 'Стара ціна має бути цілим числом гривень або порожньою.',
   categoryId: 'Оберіть категорію зі списку.',
   position: 'Порядок — ціле число від 0.',
   sku: 'Тільки великі латинські літери, цифри й дефіси — наприклад, SUMKA-LIUNET-CHORNYI.',
@@ -590,7 +593,6 @@ export const ADMIN_CATALOG_ERRORS: Record<CatalogField, string> = {
   colorHex: 'Колір у форматі #1a1a1a.',
   priceOverride: 'Своя ціна варіанта — ціле число гривень або порожнє поле.',
   weightGrams: 'Вага — ціле число грамів від 1, або порожнє поле, поки не зважено.',
-  stock: 'Залишок — ціле число від 0.',
   alt: 'Опис зображення задовгий.',
 };
 
@@ -607,6 +609,8 @@ export const ADMIN_STOREFRONT_NOTES = {
     'Товар опубліковано: зміна адреси зламає наявні поза сайтом посилання на нього.',
   noVariants:
     'Немає жодного варіанта в продажу — сторінка товару віддає 404 навіть у статусі «У продажу».',
+  noneInStock:
+    'Жоден варіант не позначено як «в наявності» — товар видно в каталозі, але кнопка «Додати до кошика» вимкнена.',
   noImages: 'Немає фото — картка в каталозі буде порожньою.',
 } as const;
 

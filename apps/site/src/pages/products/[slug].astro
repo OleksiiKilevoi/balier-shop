@@ -9,6 +9,7 @@ import { createDb } from '@balier/lib/db';
 import { getProductBySlug } from '@balier/lib/db/queries/products';
 import { formatPrice } from '@balier/lib/money';
 import { orderDeepLink } from '@balier/lib/telegram';
+import { MAX_ITEM_QUANTITY } from '@balier/lib/validation/cart';
 
 export const prerender = false;
 
@@ -46,9 +47,7 @@ const telegramHref = orderDeepLink(manager, {
   variantName: hasColourChoice ? defaultVariant.colorName : null,
 });
 
-const inStock = defaultVariant.available > 0;
-const showCompareAt =
-  product.compareAtPrice !== null && product.compareAtPrice > defaultVariant.price;
+const inStock = defaultVariant.inStock;
 ---
 
 <BaseLayout
@@ -102,17 +101,10 @@ const showCompareAt =
             ))
         }
 
-        <p class="mt-5 flex items-baseline gap-3">
+        <p class="mt-5">
           <span class="price text-2xl sm:text-3xl" data-price-display>
             {formatPrice(defaultVariant.price)}
           </span>
-          {
-            showCompareAt && (
-              <span class="text-ink-muted text-base line-through tabular-nums">
-                {formatPrice(product.compareAtPrice ?? 0)}
-              </span>
-            )
-          }
         </p>
 
         {product.description && <p class="text-ink-muted mt-5">{product.description}</p>}
@@ -153,6 +145,9 @@ const showCompareAt =
             Колір: <span class="text-ink-muted" data-variant-name>{defaultVariant.colorName}</span>
           </p>
 
+          {/* `data-in-stock` is `String(...)`, not a bare boolean: Astro renders
+              an empty attribute value as a valueless attribute, so `false` would
+              arrive in the DOM as a present-looking `data-in-stock`. */}
           <div class="mt-3 flex flex-wrap gap-2">
             {
               product.variants.map((variant, index) => (
@@ -162,7 +157,7 @@ const showCompareAt =
                   data-variant-id={variant.id}
                   data-sku={variant.sku}
                   data-price={String(variant.price)}
-                  data-available={String(variant.available)}
+                  data-in-stock={String(variant.inStock)}
                   data-colour-name={variant.colorName ?? ''}
                   aria-pressed={index === 0 ? 'true' : 'false'}
                   class="border-line-strong rounded-btn aria-pressed:border-brand aria-pressed:bg-tag/60 inline-flex min-h-touch items-center gap-2 border px-3 text-sm transition-colors md:min-h-10"
@@ -185,7 +180,9 @@ const showCompareAt =
 
         <div class="border-line mt-6 flex items-center gap-4 border-t pt-6">
           <span class="text-sm">Кількість</span>
-          <QuantityStepper max={Math.max(defaultVariant.available, 1)} />
+          {/* The cart's own per-line ceiling — availability is a yes/no on the
+              variant, so there is no smaller number to clamp to. */}
+          <QuantityStepper max={MAX_ITEM_QUANTITY} />
         </div>
 
         {/* Full-width stacked CTAs: on a phone these are the bottom of the page
@@ -268,23 +265,14 @@ const showCompareAt =
       if (!variant) return;
 
       const price = Number(variant.dataset.price);
-      const available = Number(variant.dataset.available);
+      const inStock = variant.dataset.inStock === 'true';
       const colourName = variant.dataset.colourName || null;
 
       if (priceDisplay) priceDisplay.textContent = formatPrice(price);
       if (variantName && colourName) variantName.textContent = colourName;
 
-      if (quantity) {
-        quantity.max = String(Math.max(available, 1));
-        // A colour with less on hand than the current quantity must not leave a
-        // number in the field that cannot be bought.
-        if (Number(quantity.value) > available) {
-          quantity.value = String(Math.max(available, 1));
-        }
-      }
-
-      if (addButton) addButton.disabled = available < 1;
-      if (stockNote) stockNote.hidden = available > 0;
+      if (addButton) addButton.disabled = !inStock;
+      if (stockNote) stockNote.hidden = inStock;
 
       if (telegram) {
         const href = orderDeepLink(manager, {

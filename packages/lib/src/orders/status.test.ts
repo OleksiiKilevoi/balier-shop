@@ -5,7 +5,6 @@ import {
   allowedTransitions,
   canTransition,
   carrierCanAdvance,
-  isStockCommitted,
   orderDetailsLock,
   revertTarget,
 } from './status';
@@ -15,14 +14,14 @@ import {
  * because two of its rules are invisible at the call site and expensive to get
  * wrong: which target statuses the panel may never *produce as new* (`paid` —
  * the webhook is its only writer, except when a revert restores a `paid`/
- * `confirmed`/other `STOCK_COMMITTED` status the order already demonstrably
- * passed through), and when undoing an order has to move stock, in which
- * direction.
+ * `confirmed`/other live-sale status the order already demonstrably passed
+ * through), and which recorded status a terminal order may be pulled back to.
  */
 
 const ALL_STATUSES = orderStatus.enumValues;
 const METHODS: PaymentMethod[] = ['card', 'cod'];
-const STOCK_COMMITTED_STATUSES: OrderStatus[] = [
+/** `status.ts`'s `LIVE_SALE`: the statuses an order reaches as an actual sale. */
+const LIVE_SALE_STATUSES: OrderStatus[] = [
   'confirmed',
   'paid',
   'packed',
@@ -86,14 +85,14 @@ describe('allowedTransitions', () => {
       // panel, by `create.ts`/`confirmPayment.ts` on a payment failure).
       expect(allowedTransitions(order('cancelled', method))).toEqual([]);
       expect(allowedTransitions(order('refunded', method))).toEqual([]);
-      // Recorded, but not `STOCK_COMMITTED` — nothing useful to go back to.
+      // Recorded, but not a live sale — nothing useful to go back to.
       expect(allowedTransitions(order('cancelled', method, 'pending'))).toEqual([]);
       expect(allowedTransitions(order('cancelled', method, 'awaiting_payment'))).toEqual([]);
     }
   });
 
-  it('offers exactly the recorded `statusBeforeExit` — nothing else — when it is `STOCK_COMMITTED`', () => {
-    for (const status of STOCK_COMMITTED_STATUSES) {
+  it('offers exactly the recorded `statusBeforeExit` — nothing else — when it is a live sale', () => {
+    for (const status of LIVE_SALE_STATUSES) {
       expect(allowedTransitions(order('cancelled', 'card', status))).toEqual([status]);
       expect(allowedTransitions(order('refunded', 'card', status))).toEqual([status]);
       expect(allowedTransitions(order('cancelled', 'cod', status))).toEqual([status]);
@@ -226,9 +225,9 @@ describe('revertTarget', () => {
     }
   });
 
-  it('restores `statusBeforeExit` for `cancelled`/`refunded`, exactly when it is `STOCK_COMMITTED`', () => {
+  it('restores `statusBeforeExit` for `cancelled`/`refunded`, exactly when it is a live sale', () => {
     for (const status of ALL_STATUSES) {
-      const eligible = STOCK_COMMITTED_STATUSES.includes(status);
+      const eligible = LIVE_SALE_STATUSES.includes(status);
       for (const terminal of ['cancelled', 'refunded'] as const) {
         expect(revertTarget(order(terminal, 'card', status))).toBe(eligible ? status : null);
       }
@@ -238,31 +237,6 @@ describe('revertTarget', () => {
   it('has no target for `cancelled`/`refunded` when nothing was recorded', () => {
     expect(revertTarget(order('cancelled', 'card'))).toBeNull();
     expect(revertTarget(order('refunded', 'card', null))).toBeNull();
-  });
-});
-
-describe('isStockCommitted', () => {
-  it('is true exactly where stock has already been decremented', () => {
-    // `create.ts` decrements for cash on delivery at `confirmed`;
-    // `confirmPayment.ts` decrements for card at `paid`.
-    expect(isStockCommitted('confirmed')).toBe(true);
-    expect(isStockCommitted('paid')).toBe(true);
-    expect(isStockCommitted('packed')).toBe(true);
-    expect(isStockCommitted('shipped')).toBe(true);
-    expect(isStockCommitted('arrived')).toBe(true);
-    expect(isStockCommitted('delivered')).toBe(true);
-  });
-
-  it('is false while the order still holds a reservation instead', () => {
-    // Nothing was taken out of stock, so cancelling must not put anything back —
-    // it only drops the reservation.
-    expect(isStockCommitted('pending')).toBe(false);
-    expect(isStockCommitted('awaiting_payment')).toBe(false);
-  });
-
-  it('is false for the terminal statuses', () => {
-    expect(isStockCommitted('cancelled')).toBe(false);
-    expect(isStockCommitted('refunded')).toBe(false);
   });
 });
 

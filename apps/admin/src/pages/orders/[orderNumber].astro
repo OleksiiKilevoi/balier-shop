@@ -6,7 +6,7 @@ import AdminLayout from '~/layouts/AdminLayout.astro';
 import { createDb, createTxDb } from '@balier/lib/db';
 import { getWarehouseCityRef } from '@balier/lib/db/queries/novaposhta';
 import { findAdminOrder, getOrderItemWeights } from '@balier/lib/db/queries/orders';
-import { getNpSenderSettings, getReservationTtlMinutes } from '@balier/lib/db/queries/settings';
+import { getNpSenderSettings, getPaymentTtlMinutes } from '@balier/lib/db/queries/settings';
 import {
   ADMIN_CARD_LINK_EXPIRED,
   ADMIN_ORDER_MESSAGES,
@@ -303,7 +303,7 @@ const cardPayment = unpaidCard ? order.payments.find((payment) => payment.pageUr
  * showing as a clock time rather than as "30 minutes from some earlier point".
  */
 const linkExpiresAt = cardPayment
-  ? new Date(cardPayment.createdAt.getTime() + (await getReservationTtlMinutes(db)) * 60_000)
+  ? new Date(cardPayment.createdAt.getTime() + (await getPaymentTtlMinutes(db)) * 60_000)
   : null;
 const linkExpired = linkExpiresAt !== null && linkExpiresAt.getTime() <= Date.now();
 
@@ -316,7 +316,6 @@ const message =
 /** The keys that report a refusal rather than a success. */
 const FAILURES = new Set<AdminOrderMessage>([
   'invalid_transition',
-  'insufficient_stock',
   'stale',
   'bad_request',
   'edit_ttn_exists',
@@ -487,9 +486,8 @@ const carrierDriven =
           ) : (
             <>
               {/* A disclosure rather than a confirm dialog: these are terminal
-                  (or undo a terminal state, which re-touches stock the same way
-                  exiting it did) and there is no script on this page. Two
-                  deliberate clicks. */}
+                  (or undo a terminal state) and every one of them rewrites what
+                  the order *is*. Two deliberate clicks. */}
               {/* The disclosure ids keep them open across the enhancement
                   layer's swaps — a refused action must not fold away the
                   warning it was refused under. */}
@@ -523,7 +521,8 @@ const carrierDriven =
                       )}
                       {/* Secondary, not danger: this one *undoes* a terminal
                           state. It shares the disclosure with the exits because
-                          it moves stock, not because it is destructive. */}
+                          it is the same decision read backwards, not because it
+                          is destructive. */}
                       <button type="submit" class="admin-btn admin-btn-secondary w-full sm:w-auto">
                         {ORDER_REVERT_LABELS[revert]}
                       </button>

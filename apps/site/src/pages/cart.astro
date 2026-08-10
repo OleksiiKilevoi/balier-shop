@@ -155,7 +155,6 @@ export const prerender = false;
               <span data-line-variant-name></span>
             </p>
 
-            <p data-line-stock class="text-ink-muted mt-2 text-xs" hidden></p>
           </div>
 
           {/* Wraps at 320px: the stepper is 128px and the price needs the rest. */}
@@ -209,12 +208,6 @@ export const prerender = false;
     const totalOutput = root.querySelector<HTMLElement>('[data-total]');
     const retry = root.querySelector<HTMLButtonElement>('[data-retry]');
 
-    /**
-     * Below this the row says how many are left, which is also the explanation
-     * for a stepper that refuses to go higher.
-     */
-    const LOW_STOCK = 3;
-
     /** Long enough that holding «+» is one request, short enough to feel immediate. */
     const REVALIDATE_DELAY = 600;
 
@@ -241,21 +234,15 @@ export const prerender = false;
     const paintLine = (item: HTMLElement, line: CartLine, quantity: number) => {
       const lineTotal = item.querySelector<HTMLElement>('[data-line-total]');
       if (lineTotal) lineTotal.textContent = formatPrice(line.unitPrice * quantity);
-
-      const stock = item.querySelector<HTMLElement>('[data-line-stock]');
-      if (stock) {
-        stock.textContent = line.available <= LOW_STOCK ? `Залишилось ${line.available} шт.` : '';
-        stock.hidden = line.available > LOW_STOCK;
-      }
     };
 
     /** Row fields that only change when the server says something new. */
     const syncLine = (item: HTMLElement, line: CartLine) => {
       const quantity = quantityOf(item);
-      if (quantity) {
-        quantity.max = String(Math.max(line.available, 1));
-        quantity.value = String(line.quantity);
-      }
+      // The stepper's own `max` is `MAX_ITEM_QUANTITY` and stays there: a line
+      // that survived revalidation is available, and availability has no
+      // number behind it to lower the ceiling to.
+      if (quantity) quantity.value = String(line.quantity);
 
       paintLine(item, line, line.quantity);
     };

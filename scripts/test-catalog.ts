@@ -26,7 +26,6 @@ export interface TestProduct {
   dimensions: string;
   /** Whole hryvnias, exactly as written on the card. Converted at insert time. */
   priceUah: number;
-  stock: number;
   categorySlug: string;
   isFeatured: boolean;
 }
@@ -48,7 +47,6 @@ export const TEST_PRODUCTS: TestProduct[] = [
     details: 'Тримає форму\nДоповнює образ\nПідійде під багато образів',
     dimensions: '30х17х10 см',
     priceUah: 5500,
-    stock: 4,
     categorySlug: 'womens-bags',
     isFeatured: true,
   },
@@ -60,7 +58,6 @@ export const TEST_PRODUCTS: TestProduct[] = [
     description: 'Нагрудна сумка, що підійде під багато образів, включно з класикою.',
     dimensions: '25х15х6 см',
     priceUah: 4800,
-    stock: 6,
     categorySlug: 'mens-bags',
     isFeatured: true,
   },
@@ -73,7 +70,6 @@ export const TEST_PRODUCTS: TestProduct[] = [
       'Максимально охайний, вмісткий та зручний гаманець. Усередині шкіряний підклад, аби купюри було зручно використовувати. Відділ на змійці з розширенням.',
     dimensions: '19х11 см',
     priceUah: 1950,
-    stock: 9,
     categorySlug: 'wallets',
     isFeatured: true,
   },

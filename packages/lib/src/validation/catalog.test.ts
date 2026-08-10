@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
   PRODUCT_PRICE_MAX_HRYVNIAS,
-  STOCK_MAX,
   WEIGHT_GRAMS_MAX,
   catalogFieldErrors,
   categoryActionSchema,
@@ -13,14 +12,14 @@ import {
 
 /**
  * The catalog forms are the first thing in the product that can write a price,
- * a stock level or a public URL, so what these schemas let through is what the
- * shop shows and charges.
+ * an availability flag or a public URL, so what these schemas let through is
+ * what the shop shows and charges.
  *
  * Two properties are worth more than the rest and get exact assertions rather
  * than round trips: **a price crosses into kopiykas here and nowhere else**, so
  * the numbers below are written out in full; and **an empty optional price is
- * `null`, never `0`** — `compare_at_price` and `price_override` are nullable
- * columns whose NULL means "not set", while zero would mean a free product.
+ * `null`, never `0`** — `price_override` is a nullable column whose NULL means
+ * "not set", while zero would mean a free product.
  */
 
 const BASE = {
@@ -33,7 +32,6 @@ const BASE = {
   metaTitle: '',
   metaDescription: '',
   basePrice: '1850',
-  compareAtPrice: '',
   categoryId: '',
   status: 'active',
   position: '0',
@@ -50,7 +48,7 @@ const VARIANT = {
   colorHex: '',
   priceOverride: '',
   weightGrams: '',
-  stock: '3',
+  inStock: 'on',
   position: '0',
 } as const;
 
@@ -145,23 +143,6 @@ describe('product_save', () => {
     }
   });
 
-  it('keeps an empty compare-at price as null rather than zero', () => {
-    const result = saveProduct({ compareAtPrice: '' });
-    expect(result.success).toBe(true);
-    if (result.success && result.data.intent === 'product_save') {
-      expect(result.data.compareAtPrice).toBeNull();
-    }
-  });
-
-  it('still refuses a compare-at price that is present and wrong', () => {
-    expect(saveProduct({ compareAtPrice: '0' }).success).toBe(false);
-    expect(saveProduct({ compareAtPrice: 'abc' }).success).toBe(false);
-    const result = saveProduct({ compareAtPrice: '2400' });
-    if (result.success && result.data.intent === 'product_save') {
-      expect(result.data.compareAtPrice).toBe(240_000);
-    }
-  });
-
   it('turns blank optional text into null', () => {
     const result = saveProduct({ dimensions: '   ', metaTitle: '' });
     expect(result.success).toBe(true);
@@ -200,15 +181,22 @@ describe('variant intents', () => {
       expect(result.data.colorName).toBeNull();
       expect(result.data.colorHex).toBeNull();
       expect(result.data.priceOverride).toBeNull();
-      expect(result.data.stock).toBe(3);
+      expect(result.data.inStock).toBe(true);
     }
   });
 
-  it('accepts zero stock but not a negative or absurd one', () => {
-    expect(addVariant({ stock: '0' }).success).toBe(true);
-    expect(addVariant({ stock: '-1' }).success).toBe(false);
-    expect(addVariant({ stock: '1.5' }).success).toBe(false);
-    expect(addVariant({ stock: String(STOCK_MAX + 1) }).success).toBe(false);
+  /**
+   * An unticked checkbox posts nothing at all, so «немає в наявності» arrives
+   * as an absent key — which must parse as `false` rather than fail the form.
+   */
+  it('reads a missing availability checkbox as out of stock', () => {
+    const { inStock: _omitted, ...withoutBox } = VARIANT;
+    const result = productActionSchema.safeParse(withoutBox);
+
+    expect(result.success).toBe(true);
+    if (result.success && result.data.intent === 'variant_add') {
+      expect(result.data.inStock).toBe(false);
+    }
   });
 
   /**

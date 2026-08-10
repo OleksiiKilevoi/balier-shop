@@ -4,14 +4,11 @@ import { formatPrice, type Kopiykas } from '@balier/lib/money';
 interface Props {
   /** Kopiykas. */
   amount: Kopiykas;
-  /** Kopiykas. Rendered struck through, only when higher than `amount`. */
-  compareAt?: Kopiykas | null;
   size?: 'sm' | 'md' | 'lg';
   class?: string;
 }
 
-const { amount, compareAt, size = 'md', class: className } = Astro.props;
-const showCompareAt = typeof compareAt === 'number' && compareAt > amount;
+const { amount, size = 'md', class: className } = Astro.props;
 
 const sizes = {
   sm: 'text-sm',
@@ -22,9 +19,4 @@ const sizes = {
 
 <p class:list={['flex items-baseline gap-2', className]}>
   <span class:list={['price', sizes[size]]}>{formatPrice(amount)}</span>
-  {
-    showCompareAt && (
-      <span class="text-ink-muted text-sm line-through tabular-nums">{formatPrice(compareAt)}</span>
-    )
-  }
 </p>

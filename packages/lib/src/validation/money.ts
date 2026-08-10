@@ -47,9 +47,9 @@ export function wholeHryvniaSchema({ min, max, error }: Bounds) {
 
 /**
  * The same, but an empty field means «not set» rather than «zero» — which is
- * what `compare_at_price` and `price_override` are: nullable columns whose NULL
- * has a meaning (no crossed-out price; use the product's base price). Zero would
- * be a free product, so the two cannot be conflated.
+ * what `price_override` is: a nullable column whose NULL has a meaning (use the
+ * product's base price). Zero would be a free product, so the two cannot be
+ * conflated.
  */
 export function optionalWholeHryvniaSchema({ min, max, error }: Bounds) {
   return z

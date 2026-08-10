@@ -13,7 +13,7 @@ import type { Kopiykas } from '../../money';
  */
 
 const DEFAULT_COD_LIMIT: Kopiykas = 500_000; // 5 000 UAH, matches the seed value.
-const DEFAULT_RESERVATION_TTL_MINUTES = 30;
+const DEFAULT_PAYMENT_TTL_MINUTES = 30;
 
 interface SettingRow {
   value: unknown;
@@ -75,10 +75,17 @@ export async function setCodLimitKopiykas(db: Db, value: Kopiykas): Promise<void
   await writeSetting(db, 'cod_limit', value);
 }
 
-/** Minutes a stock reservation is held for an unpaid order before it lapses. */
-export async function getReservationTtlMinutes(db: Db): Promise<number> {
-  const value = await readSetting(db, 'reservation_ttl_minutes');
-  return typeof value === 'number' ? value : DEFAULT_RESERVATION_TTL_MINUTES;
+/**
+ * Minutes an unpaid card order stays payable: the validity stamped on its
+ * Monobank invoice, and the age at which the cron sweeps the order itself.
+ *
+ * Stored under `reservation_ttl_minutes` until 2026-08-10 — it was the life of
+ * a stock reservation back when stock was counted. Migration `0016` renames the
+ * row; the fallback covers a database where neither key was ever written.
+ */
+export async function getPaymentTtlMinutes(db: Db): Promise<number> {
+  const value = await readSetting(db, 'payment_ttl_minutes');
+  return typeof value === 'number' ? value : DEFAULT_PAYMENT_TTL_MINUTES;
 }
 
 /* ------------------------------------------------------------- nova poshta */

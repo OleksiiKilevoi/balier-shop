@@ -193,8 +193,8 @@ const countLabel = `${total} ${pluralUk(total, {
                     {formatPrice(row.displayPrice)}
                   </span>
                   <span class="text-fg-subtle mt-1 block text-xs">
-                    {row.activeVariantCount} з {row.variantCount} у продажу · залишок{' '}
-                    {row.totalStock}
+                    {row.activeVariantCount} з {row.variantCount} у продажу ·{' '}
+                    {row.inStockVariantCount} в наявності
                   </span>
                 </span>
               </a>
@@ -210,7 +210,7 @@ const countLabel = `${total} ${pluralUk(total, {
                 <th scope="col" class="px-4 py-3 font-medium">Категорія</th>
                 <th scope="col" class="px-4 py-3 text-right font-medium">Ціна</th>
                 <th scope="col" class="px-4 py-3 text-right font-medium">Варіанти</th>
-                <th scope="col" class="px-4 py-3 text-right font-medium">Залишок</th>
+                <th scope="col" class="px-4 py-3 text-right font-medium">В наявності</th>
                 <th scope="col" class="px-4 py-3 font-medium">Оновлено</th>
                 <th scope="col" class="px-4 py-3 font-medium">Статус</th>
               </tr>
@@ -251,16 +251,17 @@ const countLabel = `${total} ${pluralUk(total, {
                     {row.activeVariantCount} / {row.variantCount}
                   </td>
                   <td class="px-4 py-3 text-right tabular-nums">
-                    {/* Zero stock on a published product is the one number in
-                        this table worth catching from across the room. */}
+                    {/* A published product with nothing in stock is the one
+                        thing in this table worth catching from across the
+                        room: it is on the shop and cannot be bought. */}
                     <span
                       class:list={[
-                        row.status === 'active' && row.totalStock === 0
+                        row.status === 'active' && row.inStockVariantCount === 0
                           ? 'text-danger font-medium'
                           : 'text-fg-muted',
                       ]}
                     >
-                      {row.totalStock}
+                      {row.inStockVariantCount} / {row.activeVariantCount}
                     </span>
                   </td>
                   <td class="text-fg-muted px-4 py-3 whitespace-nowrap">

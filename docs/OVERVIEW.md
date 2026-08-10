@@ -64,7 +64,7 @@ src/
       queries/            # queries grouped by domain
     monobank/             # API client + webhook verification
     novaposhta/           # API client + reference data sync
-    orders/               # order creation, state machine, reservations
+    orders/               # order creation, state machine, waybills
     cart/                 # nanostores store + server-side validation
     notify/               # telegram, email
     validation/           # zod schemas shared by client and server
@@ -109,10 +109,11 @@ Both are wrapped in `src/lib/db/index.ts`; use those helpers rather than constru
 - **`createDb(url)`** → `drizzle-orm/neon-http`. The default for reads. One HTTP round trip per
   query, nothing to clean up. **Does not support interactive transactions.**
 - **`createTxDb(url)`** → `drizzle-orm/neon-serverless` (`Pool` over WebSocket), for anything that
-  must be atomic: creating an order with its stock reservation, and the Monobank webhook transition.
+  must be atomic: creating an order with its items (and, for cash on delivery, its `confirmed`
+  status), and the Monobank webhook transition.
   Returns `{ db, close }`; the caller must `ctx.waitUntil(close())` in a `finally`.
 
-Rule: any operation that changes stock and order status at the same time runs in a transaction.
+Rule: any operation that writes an order row and its dependent rows at once runs in a transaction.
 
 ## Module map
 
@@ -126,7 +127,7 @@ What exists in the repository today, as distinct from the target shape above.
 | `src/pages/products/category/[slug].astro` | Category grid, reached from the product page's category pill |
 | `src/pages/search.astro` | Plain GET search form + results; no API route, no autocomplete |
 | `src/pages/cart.astro` | The cart — client-rendered from `/api/cart`; rows cloned from a `<template>` |
-| `src/pages/api/cart.ts` | Server-side pricing and stock validation; what checkout will also call |
+| `src/pages/api/cart.ts` | Server-side pricing and availability validation; what checkout will also call |
 | `src/pages/media/[...key].ts` | Byte pump for R2 objects; immutable caching |
 | `src/pages/checkout.astro` + `checkout/{success,failure}.astro` | The order form and its two outcomes |
 | `src/pages/api/checkout.ts`, `api/checkout/*` | Order creation; the COD limit and the two Nova Poshta lookups |
@@ -137,7 +138,7 @@ What exists in the repository today, as distinct from the target shape above.
 | `src/middleware.ts` | Two gates in sequence: the `/admin/**` session check, then per-IP rate limiting |
 | `src/lib/auth/` | Password hashing and the signed session cookie (+ tests) |
 | `scripts/admin-user.ts` | `pnpm admin:user` — create, reset, disable an admin |
-| `src/lib/orders/` | Order creation, the state machine, stock reservations |
+| `src/lib/orders/` | Order creation, the state machine, waybills and registers |
 | `src/lib/monobank/index.ts` | `PaymentPort` — invoices, status, ECDSA webhook verification (+ tests) |
 | `src/lib/novaposhta/` | `ShippingPort` client + the reference-data sync the cron runs |
 | `src/lib/notify/` | `telegram.ts`, `email.ts` (both `NotifierPort`), shared `format.ts` |
@@ -149,10 +150,10 @@ What exists in the repository today, as distinct from the target shape above.
 | `src/layouts/StaticPageLayout.astro` | Shared frame for the seven static pages |
 | `src/components/` | `Container`, `Button`, `Price`, `ProductCard`, `ProductGallery`, `QuantityStepper`, `Breadcrumbs`, `ContentPlaceholder`, `SiteHeader`, `SiteFooter` |
 | `src/stores/cart.ts` | The browser cart — variant ids and quantities only, persisted to `localStorage` |
-| `src/lib/cart/index.ts` | Pure totals: pricing from DB rows, clamping to stock, correction notices (+ `index.test.ts`) |
-| `src/lib/db/schema.ts` | The 15-table schema — single source of truth |
+| `src/lib/cart/index.ts` | Pure totals: pricing from DB rows, dropping unavailable lines, correction notices (+ `index.test.ts`) |
+| `src/lib/db/schema.ts` | The schema — single source of truth |
 | `src/lib/db/index.ts` | `createDb` / `createTxDb` factories |
-| `src/lib/db/queries/` | `products.ts`, `categories.ts`, `cart.ts`, `stock.ts` (the one definition of *available*), `locale.ts` |
+| `src/lib/db/queries/` | `products.ts`, `categories.ts`, `cart.ts`, `locale.ts` |
 | `src/lib/media/index.ts` | Content-hash keys, format allowlist, `storeImage`, `mediaUrl` |
 | `src/lib/telegram/index.ts` | `orderDeepLink` — shared by the page and its client script |
 | `src/lib/money.ts` | The `Kopiykas` type and formatting |

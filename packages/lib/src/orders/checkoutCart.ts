@@ -12,7 +12,7 @@ import type { CartItemInput } from '../validation/cart';
  * they were buying.
  */
 
-export type CheckoutNoticeReason = 'unavailable' | 'out_of_stock' | 'reduced';
+export type CheckoutNoticeReason = 'unavailable' | 'out_of_stock';
 
 export interface CheckoutNotice {
   variantId: string;
@@ -34,10 +34,10 @@ export type CheckoutCartResult =
 /**
  * Resolves requested items against what the database currently says.
  *
- * Any line that cannot be filled exactly as asked — gone, sold out, or short
- * on stock — fails the whole result. `notices` is empty only when the cart
- * itself was empty, which the caller should reject before ever reaching here
- * (there is nothing to order).
+ * Any line that cannot be filled as asked — gone or flagged out of stock —
+ * fails the whole result. `notices` is empty only when the cart itself was
+ * empty, which the caller should reject before ever reaching here (there is
+ * nothing to order).
  */
 export function resolveCheckoutCart(
   items: readonly CartItemInput[],
@@ -55,13 +55,8 @@ export function resolveCheckoutCart(
       continue;
     }
 
-    if (variant.available <= 0) {
+    if (!variant.inStock) {
       notices.push({ variantId: item.variantId, reason: 'out_of_stock', title: variant.productTitle });
-      continue;
-    }
-
-    if (item.quantity > variant.available) {
-      notices.push({ variantId: item.variantId, reason: 'reduced', title: variant.productTitle });
       continue;
     }
 

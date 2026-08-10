@@ -74,7 +74,7 @@ async function seed() {
 
     await db
       .insert(schema.productVariants)
-      .values({ productId: tote.id, sku: 'TOTE-CLASSIC', stock: 12, isActive: true })
+      .values({ productId: tote.id, sku: 'TOTE-CLASSIC', isActive: true })
       .onConflictDoNothing();
   }
 
@@ -85,7 +85,6 @@ async function seed() {
       slug: 'crossbody-mini',
       categoryId,
       basePrice: hryvnias(2400),
-      compareAtPrice: hryvnias(2900),
       status: 'active',
       isFeatured: true,
     })
@@ -111,7 +110,6 @@ async function seed() {
           sku: 'CROSS-MINI-BLK',
           colorName: 'Чорний',
           colorHex: '#1a1a1c',
-          stock: 5,
           position: 1,
         },
         {
@@ -119,7 +117,6 @@ async function seed() {
           sku: 'CROSS-MINI-BEI',
           colorName: 'Бежевий',
           colorHex: '#d9cbb8',
-          stock: 3,
           position: 2,
         },
         {
@@ -127,7 +124,9 @@ async function seed() {
           sku: 'CROSS-MINI-BRN',
           colorName: 'Коричневий',
           colorHex: '#6b4a32',
-          stock: 0,
+          // The one seeded colour that is sold out, so every screen that has
+          // to render «немає в наявності» has something to render it for.
+          inStock: false,
           position: 3,
         },
       ])
@@ -142,8 +141,8 @@ async function seed() {
     .values([
       // Kopiykas. Orders above this cannot use cash on delivery.
       { key: 'cod_limit', value: hryvnias(5000) },
-      // Minutes a stock reservation is held for an unpaid order.
-      { key: 'reservation_ttl_minutes', value: 30 },
+      // Minutes an unpaid card order stays payable before the cron sweeps it.
+      { key: 'payment_ttl_minutes', value: 30 },
     ])
     .onConflictDoNothing();
 
@@ -224,10 +223,10 @@ async function seedTestProducts() {
       .onConflictDoNothing();
 
     // One variant, no colour choice — the selector stays hidden. Still a row:
-    // stock, SKU and every cart/order reference hang off the variant, always.
+    // availability, SKU and every cart/order reference hang off the variant.
     await db
       .insert(schema.productVariants)
-      .values({ productId, sku: product.sku, stock: product.stock, isActive: true })
+      .values({ productId, sku: product.sku, isActive: true })
       .onConflictDoNothing();
 
     if (!manifest) continue;

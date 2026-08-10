@@ -1,10 +1,10 @@
 import * as Sentry from '@sentry/cloudflare';
-import { eq, inArray, sql } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import type { Db, TxDb } from '../db';
 import type { Order, OrderStatus } from '../db/schema';
-import { orderItems, orders, payments, productVariants, stockReservations } from '../db/schema';
+import { orders, payments } from '../db/schema';
 import type { PaymentPort } from '../ports';
-import { allowedTransitions, isStockCommitted, orderDetailsLock } from './status';
+import { allowedTransitions, orderDetailsLock } from './status';
 import type { OrderDetailsLock } from './status';
 
 /**
@@ -12,8 +12,13 @@ import type { OrderDetailsLock } from './status';
  *
  * Deliberately thin: every rule about *what* may happen lives in `./status.ts`,
  * where it is pure and tested. What is here is the part that has to be
- * transactional — re-reading the row under a lock, and keeping inventory
- * honest both when an order is undone and when that undo is itself undone.
+ * transactional — re-reading the row under a lock before writing it.
+ *
+ * Nothing here moves inventory. Cancelling used to put units back and
+ * reverting a cancellation used to take them out again (refusing the revert
+ * when they had since been sold); with availability a flag no order ever
+ * writes, both halves went on 2026-08-10 — the manager decides what is in
+ * stock, and a cancelled order does not.
  *
  * Note what this file cannot do: it never independently decides an order is
  * `paid` — `allowedTransitions` only ever offers `paid` as a *revert* target
@@ -27,12 +32,6 @@ export type UpdateOrderStatusResult =
   /** The row moved (or was never in `from`) since the page was rendered. */
   | { ok: false; reason: 'stale'; order: Order }
   | { ok: false; reason: 'invalid_transition'; order: Order }
-  /**
-   * Reverting out of `cancelled`/`refunded` re-commits the stock that exit
-   * put back — refused, whole transaction, rather than oversold, if any of
-   * it has since been sold to someone else.
-   */
-  | { ok: false; reason: 'insufficient_stock'; order: Order }
   | { ok: false; reason: 'not_found' };
 
 export async function updateOrderStatus(
@@ -58,72 +57,6 @@ export async function updateOrderStatus(
 
     const enteringExit = input.next === 'cancelled' || input.next === 'refunded';
     const leavingExit = order.status === 'cancelled' || order.status === 'refunded';
-
-    if (enteringExit) {
-      // Put the units back exactly when they were taken out, and never
-      // otherwise: an order that still holds a reservation has decremented
-      // nothing, so restocking it would invent stock that does not exist.
-      if (isStockCommitted(order.status)) {
-        const items = await tx
-          .select({ variantId: orderItems.variantId, quantity: orderItems.quantity })
-          .from(orderItems)
-          .where(eq(orderItems.orderId, order.id));
-
-        for (const item of items) {
-          await tx
-            .update(productVariants)
-            .set({
-              stock: sql`${productVariants.stock} + ${item.quantity}`,
-              updatedAt: sql`now()`,
-            })
-            .where(eq(productVariants.id, item.variantId));
-        }
-      }
-
-      // A no-op past the committed statuses, which dropped their reservations
-      // when they committed — but the pre-payment ones still hold live rows,
-      // and leaving them would keep stock spoken for by a dead order until the
-      // TTL cron got round to it.
-      await tx.delete(stockReservations).where(eq(stockReservations.orderId, order.id));
-    } else if (leavingExit) {
-      // The mirror image of the block above: `statusBeforeExit` is only ever
-      // offered as `next` when it is `STOCK_COMMITTED` (`revertTarget`), so
-      // re-decrementing is always the right move — but the units that were
-      // put back may since have been sold to someone else. Lock and check
-      // every row first; refuse the whole revert if even one is short,
-      // rather than oversell.
-      const items = await tx
-        .select({ variantId: orderItems.variantId, quantity: orderItems.quantity })
-        .from(orderItems)
-        .where(eq(orderItems.orderId, order.id));
-
-      const variants = await tx
-        .select({ id: productVariants.id, stock: productVariants.stock })
-        .from(productVariants)
-        .where(
-          inArray(
-            productVariants.id,
-            items.map((item) => item.variantId),
-          ),
-        )
-        .for('update');
-
-      const stockById = new Map(variants.map((variant) => [variant.id, variant.stock]));
-      const insufficient = items.some(
-        (item) => (stockById.get(item.variantId) ?? 0) < item.quantity,
-      );
-      if (insufficient) return { ok: false, reason: 'insufficient_stock', order };
-
-      for (const item of items) {
-        await tx
-          .update(productVariants)
-          .set({
-            stock: sql`${productVariants.stock} - ${item.quantity}`,
-            updatedAt: sql`now()`,
-          })
-          .where(eq(productVariants.id, item.variantId));
-      }
-    }
 
     const [updated] = await tx
       .update(orders)

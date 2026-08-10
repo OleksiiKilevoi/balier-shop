@@ -305,7 +305,7 @@ const displayPrice =
   activeVariants.length > 0 && product
     ? Math.min(...activeVariants.map((variant) => variant.priceOverride ?? product.basePrice))
     : (product?.basePrice ?? 0);
-const totalStock = activeVariants.reduce((sum, variant) => sum + variant.stock, 0);
+const inStockVariants = activeVariants.filter((variant) => variant.inStock);
 /** Resolvable on the storefront: `getProductBySlug` needs both of these. */
 const isLive = product?.status === 'active' && activeVariants.length > 0;
 
@@ -332,6 +332,17 @@ function redrawVariant(
 ): string {
   if (failedIntent === 'variant_save' && body.variantId === variantId) return body[name] ?? '';
   return text(stored);
+}
+
+/**
+ * The same, for a checkbox: a refused row is redrawn from its own body, where
+ * an unticked box is an *absent* key rather than an empty one — so `=== 'on'`
+ * is the whole test, and it correctly reads «not ticked» for a field the body
+ * never carried.
+ */
+function redrawVariantChecked(variantId: string, name: string, stored: boolean): boolean {
+  if (failedIntent === 'variant_save' && body.variantId === variantId) return body[name] === 'on';
+  return stored;
 }
 
 const variantRowFailed = (variantId: string) =>
@@ -453,8 +464,15 @@ function imageMeta(image: (typeof images)[number]): string {
                 </dd>
               </div>
               <div>
-                <dt class="text-fg-subtle text-xs">Залишок</dt>
-                <dd class="text-fg mt-0.5 font-medium tabular-nums">{totalStock}</dd>
+                <dt class="text-fg-subtle text-xs">В наявності</dt>
+                <dd
+                  class:list={[
+                    'mt-0.5 font-medium tabular-nums',
+                    inStockVariants.length === 0 ? 'text-danger' : 'text-fg',
+                  ]}
+                >
+                  {inStockVariants.length} / {activeVariants.length}
+                </dd>
               </div>
               <div>
                 <dt class="text-fg-subtle text-xs">Оновлено</dt>
@@ -476,6 +494,13 @@ function imageMeta(image: (typeof images)[number]): string {
                 {ADMIN_STOREFRONT_NOTES.noVariants}
               </p>
             )}
+            {product!.status === 'active' &&
+              activeVariants.length > 0 &&
+              inStockVariants.length === 0 && (
+                <p class="rounded-card admin-tone-attention mt-3 p-3 text-xs">
+                  {ADMIN_STOREFRONT_NOTES.noneInStock}
+                </p>
+              )}
             {images.length === 0 && (
               <p class="rounded-card admin-tone-attention mt-3 p-3 text-xs">
                 {ADMIN_STOREFRONT_NOTES.noImages}
@@ -589,35 +614,6 @@ function imageMeta(image: (typeof images)[number]): string {
                   {invalid.has('basePrice') && (
                     <p class="text-danger mt-1 text-xs">{ADMIN_CATALOG_ERRORS.basePrice}</p>
                   )}
-                </div>
-
-                <div class="w-full sm:w-40">
-                  <label for="compareAtPrice" class="text-fg-subtle text-xs">Стара ціна</label>
-                  <div class="relative mt-1">
-                    <input
-                      id="compareAtPrice"
-                      name="compareAtPrice"
-                      type="text"
-                      inputmode="numeric"
-                      value={redraw(
-                        'product_save',
-                        'compareAtPrice',
-                        toHryvnias(product!.compareAtPrice),
-                      )}
-                      autocomplete="off"
-                      class:list={[
-                        'admin-field pr-10',
-                        invalid.has('compareAtPrice') && 'border-danger',
-                      ]}
-                    />
-                    <span
-                      class="text-fg-subtle pointer-events-none absolute inset-y-0 right-4.5 flex items-center text-base sm:text-sm"
-                      aria-hidden="true"
-                    >
-                      ₴
-                    </span>
-                  </div>
-                  <p class="text-fg-subtle mt-1 text-xs">Закреслена. Порожньо — не показувати.</p>
                 </div>
 
                 <div class="w-full sm:w-44">
@@ -777,8 +773,8 @@ function imageMeta(image: (typeof images)[number]): string {
           <section class="admin-card mt-6 p-5">
             <h2 class="text-fg text-base font-semibold">Варіанти</h2>
             <p class="text-fg-muted mt-1 text-sm">
-              Кожен варіант має свій артикул і залишок. Товар без кольорів — це один варіант із
-              порожньою назвою кольору.
+              Кожен варіант має свій артикул і власну наявність. Товар без кольорів — це один
+              варіант із порожньою назвою кольору.
             </p>
 
             <ul class="mt-4 space-y-3">
@@ -859,22 +855,21 @@ function imageMeta(image: (typeof images)[number]): string {
                         />
                       </div>
 
-                      <div class="w-full sm:w-32">
-                        <label for={`stock-${variant.id}`} class="text-fg-subtle text-xs">
-                          Залишок
+                      {/* The whole of "how much of this is there". A tick is
+                          the storefront's «Додати до кошика»; untick it and the
+                          page says «Немає в наявності» instead. Nothing else
+                          writes it — an order never does. */}
+                      <div class="w-full sm:w-40">
+                        <span class="text-fg-subtle text-xs">Наявність</span>
+                        <label class="min-h-touch mt-1 flex items-center gap-2.5 text-sm md:min-h-10">
+                          <input
+                            type="checkbox"
+                            name="inStock"
+                            checked={redrawVariantChecked(variant.id, 'inStock', variant.inStock)}
+                            class="size-4"
+                          />
+                          <span class="text-fg-muted">В наявності</span>
                         </label>
-                        <input
-                          id={`stock-${variant.id}`}
-                          name="stock"
-                          type="text"
-                          inputmode="numeric"
-                          value={redrawVariant(variant.id, 'stock', variant.stock)}
-                          autocomplete="off"
-                          class:list={[
-                            'admin-field mt-1',
-                            variantRowFailed(variant.id) && invalid.has('stock') && 'border-danger',
-                          ]}
-                        />
                       </div>
 
                       <div class="w-full sm:w-36">
@@ -1053,17 +1048,17 @@ function imageMeta(image: (typeof images)[number]): string {
                     />
                   </div>
 
-                  <div class="w-full sm:w-32">
-                    <label for="new-stock" class="text-fg-subtle text-xs">Залишок</label>
-                    <input
-                      id="new-stock"
-                      name="stock"
-                      type="text"
-                      inputmode="numeric"
-                      value={redraw('variant_add', 'stock', '0')}
-                      autocomplete="off"
-                      class="admin-field mt-1"
-                    />
+                  <div class="w-full sm:w-40">
+                    <span class="text-fg-subtle text-xs">Наявність</span>
+                    <label class="min-h-touch mt-1 flex items-center gap-2.5 text-sm md:min-h-10">
+                      <input
+                        type="checkbox"
+                        name="inStock"
+                        checked={failedIntent === 'variant_add' ? body.inStock === 'on' : true}
+                        class="size-4"
+                      />
+                      <span class="text-fg-muted">В наявності</span>
+                    </label>
                   </div>
 
                   <div class="w-full sm:w-36">

@@ -94,8 +94,6 @@ export const products = pgTable(
     categoryId: uuid('category_id').references(() => categories.id, { onDelete: 'set null' }),
     /** Kopiykas. A variant may override this. */
     basePrice: integer('base_price').notNull(),
-    /** Kopiykas. Crossed-out "old" price, shown only when set and higher than the effective price. */
-    compareAtPrice: integer('compare_at_price'),
     /**
      * Free-form, as written on the product card: `30х17х10 см`, `19х11 см`.
      * Not translated — the digits carry the meaning and `см` reads the same in
@@ -155,8 +153,19 @@ export const productVariants = pgTable(
      * and an argument at the counter (docs/plans/novaposhta.md).
      */
     weightGrams: integer('weight_grams'),
-    /** Physical units on hand. Availability = stock - active reservations. */
-    stock: integer('stock').notNull().default(0),
+    /**
+     * Is this colour on sale right now? A flag rather than a count, decided
+     * 2026-08-10: the shop's stock is one-off pieces a person keeps in their
+     * head, and a number nobody updates is worse than no number. Nothing
+     * decrements it — an order does not change availability, only a manager
+     * does, so two customers *can* buy the last bag. That risk was raised and
+     * accepted; the manager confirms every order by hand anyway.
+     *
+     * Distinct from `isActive`: this one is «закінчилось, буде ще», the other
+     * is «цього кольору більше не існує» and hides the variant from the picker
+     * entirely.
+     */
+    inStock: boolean('in_stock').notNull().default(true),
     position: integer('position').notNull().default(0),
     isActive: boolean('is_active').notNull().default(true),
     createdAt,
@@ -290,30 +299,14 @@ export const orderItems = pgTable(
   (t) => [index('order_items_order_idx').on(t.orderId)],
 );
 
-/**
- * Single source of truth for "how much of this variant is spoken for".
- * Availability = variant.stock - SUM(quantity) WHERE expires_at > now().
- * A cron deletes expired rows (Phase 3).
+/*
+ * `stock_reservations` lived here until 2026-08-10. It held "how much of this
+ * variant is spoken for" against a counted `product_variants.stock`, and both
+ * went when availability became a flag: there is no number left to hold back,
+ * so an unpaid order reserves nothing. What the table also did — mark how long
+ * an unpaid card order may sit — is now `orders.created_at` measured against
+ * the `payment_ttl_minutes` setting, read by the cron's own sweep.
  */
-export const stockReservations = pgTable(
-  'stock_reservations',
-  {
-    id: uuid('id').primaryKey().defaultRandom(),
-    orderId: uuid('order_id')
-      .notNull()
-      .references(() => orders.id, { onDelete: 'cascade' }),
-    variantId: uuid('variant_id')
-      .notNull()
-      .references(() => productVariants.id, { onDelete: 'cascade' }),
-    quantity: integer('quantity').notNull(),
-    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
-    createdAt,
-  },
-  (t) => [
-    index('stock_reservations_variant_idx').on(t.variantId),
-    index('stock_reservations_expires_idx').on(t.expiresAt),
-  ],
-);
 
 export const payments = pgTable(
   'payments',
@@ -634,7 +627,6 @@ export const productTranslationsRelations = relations(productTranslations, ({ on
 export const productVariantsRelations = relations(productVariants, ({ one, many }) => ({
   product: one(products, { fields: [productVariants.productId], references: [products.id] }),
   images: many(productImages),
-  reservations: many(stockReservations),
 }));
 
 export const productImagesRelations = relations(productImages, ({ one }) => ({
@@ -648,21 +640,12 @@ export const productImagesRelations = relations(productImages, ({ one }) => ({
 export const ordersRelations = relations(orders, ({ many }) => ({
   items: many(orderItems),
   payments: many(payments),
-  reservations: many(stockReservations),
 }));
 
 export const orderItemsRelations = relations(orderItems, ({ one }) => ({
   order: one(orders, { fields: [orderItems.orderId], references: [orders.id] }),
   variant: one(productVariants, {
     fields: [orderItems.variantId],
-    references: [productVariants.id],
-  }),
-}));
-
-export const stockReservationsRelations = relations(stockReservations, ({ one }) => ({
-  order: one(orders, { fields: [stockReservations.orderId], references: [orders.id] }),
-  variant: one(productVariants, {
-    fields: [stockReservations.variantId],
     references: [productVariants.id],
   }),
 }));

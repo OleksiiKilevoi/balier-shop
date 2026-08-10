@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:workers';
 import type { APIRoute } from 'astro';
 import { createDb, createTxDb } from '@balier/lib/db';
-import { getCodLimitKopiykas, getReservationTtlMinutes } from '@balier/lib/db/queries/settings';
+import { getCodLimitKopiykas, getPaymentTtlMinutes } from '@balier/lib/db/queries/settings';
 import { createMonobankPayment } from '@balier/lib/monobank';
 import { createEmailNotifier } from '@balier/lib/notify/email';
 import { createTelegramNotifier } from '@balier/lib/notify/telegram';
@@ -49,9 +49,9 @@ export const POST: APIRoute = async ({ request, locals }) => {
   // if (!captchaOk) return json({ error: 'captcha_failed' }, 400);
 
   const db = createDb(env.DATABASE_URL);
-  const [codLimitKopiykas, reservationTtlMinutes] = await Promise.all([
+  const [codLimitKopiykas, paymentTtlMinutes] = await Promise.all([
     getCodLimitKopiykas(db),
-    getReservationTtlMinutes(db),
+    getPaymentTtlMinutes(db),
   ]);
 
   const { db: txDb, close } = createTxDb(env.DATABASE_URL);
@@ -74,7 +74,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
         email: createEmailNotifier(env.EMAIL, env.ORDER_EMAIL_FROM),
         redirectBaseUrl: new URL(request.url).origin,
         webhookUrl: new URL('/api/webhooks/monobank', new URL(request.url).origin).toString(),
-        reservationTtlMinutes,
+        paymentTtlMinutes,
         codLimitKopiykas,
       },
     );

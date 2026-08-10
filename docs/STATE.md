@@ -4,32 +4,43 @@
 
 ## 📍 CURRENT STATE (overwrite this block; keep tight)
 
-- **Last done:** **Sentry error tracking, all three phases of `docs/plans/sentry.md`**
-  (2026-08-09, committed as `8d103f6` by the client, deployed everywhere the same day). One
-  project `balier` in the **`drizzle-team` org** (client's decision: the org stays ours after
-  release — Sentry is off the Phase 5 swap list); events tagged `worker: site|admin|cron`.
-  Phase 1: `wrapRequestHandler` first in both middlewares, `withSentry` around the cron — whose
-  jobs moved from `ctx.waitUntil` to `await` so their failures reach the wrapper. Phase 2: 15
-  captures in the deliberately-swallowed catches (dangling invoices, refund-owed payments, NP
-  sweep/sync, email/Telegram sends, the OTP dispatch's bare `.catch(() => {})`). Phase 3:
-  token-gated `@sentry/vite-plugin` in both Astro builds (upload in Workers Builds, maps deleted
-  after, failed upload warns instead of failing the deploy), and `deploy.mjs` behind
-  `pnpm cron:deploy` (release = git SHA, `sentry-cli` upload, verified live: bundle
-  `8d103f6` in Sentry). Credentials: 3 build vars on both Workers + `SENTRY_*` in root
-  `.dev.vars`. **Uncommitted tail:** `deploy.mjs`'s `.env`→`.dev.vars` fix +
-  `.dev.vars.example` + plan updates. **Unverified on purpose:** cron frame-path matching until
-  its first real error (first knob recorded in the plan), and the site/admin artifact bundles —
-  check Sentry → Settings → Projects → balier → Source Maps once.
+- **Last done:** **«Стара ціна» removed, root and branch** (2026-08-10, client's call,
+  uncommitted). There is no discount model in the shop now: `products.compare_at_price` is gone
+  (migration **`0018`**, applied to dev — the values went with it), and with it the panel's
+  «Стара ціна» field, its validation entry and error string, the struck-through span on the
+  product page and on `Price.astro`/`ProductCard.astro` (`compareAt` is not a prop any more), the
+  column in both card and detail selects, and the seed's 2900 ₴. `optionalPriceSchema` stays —
+  `price_override` is still the nullable-means-«not set» case it was written for. Gate green,
+  325 tests.
+- **Previously:** **Stock counting replaced by an availability toggle** (2026-08-10, client's call,
+  uncommitted). `product_variants.stock` and the whole `stock_reservations` table are gone;
+  a variant now carries `in_stock boolean not null default true`, and **nothing but a manager
+  writes it** — an order does not decrement, a cancellation does not restore, and two customers
+  buying the last piece was raised and accepted. Migrations **`0016`** (add + backfill
+  `in_stock = stock > 0`, drop the table, rename the setting) and **`0017`** (drop `stock`), both
+  applied to dev. What went with it: the cart's `reduced` notice and every quantity clamp (the
+  stepper's ceiling is `MAX_ITEM_QUANTITY` now), `updateStatus`'s restock/re-decrement blocks and
+  its `insufficient_stock` refusal, `lockCheckoutVariants`' `FOR UPDATE` (renamed
+  `findCheckoutVariants` — it was buying nothing once there was no count to race for), and
+  `status.ts`'s `STOCK_COMMITTED`, which survives renamed as `LIVE_SALE` because the line it draws
+  is attempt-versus-sale, not inventory. The cron's sweep now measures an unpaid order's **age**
+  against `payment_ttl_minutes` (the renamed `reservation_ttl_minutes`, the same value that stamps
+  the invoice's validity) instead of a reservation's expiry. Panel: the «Залишок» number is a
+  «В наявності» checkbox on each variant row and on the add form, the list column and the editor's
+  «На вітрині» card count `N / M` in stock, and a published product with nothing in stock says so.
+  `docs/plans/roadmap.md` still describes the counted model in its Phase 2/3 entries **on purpose**
+  — it records what was built then; `CONVENTIONS.md`, `OVERVIEW.md` and CLAUDE.md's hard rule 3
+  carry the new one.
 - **Context:** the OTP PRG fix went out as `95060e7` before this session; NP-1..NP-5 + `arrived`
-  split live through `a5a192c`.
-- **In progress:** nothing. Migrations `0006`–`0015` are all applied to the **dev** database.
-- **Next step:** back to what was owed before this feature: the NP **create-inspect-delete volume
-  pass** on the dev key (the
-  volumetric fix is the one change whose wrongness costs money at the counter), the register flow
+  split live through `a5a192c`. The NP **create-inspect-delete volume pass** was run by the client
+  (confirmed 2026-08-09) — the `/1_000_000` volumetric fix is verified against the cabinet, closing
+  the follow-up from the 2026-08-07 post-ship review.
+- **In progress:** nothing. Migrations `0006`–`0018` are all applied to the **dev** database.
+- **Next step:** back to what was owed before this feature: the register flow
   with real parcels, and the browser passes — `/checkout`'s delivery step, `/categories`,
   `/settings`, `/users`, image upload preview, `/orders/new` card order. Then Phase 5.
   **A production deploy needs `pnpm db:migrate` against that database and one
-  `pnpm admin:user role <email> admin`**; migrations `0008`/`0009` (and now `0015`) must land
+  `pnpm admin:user role <email> admin`**; migrations `0008`/`0009` (and now `0015`–`0018`) must land
   before that deploy — the gate reads `sessions_valid_from`/`archived_at` on every request, so code
   ahead of schema is a panel nobody can open. The dev sender settings still point at **Київ,
   Відділення №1** as a placeholder handover branch.
@@ -111,7 +122,10 @@
   push auto-deployed `balier-dev` and `balier-admin-dev` (15:06 UTC, verified via
   `wrangler deployments list` — the list prints oldest-first, read the bottom). Only
   `balier-cron` deploys by hand (`pnpm cron:deploy`, now also the sourcemap-upload path).
-- **Dev DB state (real rows, harmless, deliberately not cleaned up):** ten orders. From the Phase 3
+- **Dev DB state (real rows, harmless, deliberately not cleaned up):** the ten below plus
+  `B260810-B4FNH` (COD, `confirmed`, 7 × CROSS-MINI-BLK — the availability drive's proof that an
+  order decrements nothing) and a disabled `qa-stock@balier.test` (admin) alongside the five other
+  disabled accounts. From the Phase 3
   and admin passes: `B260805-XVFYQ` (COD, placed by curl with no captcha token — the proof Turnstile
   is off), `B260804-6DN8Q` (card, paid through the real webhook), `B260804-BYP3K` / `B260804-S86Y7`
   (COD), `B260804-DAMN7` (walked all over by the admin screens — `delivered`, fake TTN
@@ -172,6 +186,36 @@
 > 2026-08-05, not rewritten — this file is read in full at every session start and had reached
 > 852 lines. New session entries go here; move a phase's entries across once the phase is done.
 
+**2026-08-10 (без скидок).** «Убрать "Стара ціна" полностью, система скидок не нужна сейчас».
+The one thing worth asking was depth — code-only or the column too — and the client took the
+column: migration `0018` is a bare `ALTER TABLE products DROP COLUMN compare_at_price`, applied to
+dev, so the old prices are not recoverable. Removed with it: the panel field and its hint, the
+`compareAtPrice` line in `productSaveSchema`, its `CATALOG_FIELDS` entry and its
+`ADMIN_CATALOG_ERRORS` string, both selects in `queries/products.ts` and the two interfaces they
+feed, `ProductFields` + the `updateProduct` set, `Price.astro`'s `compareAt` prop and struck-through
+span (the component is one price now, so `ProductCard` passes one), the product page's
+`showCompareAt` (its `<p>` lost the flex it only needed for two children), and the seed's
+`hryvnias(2900)`. Kept on purpose: `optionalPriceSchema` and `optionalWholeHryvniaSchema` — the
+NULL-is-«not set» rule still has `price_override` to enforce it, and the doc comments were
+rewritten to say so rather than deleted. The two compare-at tests went; 325 pass. `pnpm check` +
+`pnpm build` green, nothing committed, nothing deployed.
+
+**2026-08-10 (наличие вместо остатка).** Asked to drop the stock figure from the shop and put an
+in-stock toggle in its place; the depth was a decision, and the client took the full one — a real
+`in_stock` boolean, reservations and arithmetic deleted, overselling accepted without a safety net
+(both recorded above). Two migrations because drizzle-kit's rename prompt needs a TTY this shell
+does not have: generate with both columns present (`0016`, hand-edited to carry the backfill, the
+table drop and the settings-key rename), then generate the drop alone (`0017`). Driven live rather
+than assumed: `/api/cart` keeps a quantity of 40 and drops an unavailable line with a notice,
+`/api/checkout` refuses an out-of-stock line 409 `cart_changed`, and a **COD order for 7 units was
+placed and left `in_stock = true`** (`B260810-B4FNH`) — the proof nothing decrements. The panel was
+driven through its own rendered form, per the «curl composes a body no control sends» rule: the
+variant row posts `inStock=on`, unticking posts the key not at all, the save redrew the box
+unticked with «0 / 3» and the new warning, and re-ticking restored it with price/weight/position
+untouched. QA admin `qa-stock@balier.test` created and disabled after. 329 tests; gate green;
+nothing deployed, nothing committed. **The cron needs `pnpm cron:deploy` this time** — its sweep is
+new code, and its old one queries a table that no longer exists.
+
 **2026-08-09 (Sentry, planned → built → deployed in one day).** Session opened on «что нам нужно,
 чтобы начать» over `docs/plans/sentry.md`. Decisions along the way, all recorded in the plan: the
 org is the existing `drizzle-team` org we were invited into and **stays ours after release**; one
@@ -182,8 +226,12 @@ vitest → captures are no-ops); Phase 3 verified as far as tokenless: fake-toke
 401 upload, cron `--dry-run` emits bundle+map+release. Client created the token, set 3 build vars
 on both Workers, pushed (auto-deploy) and ran `cron:deploy` — first run skipped upload because
 `deploy.mjs` read a root `.env` this repo doesn't have (its files are `.dev.vars`; fixed, quotes
-stripped), second run uploaded bundle for release `8d103f6`. Traps for next time: root
-`.dev.vars` feeds Node tooling and is quoted; `wrangler deployments list` prints oldest-first.
+stripped), second run uploaded bundle for release `8d103f6`. The site/admin uploads took two
+more rounds: the vars had gone into the runtime Variables panel (build-invisible; moved to the
+Build section, runtime copies deleted — secrets audited intact after), and the fixed build never
+ran because the docs-only tail commit missed the Builds path filter — a Retry build closed it:
+8 artifact bundles confirmed over the API. Traps for next time: root `.dev.vars` feeds Node
+tooling and is quoted; `wrangler deployments list` prints oldest-first.
 
 **2026-08-08 (OTP refresh bugs → PRG).** Two client-found bugs, one root: the code step rendered
 straight in the `otp_send` POST response, so F5 re-posted it — countdown reset every time

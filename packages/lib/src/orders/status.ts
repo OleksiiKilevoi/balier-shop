@@ -37,23 +37,27 @@ import type { OrderStatus, PaymentMethod } from '../db/schema';
  * (`~/lib/db/schema.ts`), written by `./updateStatus.ts` whenever the panel
  * moves an order into either, records the status it actually held a moment
  * before. Reverting restores that recorded fact, and only when it is one of
- * `STOCK_COMMITTED` — a cancellation/refund from `pending`/`awaiting_payment`
+ * `LIVE_SALE` — a cancellation/refund from `pending`/`awaiting_payment`
  * (never done by this panel, but done elsewhere on a payment failure; see
  * `./create.ts`/`./confirmPayment.ts`) has no useful status to go back to,
  * for the same reason those two are never forward-revertable either.
  */
 
 /**
- * Statuses at which the sale is already committed against inventory:
- * `productVariants.stock` has been decremented and the reservation deleted.
+ * The statuses an order reaches as a *live* sale: cash on delivery at creation
+ * (`./create.ts` — there is no payment to wait on), card at the webhook
+ * (`./confirmPayment.ts`), and everything downstream of those.
  *
- * Cash on delivery commits at creation (`./create.ts` — there is no payment to
- * wait on), card commits in the webhook (`./confirmPayment.ts`). Anything before
- * that holds a live `stock_reservations` row instead and has decremented
- * nothing, which is the whole reason this set exists: undoing an order must put
- * units back exactly when they were taken out, and never otherwise.
+ * `pending` and `awaiting_payment` are outside it because they are not an
+ * agreement yet, only an attempt at one — which is why an order cancelled from
+ * either has nothing worth restoring and `revertTarget` below offers no way
+ * back to them.
+ *
+ * This set was called `STOCK_COMMITTED` until 2026-08-10 and meant «the units
+ * have been decremented»; it survived the removal of the stock count because
+ * the line it draws — attempt versus sale — was never really about inventory.
  */
-const STOCK_COMMITTED: ReadonlySet<OrderStatus> = new Set<OrderStatus>([
+const LIVE_SALE: ReadonlySet<OrderStatus> = new Set<OrderStatus>([
   'confirmed',
   'paid',
   'packed',
@@ -61,10 +65,6 @@ const STOCK_COMMITTED: ReadonlySet<OrderStatus> = new Set<OrderStatus>([
   'arrived',
   'delivered',
 ]);
-
-export function isStockCommitted(status: OrderStatus): boolean {
-  return STOCK_COMMITTED.has(status);
-}
 
 /** Nothing follows these by *forward* progress — but see `revertTarget`. */
 const TERMINAL: ReadonlySet<OrderStatus> = new Set<OrderStatus>(['cancelled', 'refunded']);
@@ -135,7 +135,7 @@ export interface OrderStateInput {
  * `arrived` and `delivered` don't need the split — both payment methods reach
  * them through the same tail of the chain. `cancelled`/`refunded` revert
  * to whatever `statusBeforeExit` recorded, but only when that recording is
- * itself a `STOCK_COMMITTED` status — the same eligibility rule that keeps
+ * itself a `LIVE_SALE` status — the same eligibility rule that keeps
  * `pending`/`awaiting_payment` unreachable everywhere else in this module.
  */
 export function revertTarget(order: OrderStateInput): OrderStatus | null {
@@ -151,7 +151,7 @@ export function revertTarget(order: OrderStateInput): OrderStatus | null {
     case 'cancelled':
     case 'refunded': {
       const prior = order.statusBeforeExit;
-      return prior && STOCK_COMMITTED.has(prior) ? prior : null;
+      return prior && LIVE_SALE.has(prior) ? prior : null;
     }
     default:
       return null;
@@ -163,7 +163,8 @@ export function revertTarget(order: OrderStateInput): OrderStatus | null {
  * cancel or refund, exactly one of the two, decided by whether money has
  * changed hands — an order that was never paid for cannot be *refunded*, and
  * an order that was paid for must not be quietly *cancelled* with the money
- * still held. Both return committed stock; see `isStockCommitted`.
+ * still held. Neither touches availability — that is the manager's flag on the
+ * variant, and an undone order is not evidence about it either way.
  *
  * No forward steps (each has its one non-panel owner — see the module doc)
  * and no forward-chain reverts either: undoing `packed` is deleting its

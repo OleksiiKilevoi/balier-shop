@@ -18,8 +18,9 @@ export function createDb(databaseUrl: string) {
 export type Db = ReturnType<typeof createDb>;
 
 /**
- * Write path for anything that must be atomic: order creation with stock
- * reservation, and the Monobank webhook transition.
+ * Write path for anything that must be atomic: order creation (the order row,
+ * its items and, for cash on delivery, its `confirmed` status together) and
+ * the Monobank webhook transition.
  *
  * The caller MUST close the pool. Prefer:
  *

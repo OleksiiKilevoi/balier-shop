@@ -8,9 +8,9 @@ import type { CheckoutNotice } from '../orders/checkoutCart';
  */
 
 /**
- * Unlike `cartNoticeText`, checkout never clamps a line — it refuses the
- * whole order — so there is no surviving quantity to report, only what
- * changed and why the customer needs to go back to `/cart`.
+ * Unlike `cartNoticeText`, checkout does not correct the cart — it refuses the
+ * whole order — so this only says what changed and why the customer needs to
+ * go back to `/cart`.
  */
 export function checkoutNoticeText(notice: CheckoutNotice): string {
   const name = notice.title ? `«${notice.title}»` : 'Один із товарів';
@@ -20,8 +20,6 @@ export function checkoutNoticeText(notice: CheckoutNotice): string {
       return `${name} більше не продається.`;
     case 'out_of_stock':
       return `${name} закінчився.`;
-    case 'reduced':
-      return `${name}: у наявності менше, ніж у вашому кошику.`;
   }
 }
 

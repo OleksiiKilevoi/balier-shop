@@ -94,8 +94,8 @@ export interface AdminProductRow {
   position: number;
   variantCount: number;
   activeVariantCount: number;
-  /** Physical units across active variants; reservations are not subtracted. */
-  totalStock: number;
+  /** How many of the active variants are flagged in stock. */
+  inStockVariantCount: number;
   imageUrl: string | null;
   updatedAt: Date;
 }
@@ -107,7 +107,8 @@ export interface AdminProductList {
 
 /**
  * The product list: every product regardless of status, newest edit first, with
- * the two numbers a manager scans for — how many variants and how much stock.
+ * the two numbers a manager scans for — how many variants are on sale, and how
+ * many of those are actually available.
  *
  * Search covers title, slug and SKU, which is what someone has in front of them:
  * a name from a chat message, a URL from the shop, or a code off a label.
@@ -175,7 +176,7 @@ export async function listAdminProducts(
         updatedAt: products.updatedAt,
         variantCount: sql<number>`count(${productVariants.id})::int`,
         activeVariantCount: sql<number>`count(${productVariants.id}) filter (where ${activeVariant})::int`,
-        totalStock: sql<number>`coalesce(sum(${productVariants.stock}) filter (where ${activeVariant}), 0)::int`,
+        inStockVariantCount: sql<number>`count(${productVariants.id}) filter (where ${activeVariant} and ${productVariants.inStock})::int`,
         displayPrice: sql<number>`coalesce(
           min(coalesce(${productVariants.priceOverride}, ${products.basePrice}))
             filter (where ${activeVariant}),
@@ -373,7 +374,6 @@ export async function createProduct(
 export interface ProductFields {
   slug: string;
   basePrice: Kopiykas;
-  compareAtPrice: Kopiykas | null;
   dimensions: string | null;
   categoryId: string | null;
   status: ProductStatus;
@@ -399,7 +399,6 @@ export async function updateProduct(
         .set({
           slug: fields.slug,
           basePrice: fields.basePrice,
-          compareAtPrice: fields.compareAtPrice,
           dimensions: fields.dimensions,
           categoryId: fields.categoryId,
           status: fields.status,
@@ -447,7 +446,7 @@ export interface VariantFields {
   priceOverride: Kopiykas | null;
   /** Grams; NULL = not weighed, which blocks a waybill rather than defaulting. */
   weightGrams: number | null;
-  stock: number;
+  inStock: boolean;
   position: number;
 }
 

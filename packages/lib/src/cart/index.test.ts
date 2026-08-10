@@ -23,7 +23,7 @@ function variant(overrides: Partial<CartVariantData> & { variantId: string }): C
     variantHex: null,
     sku: 'SKU-1',
     unitPrice: 550000,
-    available: 10,
+    inStock: true,
     imageUrl: null,
     imageAlt: null,
     ...overrides,
@@ -53,17 +53,15 @@ describe('buildCartSummary', () => {
     expect(summary.total).toBe(summary.itemsTotal);
   });
 
-  it('clamps a quantity to what is available and says so', () => {
+  it('keeps the requested quantity whole — availability is a flag, not a ceiling', () => {
     const summary = buildCartSummary(
       [{ variantId: id(1), quantity: 9 }],
-      [variant({ variantId: id(1), available: 2, unitPrice: 100000 })],
+      [variant({ variantId: id(1), unitPrice: 100000 })],
     );
 
-    expect(summary.lines[0]?.quantity).toBe(2);
-    expect(summary.itemsTotal).toBe(200000);
-    expect(summary.notices).toEqual([
-      { variantId: id(1), reason: 'reduced', title: 'Сумка', quantity: 2 },
-    ]);
+    expect(summary.lines[0]?.quantity).toBe(9);
+    expect(summary.itemsTotal).toBe(900000);
+    expect(summary.notices).toEqual([]);
   });
 
   it('drops a variant the query did not return', () => {
@@ -74,26 +72,15 @@ describe('buildCartSummary', () => {
     expect(summary.notices[0]).toMatchObject({ reason: 'unavailable', title: null });
   });
 
-  it('drops a variant that exists but has nothing available', () => {
+  it('drops a variant the shop has flagged out of stock, whole', () => {
     const summary = buildCartSummary(
-      [{ variantId: id(1), quantity: 1 }],
-      [variant({ variantId: id(1), available: 0 })],
-    );
-
-    expect(summary.lines).toHaveLength(0);
-    expect(summary.notices[0]).toMatchObject({ reason: 'out_of_stock', title: 'Сумка' });
-  });
-
-  it('treats a reservation that ate the whole stock as out of stock, not negative', () => {
-    // `available` is `stock − reservations` and can go negative if stock was
-    // lowered after an order reserved against it.
-    const summary = buildCartSummary(
-      [{ variantId: id(1), quantity: 1 }],
-      [variant({ variantId: id(1), available: -3 })],
+      [{ variantId: id(1), quantity: 4 }],
+      [variant({ variantId: id(1), inStock: false })],
     );
 
     expect(summary.lines).toHaveLength(0);
     expect(summary.itemsTotal).toBe(0);
+    expect(summary.notices[0]).toMatchObject({ reason: 'out_of_stock', title: 'Сумка' });
   });
 
   it('keeps the requested order so the page does not reshuffle on revalidation', () => {

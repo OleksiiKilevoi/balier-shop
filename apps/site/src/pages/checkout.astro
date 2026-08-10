@@ -752,7 +752,7 @@ const phoneInputClass = inputClass.replace('px-4', 'pl-16 pr-4');
           orderNumber?: string;
           redirectUrl?: string;
           error?: string;
-          notices?: { variantId: string; reason: 'unavailable' | 'out_of_stock' | 'reduced'; title: string | null }[];
+          notices?: { variantId: string; reason: 'unavailable' | 'out_of_stock'; title: string | null }[];
         };
 
         if (response.ok && body.redirectUrl) {

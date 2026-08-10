@@ -11,7 +11,6 @@ import {
 import type { Kopiykas } from '../../money';
 import { likeContains } from './like';
 import { LOCALE } from './locale';
-import { availableStock } from './stock';
 
 /** A single buyable row. `id` is what the cart and every order reference. */
 export interface ProductVariantData {
@@ -22,7 +21,8 @@ export interface ProductVariantData {
   colorHex: string | null;
   /** Kopiykas, already resolved against `products.base_price`. */
   price: Kopiykas;
-  available: number;
+  /** The manager's flag, verbatim — there is no count behind it. */
+  inStock: boolean;
 }
 
 export interface ProductImageData {
@@ -48,7 +48,6 @@ export interface ProductDetailData {
   categorySlug: string | null;
   /** Free text exactly as written on the card, e.g. `30х17х10 см`. */
   dimensions: string | null;
-  compareAtPrice: Kopiykas | null;
   /** Always at least one. There is no product-without-variants path. */
   variants: ProductVariantData[];
   images: ProductImageData[];
@@ -61,7 +60,6 @@ export interface ProductCardData {
   categoryTitle: string | null;
   /** Kopiykas. The cheapest active variant — what the card advertises. */
   price: Kopiykas;
-  compareAtPrice: Kopiykas | null;
   imageUrl: string | null;
   imageAlt: string | null;
   /** Only variants that name a colour. A plain product yields an empty list. */
@@ -73,7 +71,6 @@ interface ProductCardRow {
   id: string;
   slug: string;
   basePrice: Kopiykas;
-  compareAtPrice: Kopiykas | null;
   title: string;
   categoryTitle: string | null;
 }
@@ -90,7 +87,6 @@ function selectProductCards(db: Db) {
       id: products.id,
       slug: products.slug,
       basePrice: products.basePrice,
-      compareAtPrice: products.compareAtPrice,
       title: productTranslations.title,
       categoryTitle: categoryTranslations.title,
     })
@@ -133,7 +129,7 @@ async function hydrateProductCards(
         colorName: productVariants.colorName,
         colorHex: productVariants.colorHex,
         priceOverride: productVariants.priceOverride,
-        available: availableStock(),
+        inStock: productVariants.inStock,
       })
       .from(productVariants)
       .where(
@@ -174,13 +170,12 @@ async function hydrateProductCards(
       title: row.title,
       categoryTitle: row.categoryTitle,
       price: prices.length > 0 ? Math.min(...prices) : row.basePrice,
-      compareAtPrice: row.compareAtPrice,
       imageUrl: image?.url ?? null,
       imageAlt: image?.alt ?? null,
       swatches: rowVariants.flatMap((variant) =>
         variant.colorName ? [{ name: variant.colorName, hex: variant.colorHex }] : [],
       ),
-      inStock: rowVariants.some((variant) => variant.available > 0),
+      inStock: rowVariants.some((variant) => variant.inStock),
     };
   });
 }
@@ -288,22 +283,22 @@ export interface AdminVariantResult {
   /** NULL when the product has no colour choice. */
   colorName: string | null;
   price: Kopiykas;
-  available: number;
+  inStock: boolean;
 }
 
 /**
  * The product picker on `/admin/orders/new` — the same substring matching
  * `searchProducts` uses (see its comment for why not full-text), but resolved
  * to **variants** rather than products, because a variant is what an order line
- * references and what has a price and a stock figure of its own.
+ * references and what carries its own price and availability.
  *
  * Filtered exactly like `lockCheckoutVariants`: active variants of active
  * products, and nothing else. A looser filter here would let a manager add a
  * draft product to a basket and then be refused at the last step with
  * `cart_changed`, which reads as a bug rather than as a rule.
  *
- * Out-of-stock variants *are* returned — the count is shown next to each row,
- * and hiding them would leave a manager searching for something they can see in
+ * Out-of-stock variants *are* returned — the row says so next to the price, and
+ * hiding them would leave a manager searching for something they can see in
  * the catalog with no explanation. Adding one is refused when the order is
  * created, by the same repricing every checkout goes through.
  */
@@ -333,7 +328,7 @@ export async function searchAdminVariants(
       productTitle: productTranslations.title,
       colorName: productVariants.colorName,
       price: sql<number>`coalesce(${productVariants.priceOverride}, ${products.basePrice})`,
-      available: availableStock(),
+      inStock: productVariants.inStock,
     })
     .from(productVariants)
     .innerJoin(products, eq(products.id, productVariants.productId))
@@ -366,7 +361,6 @@ export async function getProductBySlug(db: Db, slug: string): Promise<ProductDet
       id: products.id,
       slug: products.slug,
       basePrice: products.basePrice,
-      compareAtPrice: products.compareAtPrice,
       dimensions: products.dimensions,
       title: productTranslations.title,
       description: productTranslations.description,
@@ -410,7 +404,7 @@ export async function getProductBySlug(db: Db, slug: string): Promise<ProductDet
         colorName: productVariants.colorName,
         colorHex: productVariants.colorHex,
         priceOverride: productVariants.priceOverride,
-        available: availableStock(),
+        inStock: productVariants.inStock,
       })
       .from(productVariants)
       .where(and(eq(productVariants.productId, row.id), eq(productVariants.isActive, true)))
@@ -441,14 +435,13 @@ export async function getProductBySlug(db: Db, slug: string): Promise<ProductDet
     categoryTitle: row.categoryTitle,
     categorySlug: row.categorySlug,
     dimensions: row.dimensions,
-    compareAtPrice: row.compareAtPrice,
     variants: variants.map((variant) => ({
       id: variant.id,
       sku: variant.sku,
       colorName: variant.colorName,
       colorHex: variant.colorHex,
       price: variant.priceOverride ?? row.basePrice,
-      available: variant.available,
+      inStock: variant.inStock,
     })),
     images,
   };

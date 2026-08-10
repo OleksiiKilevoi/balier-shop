@@ -13,7 +13,7 @@ import {
   topSettlements,
 } from '@balier/lib/db/queries/novaposhta';
 import { searchAdminVariants } from '@balier/lib/db/queries/products';
-import { getCodLimitKopiykas, getReservationTtlMinutes } from '@balier/lib/db/queries/settings';
+import { getCodLimitKopiykas, getPaymentTtlMinutes } from '@balier/lib/db/queries/settings';
 import {
   ADMIN_NEW_ORDER_ERRORS,
   ADMIN_NEW_ORDER_MESSAGES,
@@ -99,9 +99,9 @@ let banner: string | null = null;
 /** Which lines the database refused, when the create attempt was repriced. */
 let notices: CheckoutNotice[] = [];
 
-const [codLimitKopiykas, reservationTtlMinutes] = await Promise.all([
+const [codLimitKopiykas, paymentTtlMinutes] = await Promise.all([
   getCodLimitKopiykas(db),
-  getReservationTtlMinutes(db),
+  getPaymentTtlMinutes(db),
 ]);
 
 /** The submitted body, read exactly once — it is a stream. */
@@ -276,9 +276,7 @@ const itemsTotal = basket.reduce(
 
 /** Display only. The order is priced from the database inside `createOrder`. */
 const hasUnavailable = basket.some((line) => !line.variant);
-const hasShortStock = basket.some(
-  (line) => line.variant && line.quantity > line.variant.available,
-);
+const hasOutOfStock = basket.some((line) => line.variant && !line.variant.inStock);
 
 /**
  * Whether the basket exceeds the COD ceiling. Whether that *matters* is decided
@@ -313,7 +311,7 @@ function createOrderFromPanel(txDb: TxDb, input: AdminNewOrder, origin: string) 
       email: createEmailNotifier(env.EMAIL, env.ORDER_EMAIL_FROM),
       redirectBaseUrl: origin,
       webhookUrl: new URL('/api/webhooks/monobank', origin).toString(),
-      reservationTtlMinutes,
+      paymentTtlMinutes,
       codLimitKopiykas,
     },
   );
@@ -413,8 +411,7 @@ const DELIVERY_CHOICES = [
                       </p>
                       <p class="text-fg-subtle text-xs">
                         <span class="font-mono">{line.variant.sku}</span> ·{' '}
-                        {formatPrice(line.variant.unitPrice)} · у наявності{' '}
-                        {line.variant.available}
+                        {formatPrice(line.variant.unitPrice)}
                       </p>
                     </>
                   ) : (
@@ -422,9 +419,9 @@ const DELIVERY_CHOICES = [
                       Товар більше не продається — приберіть його з кошика.
                     </p>
                   )}
-                  {line.variant && line.quantity > line.variant.available && (
+                  {line.variant && !line.variant.inStock && (
                     <p class="text-danger text-xs">
-                      Замовлено більше, ніж є на складі — замовлення не створиться.
+                      Позначено як «немає в наявності» — замовлення не створиться.
                     </p>
                   )}
                 </div>
@@ -506,8 +503,8 @@ const DELIVERY_CHOICES = [
                     </p>
                     <p class="text-fg-subtle text-xs">
                       <span class="font-mono">{result.sku}</span> · {formatPrice(result.price)} ·{' '}
-                      {result.available > 0 ? (
-                        <>у наявності {result.available}</>
+                      {result.inStock ? (
+                        'в наявності'
                       ) : (
                         <span class="text-danger">немає в наявності</span>
                       )}
@@ -857,7 +854,7 @@ const DELIVERY_CHOICES = [
           flip without a submit, so the server's `draft.paymentMethod` may be a
           click behind. */}
       <p class="text-fg-subtle group-has-[#pm-card:checked]:block mt-3 hidden text-sm">
-        {cardLinkValidityText(reservationTtlMinutes)}
+        {cardLinkValidityText(paymentTtlMinutes)}
       </p>
 
       {
@@ -884,9 +881,9 @@ const DELIVERY_CHOICES = [
       </button>
 
       {
-        (hasUnavailable || hasShortStock) && (
+        (hasUnavailable || hasOutOfStock) && (
           <p class="text-danger text-sm">
-            Замовлення не створиться, поки в кошику є товар, якого немає в потрібній кількості.
+            Замовлення не створиться, поки в кошику є товар, якого немає в наявності.
           </p>
         )
       }

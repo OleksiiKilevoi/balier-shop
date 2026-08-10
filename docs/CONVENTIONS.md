@@ -62,8 +62,13 @@ Most products have no options at all; occasionally an item (a bag, say) comes in
 The schema handles both with one shape — **there is no "product without variants" code path.**
 
 - Every product has **at least one row** in `product_variants`. A plain product has exactly one.
-- Stock, SKU and an optional price override live on the **variant**. Never put stock on `products`.
-- Cart items, order items and stock reservations reference `variantId`, never `productId`.
+- Availability, SKU and an optional price override live on the **variant**. Never put availability
+  on `products`.
+- **Availability is a flag, not a count** (`product_variants.in_stock`, since 2026-08-10). Nothing
+  but a manager writes it: an order does not decrement it, a cancellation does not put it back, and
+  two customers ordering the last piece is an accepted outcome, not a bug. `stock_reservations`
+  and the `stock` column are gone; do not reintroduce a quantity without discussing it first.
+- Cart items and order items reference `variantId`, never `productId`.
 - `product_images.variant_id` is nullable: `NULL` means the image is shared across all variants,
   a set value means it belongs to that colour only. Selecting a colour swaps the gallery.
 - `products.dimensions` is free text exactly as written on the card (`30х17х10 см`), not structured
@@ -105,10 +110,11 @@ For cash on delivery, `awaiting_payment` is skipped: `pending → confirmed → 
 
 - The order is created **before** calling Monobank, with a human-readable `orderNumber` (which is
   also the `reference` in `merchantPaymInfo`).
-- Stock is reserved when the order is created, with a TTL. `stock_reservations` is the single source
-  of truth for what is spoken for: **available = `variant.stock` − SUM(unexpired reservations)**.
-  Never track a separate `reserved` counter — two sources of truth will drift. A cron releases
-  reservations for stale unpaid orders (Phase 3).
+- Creating an order reserves nothing and moves no inventory: it reprices the cart against the
+  database and refuses any line whose variant is gone or flagged out of stock. An unpaid card order
+  is closed out by its **age** instead — the `payment_ttl_minutes` setting, which is also the
+  invoice's validity; the cron cancels `pending` past it and reconciles `awaiting_payment` against
+  Monobank rather than cancelling on our clock alone.
 - Order items **snapshot** product title, variant name, SKU and unit price. Rendering a historical
   order must never join back to the live catalog.
 - The transition to `paid` happens **only in the webhook handler**, never on the `success` page.
@@ -244,8 +250,8 @@ duplicate to be merged.
 ## What not to do
 
 - Do not set an order to `paid` anywhere except the webhook handler.
-- Do not trust prices, totals, or stock coming from the client.
-- Do not reference `productId` from a cart item, order item, or reservation — always `variantId`.
+- Do not trust prices, totals, or availability coming from the client.
+- Do not reference `productId` from a cart item or an order item — always `variantId`.
 - Do not use Node-specific APIs or `process.env` at runtime.
 - Do not add dependencies incompatible with the Workers runtime (native modules, heavy SDKs).
 - Do not expand a phase's scope from `docs/plans/roadmap.md` without discussion — the timeline is

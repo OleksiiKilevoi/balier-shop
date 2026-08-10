@@ -2,7 +2,7 @@ import { eq, sql } from 'drizzle-orm';
 import type { TxDb } from '../db';
 import { findPaymentByInvoiceId } from '../db/queries/orders';
 import type { Order, OrderItem } from '../db/schema';
-import { orders, payments, productVariants, stockReservations } from '../db/schema';
+import { orders, payments } from '../db/schema';
 import type { Kopiykas } from '../money';
 import type { InvoiceStatus } from '../ports';
 
@@ -14,8 +14,8 @@ import type { InvoiceStatus } from '../ports';
  * that re-check.
  *
  * Idempotent: a redelivered webhook for an order that already left `pending`/
- * `awaiting_payment` is a no-op, so a retried delivery never double-decrements
- * stock or re-fires a transition.
+ * `awaiting_payment` is a no-op, so a retried delivery never re-fires a
+ * transition or its notifications.
  */
 
 export type ConfirmPaymentResult =
@@ -30,8 +30,9 @@ export type ConfirmPaymentResult =
    * Monobank reports `success` for an order that is already `cancelled` — the
    * customer paid in the gap between cancellation and this call (a late
    * webhook after the TTL sweep, or a payment link that outlived an admin
-   * cancel). The order is deliberately NOT resurrected: its stock may be sold,
-   * its cancellation may have been communicated. What must happen instead is a
+   * cancel). The order is deliberately NOT resurrected: the piece may have
+   * gone to someone else, its cancellation may have been communicated to the
+   * customer. What must happen instead is a
    * refund, and that takes a person — the caller alerts the manager. Returned
    * once per order, same idempotency as `paid`: the payment row's own `success`
    * marks the alert as already raised.
@@ -87,15 +88,6 @@ export async function confirmPayment(
 
       if (!paidOrder) throw new Error('order update returned no row');
 
-      for (const item of order.items) {
-        await tx
-          .update(productVariants)
-          .set({ stock: sql`${productVariants.stock} - ${item.quantity}`, updatedAt: sql`now()` })
-          .where(eq(productVariants.id, item.variantId));
-      }
-
-      await tx.delete(stockReservations).where(eq(stockReservations.orderId, order.id));
-
       return { ok: true, transitioned: 'paid', order: paidOrder, items: order.items };
     }
 
@@ -109,8 +101,6 @@ export async function confirmPayment(
         .update(orders)
         .set({ status: 'cancelled', cancelledAt: sql`now()`, updatedAt: sql`now()` })
         .where(eq(orders.id, order.id));
-
-      await tx.delete(stockReservations).where(eq(stockReservations.orderId, order.id));
 
       return { ok: true, transitioned: 'cancelled' };
     }

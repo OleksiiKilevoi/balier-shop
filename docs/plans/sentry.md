@@ -152,8 +152,12 @@ just minified. Credentials come from env: `SENTRY_AUTH_TOKEN` + `SENTRY_ORG` + `
 (project slug is `balier`; org slug visible in the Sentry URL). They go in **two places**: the
 Workers Builds build variables of both `balier-dev` and `balier-admin-dev` (site/admin upload
 runs on git push), and the repo root `.dev.vars` — the same file drizzle-kit and `scripts/*`
-read (cron uploads run locally — `deploy.mjs` falls back to it, then to `.env`). **Unverified until the token exists:** a real upload from all three builds, and — the
-one to re-check on the first real cron error — that the cron's frame paths actually match the
+read (cron uploads run locally — `deploy.mjs` falls back to it, then to `.env`). **Verified 2026-08-09 with the real token:** uploads landed from all three builds (7 artifact
+bundles from the site/admin Workers Builds runs + the cron's, listed via the API). Two traps
+found on the way: the token goes in the **Build** section's variables, not the runtime
+Variables panel (the build can't see the latter), and Workers Builds' path filter skips
+commits that don't touch the app — a vars-only change needs Retry build, not a push. Still
+unverified — the one to re-check on the first real cron error — that the cron's frame paths actually match the
 uploaded artifact names (release-based matching is pickier than debug IDs; if traces stay
 minified, `sentry-cli sourcemaps upload --strip-common-prefix` or a `~/` url-prefix is the
 first knob).

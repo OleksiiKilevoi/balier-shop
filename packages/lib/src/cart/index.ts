@@ -28,8 +28,8 @@ export interface CartVariantData {
   sku: string;
   /** Kopiykas, already resolved against `products.base_price`. */
   unitPrice: Kopiykas;
-  /** `stock − unexpired reservations`, from the one definition in `queries/stock.ts`. */
-  available: number;
+  /** The manager's availability flag. There is no quantity to compare against. */
+  inStock: boolean;
   imageUrl: string | null;
   imageAlt: string | null;
 }
@@ -44,18 +44,19 @@ export interface CartLine extends CartVariantData {
  * Why a line the customer had is not the line they got back.
  *
  * - `unavailable` — the variant, or its product, is gone or no longer active.
- * - `out_of_stock` — it exists but nothing is available.
- * - `reduced` — more was asked for than is available; the quantity was clamped.
+ * - `out_of_stock` — it exists, but the shop has flagged it as not in stock.
+ *
+ * There used to be a third, `reduced` — "you asked for five, there are two" —
+ * which died with the stock count on 2026-08-10: a flag has no number to clamp
+ * a quantity against, so a line is either kept whole or dropped whole.
  */
-export type CartNoticeReason = 'unavailable' | 'out_of_stock' | 'reduced';
+export type CartNoticeReason = 'unavailable' | 'out_of_stock';
 
 export interface CartNotice {
   variantId: string;
   reason: CartNoticeReason;
   /** NULL for a variant that no longer exists — we have no name to show. */
   title: string | null;
-  /** The quantity that survived. Only meaningful for `reduced`. */
-  quantity: number;
 }
 
 export interface CartSummary {
@@ -125,30 +126,22 @@ export function buildCartSummary(
     const variant = byId.get(item.variantId);
 
     if (!variant) {
-      notices.push({ variantId: item.variantId, reason: 'unavailable', title: null, quantity: 0 });
+      notices.push({ variantId: item.variantId, reason: 'unavailable', title: null });
       continue;
     }
 
-    if (variant.available <= 0) {
+    if (!variant.inStock) {
       notices.push({
         variantId: item.variantId,
         reason: 'out_of_stock',
         title: variant.productTitle,
-        quantity: 0,
       });
       continue;
     }
 
-    const quantity = Math.min(item.quantity, variant.available);
-
-    if (quantity < item.quantity) {
-      notices.push({
-        variantId: item.variantId,
-        reason: 'reduced',
-        title: variant.productTitle,
-        quantity,
-      });
-    }
+    // `mergeCartItems` has already clamped the quantity to `MAX_ITEM_QUANTITY`,
+    // which is now the only ceiling there is.
+    const quantity = item.quantity;
 
     lines.push({ ...variant, quantity, lineTotal: variant.unitPrice * quantity });
   }

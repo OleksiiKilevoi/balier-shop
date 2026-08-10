@@ -73,7 +73,6 @@ const requiredId = z.uuid('invalid_id');
 
 export const PRODUCT_PRICE_MIN_HRYVNIAS = 1;
 export const PRODUCT_PRICE_MAX_HRYVNIAS = 1_000_000;
-export const STOCK_MAX = 100_000;
 export const POSITION_MAX = 9_999;
 /** Grams. A typo guard like the COD limit's bounds, not what NP will carry. */
 export const WEIGHT_GRAMS_MAX = 100_000;
@@ -151,7 +150,6 @@ const productSaveSchema = z.object({
   metaTitle: optionalText(META_TITLE_MAX),
   metaDescription: optionalText(META_DESCRIPTION_MAX),
   basePrice: priceSchema,
-  compareAtPrice: optionalPriceSchema,
   categoryId: optionalId,
   status: z.enum(productStatus.enumValues),
   isFeatured: checkbox,
@@ -166,7 +164,14 @@ const variantFields = {
   colorHex: colorHexSchema,
   priceOverride: optionalPriceSchema,
   weightGrams: optionalWholeNumber(WEIGHT_GRAMS_MAX, 'invalid_weight'),
-  stock: wholeNumber(STOCK_MAX, 'invalid_stock'),
+  /**
+   * A checkbox, so «немає в наявності» is the *absent* key — which is exactly
+   * what an unticked box posts, and what a `variant_add` form with no box at
+   * all would post too. The add form therefore renders one, ticked: a new
+   * colour nobody has said anything about is for sale, which is also the
+   * column's default.
+   */
+  inStock: checkbox,
   position: wholeNumber(POSITION_MAX, 'invalid_position'),
 };
 
@@ -284,7 +289,6 @@ const CATALOG_FIELDS = [
   'metaTitle',
   'metaDescription',
   'basePrice',
-  'compareAtPrice',
   'categoryId',
   'position',
   'sku',
@@ -292,7 +296,6 @@ const CATALOG_FIELDS = [
   'colorHex',
   'priceOverride',
   'weightGrams',
-  'stock',
   'alt',
 ] as const;
 

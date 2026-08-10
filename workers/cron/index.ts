@@ -1,8 +1,9 @@
 import * as Sentry from '@sentry/cloudflare';
-import { and, eq, inArray, lt, sql } from 'drizzle-orm';
+import { and, eq, sql, type SQL } from 'drizzle-orm';
 import { createDb, createTxDb } from '@balier/lib/db';
 import { listWaybillOrdersToTrack } from '@balier/lib/db/queries/orders';
-import { orders, payments, stockReservations } from '@balier/lib/db/schema';
+import { getPaymentTtlMinutes } from '@balier/lib/db/queries/settings';
+import { orders, payments } from '@balier/lib/db/schema';
 import { createMonobankPayment } from '@balier/lib/monobank';
 import { createEmailNotifier } from '@balier/lib/notify/email';
 import { createTelegramNotifier } from '@balier/lib/notify/telegram';
@@ -34,11 +35,11 @@ import { confirmPayment } from '@balier/lib/orders/confirmPayment';
 const handler = {
   async scheduled(event: ScheduledController, env: Env): Promise<void> {
     switch (event.cron) {
-      // Every 15 minutes — release reservations for orders that were never
-      // paid, and follow every live waybill's carrier status (NP-4).
+      // Every 15 minutes — close out orders that were never paid, and follow
+      // every live waybill's carrier status (NP-4).
       case '*/15 * * * *': {
         const results = await Promise.allSettled([
-          releaseExpiredReservations(env),
+          sweepUnpaidOrders(env),
           trackWaybillStatuses(env),
         ]);
         const failed = results.find((r) => r.status === 'rejected');
@@ -75,58 +76,57 @@ export default Sentry.withSentry(
 );
 
 /**
- * A 30-minute reservation TTL is meaningless without this: a card checkout
- * that never reaches payment would otherwise hold its stock forever. Cash on
- * delivery never leaves a reservation lying around — `createOrder` resolves
- * it immediately — so this only ever finds card orders that stalled at
- * `pending`/`awaiting_payment`.
+ * A payment window is meaningless without this: a card checkout that never
+ * reaches payment would otherwise sit `pending`/`awaiting_payment` forever.
+ * Cash on delivery is never found here — `createOrder` confirms it in the
+ * transaction that creates it — so this only ever sees card orders that
+ * stalled.
+ *
+ * The window is the order's own age against `payment_ttl_minutes`, the same
+ * setting that stamps the invoice's validity. Until 2026-08-10 it was the
+ * expiry on a `stock_reservations` row instead; the row went with the stock
+ * count, the clock it carried did not.
  *
  * Two steps, deliberately unequal in caution:
  *
- * 1. **Expired reservations are deleted and `pending` orders cancelled
- *    outright.** `pending` means the invoice was never recorded (`createOrder`
- *    moves to `awaiting_payment` in the same transaction that records it), so
- *    there is nothing to ask Monobank about.
+ * 1. **`pending` orders past the window are cancelled outright.** `pending`
+ *    means the invoice was never recorded (`createOrder` moves to
+ *    `awaiting_payment` in the same transaction that records it), so there is
+ *    nothing to ask Monobank about.
  * 2. **`awaiting_payment` orders are never cancelled on our clock alone.**
  *    The customer may have paid in the invoice's final minute with the
  *    webhook still in flight — or the webhook may simply have been lost. So
- *    every `awaiting_payment` order whose reservation is gone is *reconciled*:
- *    ask Monobank for the invoice's live status and let `confirmPayment`
- *    apply it — `paid` (with the notifications the webhook would have sent),
+ *    every `awaiting_payment` order past the window is *reconciled*: ask
+ *    Monobank for the invoice's live status and let `confirmPayment` apply
+ *    it — `paid` (with the notifications the webhook would have sent),
  *    cancelled on a definitive failure, or left alone until the invoice
  *    itself expires. This doubles as the recovery path for lost webhooks.
- *
- * The freed stock can be resold before a late payment lands; `confirmPayment`
- * accepts that (money beats inventory) and the oversell is handled by hand.
  */
-async function releaseExpiredReservations(env: Env): Promise<void> {
+async function sweepUnpaidOrders(env: Env): Promise<void> {
+  // The setting is a plain read, so it goes over the HTTP driver; the sweep
+  // itself needs the pooled one, because `confirmPayment` opens transactions.
+  const ttlMinutes = await getPaymentTtlMinutes(createDb(env.DATABASE_URL));
   const { db, close } = createTxDb(env.DATABASE_URL);
 
   try {
-    await db.transaction(async (tx) => {
-      const expired = await tx
-        .delete(stockReservations)
-        .where(lt(stockReservations.expiresAt, sql`now()`))
-        .returning({ orderId: stockReservations.orderId });
+    // Interpolated as a number into an interval expression — `ttlMinutes` is a
+    // setting read back as a JSON number, never user text.
+    const expired = sql`${orders.createdAt} < now() - make_interval(mins => ${ttlMinutes})`;
 
-      const orderIds = [...new Set(expired.map((row) => row.orderId))];
-      if (orderIds.length === 0) return;
+    await db
+      .update(orders)
+      .set({ status: 'cancelled', cancelledAt: sql`now()`, updatedAt: sql`now()` })
+      .where(and(eq(orders.status, 'pending'), expired));
 
-      await tx
-        .update(orders)
-        .set({ status: 'cancelled', cancelledAt: sql`now()`, updatedAt: sql`now()` })
-        .where(and(inArray(orders.id, orderIds), eq(orders.status, 'pending')));
-    });
-
-    await reconcileAwaitingPayment(env, db);
+    await reconcileAwaitingPayment(env, db, expired);
   } finally {
     await close();
   }
 }
 
 /**
- * Step 2 above. Picks up every `awaiting_payment` order with no live
- * reservation — this sweep's expiries and any stragglers a previous sweep left
+ * Step 2 above. Picks up every `awaiting_payment` order past the payment
+ * window — this sweep's expiries and any stragglers a previous sweep left
  * `unchanged` (invoice still `processing`, or Monobank unreachable) — so an
  * order can never get stuck between sweeps. Network calls happen between
  * transactions, never inside one; `confirmPayment` is idempotent, so a webhook
@@ -135,21 +135,13 @@ async function releaseExpiredReservations(env: Env): Promise<void> {
 async function reconcileAwaitingPayment(
   env: Env,
   db: ReturnType<typeof createTxDb>['db'],
+  expired: SQL,
 ): Promise<void> {
   const stale = await db
     .select({ orderNumber: orders.orderNumber, invoiceId: payments.invoiceId })
     .from(orders)
     .innerJoin(payments, eq(payments.orderId, orders.id))
-    .where(
-      and(
-        eq(orders.status, 'awaiting_payment'),
-        sql`not exists (
-          select 1 from ${stockReservations}
-          where ${stockReservations.orderId} = ${orders.id}
-            and ${stockReservations.expiresAt} > now()
-        )`,
-      ),
-    );
+    .where(and(eq(orders.status, 'awaiting_payment'), expired));
 
   if (stale.length === 0) return;
 
@@ -186,7 +178,7 @@ async function reconcileAwaitingPayment(
         await notifier.paymentAfterCancellation({ order: result.order, items: result.items });
       }
       // 'unchanged' (created/processing/hold): the invoice is still live —
-      // the next sweep will find the order again, still reservation-less.
+      // the next sweep will find the order again, still past the window.
     } catch (err) {
       // One unreachable invoice must not stall the rest of the sweep; the
       // order stays `awaiting_payment` and the next sweep retries it.
