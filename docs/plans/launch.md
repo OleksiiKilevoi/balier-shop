@@ -82,7 +82,8 @@ A full second setup, not a transfer. Only schema and migrations carry over; no d
       **2026-09-10: `balier.ua` is NXDOMAIN at the `.ua` registry** — no nameservers set anywhere,
       so there is nothing to import and Active waits on the registrar change; confirm with the
       client that the registration itself is complete (direct `.ua` names need a registered
-      trademark). Decision confirmed 2026-09-10: client-owned account, developer invited.
+      trademark). Decision 2026-09-10, revised the same session: **the owner runs the site — production on
+      the developer's own account `52a29667…`**; nothing here is «client-owned» any more.
 - [ ] **Workers Paid plan** on that account — Email Sending requires it (as on the dev account
       since 2026-08-04).
 - [ ] R2: `wrangler r2 bucket create balier-media`. Empty on purpose — the dev photos are test

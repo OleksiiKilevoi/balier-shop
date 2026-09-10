@@ -6,23 +6,24 @@
 
 - **Last done (2026-09-10):** **L3 committed** — `2adbb7e` (production env values) and `17e0a5e`
   (launch plan, catalog draft, STATE); gate green; **not pushed** (the previous developer's
-  Workers Builds may still watch `main`). Decision confirmed by the client: production lives on a
-  **client-owned Cloudflare account** with `oleksii.kilevoi@drizzle.team` invited. The wrangler
-  login on this laptop is the developer's own account (`52a29667…`, one membership, no invites) —
-  nothing deploys from here until the invite is accepted and `wrangler login` is re-run. Two
+  Workers Builds may still watch `main`). Decision, reversed within the session («я сам буду
+  заниматься сайтом»): **the owner runs the site — production lives on this account**
+  (`52a29667…`, `oleksii.kilevoi@drizzle.team`, which also hosts eight unrelated Workers and the
+  `ugs` bucket). No `balier.ua` zone on it yet. `wrangler r2 bucket create balier-media` and
+  `wrangler kv namespace create RATE_LIMIT` were **blocked by the session's permission
+  classifier** — owed by hand from `apps/site`. Two
   facts checked, not assumed: **`balier.ua` is NXDOMAIN at the `.ua` registry** (no nameservers
   anywhere — the zone cannot go Active until the client sets Cloudflare's NS at the registrar),
   and the production database answers with **zero admin accounts**.
 - **In progress:** waiting on the client (list below). Catalog review (`docs/plans/catalog.md`)
   still open.
-- **Next step:** the moment the Cloudflare invite lands: `wrangler login` → check the zone is
-  Active → `docs/plans/launch.md` L2 (Workers Paid, R2 `balier-media`, KV `RATE_LIMIT` id into
-  both `wrangler.jsonc`, Email Sending on `mail.balier.ua`) → L4 in its order. L4.2 can go first
+- **Next step:** add the `balier.ua` zone in the dashboard and set its NS at the registrar →
+  the two `wrangler … create` commands above → KV id into both `wrangler.jsonc` → Workers Paid →
+  Email Sending on `mail.balier.ua` (`docs/plans/launch.md` L2) → L4 in its order. L4.2 can go first
   at any time: `pnpm admin:user create <email> --role=admin` (password is prompted — run by hand).
 - **Blockers (waiting on me / the client):**
-  - Cloudflare account created by the client; developer invited as Administrator; payment method
-    and Workers Paid added by the client (an Administrator cannot touch billing).
-  - `balier.ua` registration confirmed and registrar access, or the client ready to change NS.
+  - `balier.ua` zone added in the dashboard, NS changed at the registrar, zone **Active**;
+    registration itself confirmed (the registry has no record). Workers Paid on the account.
   - L1 texts for the seven static pages; `/offer` + `/privacy` gate the Monobank merchant.
   - Nova Poshta API key; new Telegram bot token, notification chat id, manager handle.
   - Catalog table (dimensions, weight, leather); Neon plan upgrade to Launch in the console.
@@ -85,10 +86,10 @@
 **2026-09-10 (launch, L3 → L2).** «guide me until launch». `wrangler whoami` showed the login
 made minutes earlier is the developer's own account — one membership, no invites — and
 `dig NS balier.ua` came back NXDOMAIN from the `.ua` registry: the domain has no delegation at
-all. The client chose a client-owned Cloudflare account with the developer invited. Committed L3
+all. The client first chose a client-owned Cloudflare account, then reversed it: the owner runs the
+site, production on this account. R2/KV creation was blocked by the permission classifier. Committed L3
 as `2adbb7e` and the docs as `17e0a5e` (gate green, nothing pushed); the neon CLI's link files
-stay untracked. `pnpm admin:user list` against production: no admins. Wrote the client's
-account checklist; nothing deploys until the invite is accepted. CURRENT STATE cut from 177
+stay untracked. `pnpm admin:user list` against production: no admins. Nothing deploys until the zone exists. CURRENT STATE cut from 177
 lines to the handover — the dev environment's state lives in this file at `17e0a5e`.
 
 **2026-09-07 (launch plan).** «analyse repository and write down steps needed for launch».
