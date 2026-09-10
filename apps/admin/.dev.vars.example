@@ -36,3 +36,7 @@ TELEGRAM_CHAT_ID=""
 # `wrangler.jsonc` carries the deployed value; this override is for local dev
 # against `pnpm dev` on the default port.
 SITE_ORIGIN="http://localhost:4321"
+
+# Nova Poshta API key — waybills, registers and tracking from the order screens
+# (`@balier/lib/novaposhta`). The cron Worker holds its own copy for the sync.
+NOVAPOSHTA_API_KEY=""

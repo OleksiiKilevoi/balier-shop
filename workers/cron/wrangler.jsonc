@@ -27,12 +27,12 @@
   // like the app's sends.
   "send_email": [{ "name": "EMAIL" }],
   "vars": {
-    "ORDER_EMAIL_FROM": "noreply@mail.mlosko.dev",
+    "ORDER_EMAIL_FROM": "noreply@mail.balier.ua",
     // Sentry (`docs/plans/sentry.md`) — a DSN is a public project identifier,
     // not a secret. Same single project as the site and admin Workers; the
     // `withSentry` wrapper in `index.ts` tags events `worker:cron`.
     "SENTRY_DSN": "https://10cc802695139cc28dd32cf305de6f34@o4504565189378049.ingest.us.sentry.io/4511881341370368",
-    "SENTRY_ENVIRONMENT": "development"
+    "SENTRY_ENVIRONMENT": "production"
   }
   // Secrets this Worker needs (its own copies — secrets are per-Worker), set
   // with `wrangler secret put <NAME>` from this directory:

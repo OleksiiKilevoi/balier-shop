@@ -50,7 +50,7 @@ export interface CreateOrderDeps {
   email: NotifierPort;
   /**
    * Origin the customer's browser is actually on — e.g. `http://localhost:4321`
-   * or `https://balier.mlosko.dev` — used to build the
+   * or `https://balier.ua` — used to build the
    * post-checkout redirect (`/checkout/success`). Deliberately request-derived
    * rather than a fixed site URL, so the redirect works wherever this is being
    * tested from.

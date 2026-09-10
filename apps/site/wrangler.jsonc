@@ -1,27 +1,18 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  // Must match the Worker that Workers Builds actually deploys to. It does not
-  // say `balier`: the live dev Worker is `balier-dev`, and a mismatch here means
-  // `pnpm deploy` silently creates a *second*, empty Worker under the config's
-  // name instead of updating the running one. Phase 5 stands the store up again
-  // on the client's account, and that Worker gets its own name.
-  "name": "balier-dev",
-  // Custom domain for the dev deployment, on `mlosko.dev` (bought 2026-08-04 to
-  // unblock Cloudflare Access and Email Sending, both of which need a zone on
-  // this account — `*.workers.dev` cannot be an Access application hostname).
-  // Cloudflare creates the DNS record and the certificate itself, but only once
-  // the zone reads Active: deploying this route before that fails.
-  //
-  // The `workers.dev` URL keeps working alongside it. `/admin` there stays 403,
-  // because no Access policy can cover a `workers.dev` hostname and the in-app
-  // JWT check in `src/middleware.ts` refuses an unauthenticated request anyway.
-  // That gap is precisely why `docs/CONVENTIONS.md` asks for the second check.
-  "routes": [{ "pattern": "balier.mlosko.dev", "custom_domain": true }],
+  // Must match the Worker that Workers Builds actually deploys to. A mismatch
+  // does not error — `wrangler deploy` silently creates a *second*, empty
+  // Worker under the config's name and leaves the live one untouched.
+  // Production Worker on the client's Cloudflare account (docs/plans/launch.md,
+  // L2/L3). The retired dev deployment was `balier-dev` on `balier.mlosko.dev`.
+  "name": "balier",
+  // Custom domain. Cloudflare creates the DNS record and the certificate
+  // itself, but only once the `balier.ua` zone reads Active on the account —
+  // deploying this route before that fails.
+  "routes": [{ "pattern": "balier.ua", "custom_domain": true }],
   // Explicit, not incidental: adding `routes` makes wrangler disable the
-  // `workers.dev` URL by default anyway, and one hostname is what we want —
-  // `balier-dev.<subdomain>.workers.dev` was a second public surface that no
-  // Access policy could cover. Older notes in `docs/STATE.md` that name it as
-  // the live test URL predate this. Set it to `true` to bring it back.
+  // `workers.dev` URL by default anyway, and one hostname is what we want — a
+  // `workers.dev` URL would be a second public surface. `true` brings it back.
   "workers_dev": false,
   "compatibility_date": "2026-07-30",
   "compatibility_flags": ["nodejs_compat"],
@@ -35,17 +26,13 @@
   //   wrangler r2 bucket create balier-media
   //
   // `remote: true` points this binding at the real bucket **in local development
-  // too**, and is the reason the panel's uploads exist anywhere but this laptop.
-  // Without it, `pnpm dev` binds MEDIA to Miniflare's simulated bucket under
-  // `.wrangler/state/v3/r2/`, so a photo uploaded through `/admin/products/…`
-  // was written to disk while its `product_images` row went to the *real* Neon
-  // database — a row pointing at an object no deployed Worker could ever serve.
-  // Local R2 and remote Postgres is the one combination that silently produces
-  // broken data rather than a broken screen.
-  //
-  // The flag is local-development only; a deployed Worker always had the real
-  // bucket. The cost is that dev writes are real writes: an upload made while
-  // testing puts an object in the production bucket and it stays there.
+  // too**. Without it, `pnpm dev` binds MEDIA to Miniflare's simulated bucket
+  // under `.wrangler/state/v3/r2/`, so a photo uploaded through the panel is
+  // written to disk while its `product_images` row goes to the *real* database
+  // — local R2 and remote Postgres is the one combination that silently
+  // produces broken data rather than a broken screen. The cost is that dev
+  // writes are real writes. `CLOUDFLARE_VITE_FORCE_LOCAL=true pnpm dev` forces
+  // the isolated behaviour for a session without editing this file.
   "r2_buckets": [
     {
       "binding": "MEDIA",
@@ -54,51 +41,62 @@
     }
   ],
   // Cloudflare Email Sending — order-confirmation emails to customers
-  // (`src/lib/notify/email.ts`). Requires Workers Paid (enabled 2026-08-04).
-  // Sending is enabled on `mail.mlosko.dev`, a dedicated subdomain rather than
-  // the apex, so `mlosko.dev` keeps its MX records free for real inbound mail.
-  // Sends fail closed with `E_SENDER_NOT_VERIFIED` (caught, logged, never thrown
-  // into checkout — same best-effort contract as `NotifierPort`) until
-  // `wrangler email sending enable mail.mlosko.dev` has run and its DNS records
-  // are in place. Phase 5 swaps the sender to `balier.ua` on the client account.
+  // (`@balier/lib/notify/email`). Requires Workers Paid. Sending is enabled on
+  // a dedicated subdomain rather than the apex, so `balier.ua` keeps its MX
+  // records free for the client's real inbound mail:
+  //   wrangler email sending enable mail.balier.ua   (+ the dashboard's DNS
+  //   auto-onboard button — wrangler's OAuth token has no DNS-edit scope)
+  // Sends fail closed with `E_SENDER_NOT_VERIFIED` (caught, logged, never
+  // thrown into checkout — same best-effort contract as `NotifierPort`) until
+  // those DNS records exist.
   "send_email": [{ "name": "EMAIL" }],
   // Secrets are NOT set here. Locally they live in `.dev.vars`; in production
-  // they are set with `wrangler secret put <NAME>` from this directory.
-  //   DATABASE_URL, MONOBANK_TOKEN, TURNSTILE_SECRET_KEY,
-  //   TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+  // they are set with `wrangler secret put <NAME>` from this directory:
+  //   DATABASE_URL, MONOBANK_TOKEN, TURNSTILE_SECRET_KEY (only if Turnstile
+  //   is switched back on), TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
   //
-  // ADMIN_SESSION_SECRET belongs to the admin Worker (`apps/admin`) now, and
-  // NOVAPOSHTA_API_KEY to the cron Worker — neither is read here.
+  // ADMIN_SESSION_SECRET belongs to the admin Worker (`apps/admin`), and
+  // NOVAPOSHTA_API_KEY to the admin and cron Workers — none is read here.
+  //
+  // Everything in `vars` is the COMPLETE set of plaintext variables: Workers
+  // Builds sends this block on every push and a variable added in the
+  // dashboard as Text is silently dropped by the next deploy. Anything
+  // sensitive is an encrypted Secret, never a var (docs/OVERVIEW.md).
   "vars": {
     "PUBLIC_SITE_URL": "https://balier.ua",
     // `from` address for order-confirmation emails. Not `PUBLIC_` — server-only,
-    // never sent to the client. See the `send_email` binding comment above:
-    // this does nothing until the domain is onboarded.
-    "ORDER_EMAIL_FROM": "noreply@mail.mlosko.dev",
+    // never sent to the client. Does nothing until the sender subdomain above
+    // is onboarded.
+    "ORDER_EMAIL_FROM": "noreply@mail.balier.ua",
     // Telegram account the product page's «Замовити через Телеграм» deep-links
-    // to. Public by definition — it ends up in an href. PLACEHOLDER: the real
-    // manager account is a Phase 0 item and does not exist yet, so this handle
-    // is a guess and the button currently points at nothing. `orderDeepLink`
-    // validates it, so an empty value hides the button rather than breaking it.
-    "PUBLIC_TELEGRAM_MANAGER": "balier_ua",
+    // to. Public by definition — it ends up in an href. EMPTY ON PURPOSE until
+    // the client names the manager account (launch.md L0): `orderDeepLink`
+    // validates it, and an empty value hides the button rather than shipping a
+    // link to a stranger.
+    "PUBLIC_TELEGRAM_MANAGER": "",
     // Turnstile site key — public by definition, it was embedded in the
     // checkout page's HTML. The paired secret (`TURNSTILE_SECRET_KEY`) is a
     // Worker secret, never here.
-    // CURRENTLY UNUSED: Turnstile is commented out (2026-08-05, on request) —
-    // see the `Turnstile:` markers in `src/pages/checkout.astro`. Both values
-    // are kept set so uncommenting is all it takes to bring it back.
+    // CURRENTLY UNUSED: Turnstile is commented out (2026-08-05, on request,
+    // and off at launch by decision) — see the `Turnstile:` markers in
+    // `src/pages/checkout.astro`. Bringing it back means a new widget on the
+    // client's account for `balier.ua`; this key belongs to the retired dev
+    // widget and is kept only so the var stays typed.
     "PUBLIC_TURNSTILE_SITE_KEY": "0x4AAAAAAEF8vF0-cXNWdOOY",
     // Sentry (`docs/plans/sentry.md`) — a DSN is a public project identifier,
     // not a secret. One project (`balier`) for all three Workers; the wrapper
-    // in `src/middleware.ts` tags events `worker:site`. The environment tag
-    // flips to `production` at Phase 5 — the Sentry org itself stays ours.
+    // in `src/middleware.ts` tags events `worker:site`. The Sentry org stays
+    // ours after launch by decision; only the environment tag changed.
     "SENTRY_DSN": "https://10cc802695139cc28dd32cf305de6f34@o4504565189378049.ingest.us.sentry.io/4511881341370368",
-    "SENTRY_ENVIRONMENT": "development"
+    "SENTRY_ENVIRONMENT": "production"
   },
 
-  // CACHE is not created yet — nothing needs it. RATE_LIMIT backs the
-  // per-IP counters in `src/middleware.ts` (`wrangler kv namespace create
-  // RATE_LIMIT`, 2026-08-04).
-  //   wrangler kv namespace create CACHE
-  "kv_namespaces": [{ "binding": "RATE_LIMIT", "id": "8ef01313c48a4dcea67fc75f2b50129f" }]
+  // RATE_LIMIT backs the per-IP counters in `src/middleware.ts`, and the admin
+  // Worker shares the same namespace on purpose (one login budget). Created on
+  // the client's account at launch.md L2:
+  //   wrangler kv namespace create RATE_LIMIT
+  // and the id it prints goes here AND in `apps/admin/wrangler.jsonc`. The
+  // placeholder below makes a deploy fail loudly rather than bind to nothing.
+  // CACHE is not created — nothing needs it.
+  "kv_namespaces": [{ "binding": "RATE_LIMIT", "id": "REPLACE_AT_L2_WITH_CLIENT_KV_ID" }]
 }

@@ -1,13 +1,14 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   // The admin panel's own Worker — split out of the app Worker so the store's
-  // public origin carries no admin surface at all. Like `balier-dev`, the name
-  // is dev-scoped: Phase 5 stands the panel up again on the client's account
-  // and that Worker gets its own name.
-  "name": "balier-admin-dev",
-  // Custom domain on the same `mlosko.dev` zone as the storefront. Cloudflare
+  // public origin carries no admin surface at all. Production Worker on the
+  // client's Cloudflare account (docs/plans/launch.md); the retired dev
+  // deployment was `balier-admin-dev` on `admin.balier.mlosko.dev`. Like the
+  // site Worker, a name mismatch silently creates a second, empty Worker.
+  "name": "balier-admin",
+  // Custom domain on the same `balier.ua` zone as the storefront. Cloudflare
   // creates the DNS record and certificate itself once the zone is Active.
-  "routes": [{ "pattern": "admin.balier.mlosko.dev", "custom_domain": true }],
+  "routes": [{ "pattern": "admin.balier.ua", "custom_domain": true }],
   // One hostname on purpose, same reasoning as the site Worker: a
   // `workers.dev` URL would be a second public surface. The in-app session
   // gate (`src/middleware.ts`) holds anywhere the Worker is reachable anyway.
@@ -18,6 +19,7 @@
     "enabled": true
   },
   // Reads image dimensions in the upload pipeline (`@balier/lib/media`).
+  // Only `.info()` is ever called — never a transform, which is metered.
   "images": {
     "binding": "IMAGES"
   },
@@ -36,33 +38,40 @@
   "send_email": [{ "name": "EMAIL" }],
   // Same KV namespace as the storefront, shared deliberately: the login form's
   // brute-force budget (`src/pages/login.astro`) keeps counting in one place.
-  "kv_namespaces": [{ "binding": "RATE_LIMIT", "id": "8ef01313c48a4dcea67fc75f2b50129f" }],
+  // The id is the one `wrangler kv namespace create RATE_LIMIT` prints at
+  // launch.md L2 — the same value as in `apps/site/wrangler.jsonc`.
+  "kv_namespaces": [{ "binding": "RATE_LIMIT", "id": "REPLACE_AT_L2_WITH_CLIENT_KV_ID" }],
   // Secrets are NOT set here. Locally they live in `.dev.vars`; in production
-  // they are set with `wrangler secret put <NAME>` from this directory.
-  //   DATABASE_URL, ADMIN_SESSION_SECRET, MONOBANK_TOKEN,
+  // they are set with `wrangler secret put <NAME>` from this directory:
+  //   DATABASE_URL, ADMIN_SESSION_SECRET, MONOBANK_TOKEN, NOVAPOSHTA_API_KEY,
   //   TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
   //
   // ADMIN_SESSION_SECRET signs the session cookie and so gates every route
   // (`src/middleware.ts`). It IS a credential: anyone holding it can mint a
   // session for any admin. While it is unset, every request is turned away,
   // which is the intended failure direction. Rotating it signs everyone out.
+  //
+  // `vars` is the COMPLETE set of plaintext variables on every push — see the
+  // note in `apps/site/wrangler.jsonc`.
   "vars": {
     // Where the *storefront* lives. `/orders/new` mints Monobank invoices, and
     // both the webhook and the customer's success/failure redirect must land on
     // that origin, never this one. `.dev.vars` overrides it for local dev.
-    "SITE_ORIGIN": "https://balier.mlosko.dev",
+    "SITE_ORIGIN": "https://balier.ua",
     // `from` address for order-confirmation emails, same value as the site
     // Worker's — the customer cannot tell which Worker created their order.
-    "ORDER_EMAIL_FROM": "noreply@mail.mlosko.dev",
+    "ORDER_EMAIL_FROM": "noreply@mail.balier.ua",
     // The bot's public username — `/settings` builds the account-linking deep
     // link (`t.me/<bot>?start=…`) from it. A username is public by nature,
-    // hence a var; the *token* stays a secret. Blank would just switch the
-    // Telegram sign-in section into its "not configured" state.
-    "PUBLIC_TELEGRAM_BOT": "balierua_bot",
+    // hence a var; the *token* stays a secret. EMPTY until the launch bot
+    // exists (launch.md L2 — the dev bot's token stayed with the previous
+    // developer); blank just switches the Telegram sign-in section into its
+    // "not configured" state.
+    "PUBLIC_TELEGRAM_BOT": "",
     // Sentry (`docs/plans/sentry.md`) — a DSN is a public project identifier,
     // not a secret. Same single project as the site and cron Workers; the
     // wrapper in `src/middleware.ts` tags events `worker:admin`.
     "SENTRY_DSN": "https://10cc802695139cc28dd32cf305de6f34@o4504565189378049.ingest.us.sentry.io/4511881341370368",
-    "SENTRY_ENVIRONMENT": "development"
+    "SENTRY_ENVIRONMENT": "production"
   }
 }
