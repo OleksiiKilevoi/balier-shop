@@ -4,8 +4,25 @@
 
 ## 📍 CURRENT STATE (overwrite this block; keep tight)
 
-- **Last done:** **«Стара ціна» removed, root and branch** (2026-08-10, client's call,
-  uncommitted). There is no discount model in the shop now: `products.compare_at_price` is gone
+- **Last done:** **Launch plan written — `docs/plans/launch.md`** (2026-09-07). A repository
+  read-through turned into the Phase 5 checklist: client decisions (L0), content (L1), the
+  client's accounts (L2), the dev-scoped values in the repo (L3 — `ADMIN_HOST` in the site
+  middleware, `DEFAULT_URL` in `scripts/telegram-webhook.ts`, `SITE_ORIGIN`, names/routes/vars in
+  the three `wrangler.jsonc`), the strictly ordered stand-up (L4), the verification pass (L5) and
+  go-live (L6). Found on the way, via Sentry: **the dev cron was never redeployed after
+  `ec0797e`** — BALIER-5, 2 693 events, the sweep still deletes from `stock_reservations` every
+  15 minutes; `pnpm cron:deploy` is owed on dev *now*. Also: the two 2026-08-10 features below are
+  committed (`ec0797e`). Same session, after the client's answers: **dev is unreachable** (the
+  previous developer holds every dev account; this laptop's wrangler login is an unrelated
+  account — never deploy from here until the client's login exists), only the `balier.ua`
+  domain exists on the client's side, and the L0 defaults are taken. **L3 is done in the
+  working tree, uncommitted:** Worker names `balier`/`balier-admin`, routes on `balier.ua`,
+  `SITE_ORIGIN`, `ORDER_EMAIL_FROM`, Sentry `production`, `ADMIN_HOST`, the webhook script's
+  default URL, blank bot/manager vars, KV id as a loud `REPLACE_AT_L2…` placeholder, typegen
+  regenerated (the admin `.dev.vars.example` was missing `NOVAPOSHTA_API_KEY` — added). Gate
+  green (`pnpm check`; site build needs `CLOUDFLARE_VITE_FORCE_LOCAL=true` on this laptop).
+- **Before that:** **«Стара ціна» removed, root and branch** (2026-08-10, client's call,
+  committed in `ec0797e`). There is no discount model in the shop now: `products.compare_at_price` is gone
   (migration **`0018`**, applied to dev — the values went with it), and with it the panel's
   «Стара ціна» field, its validation entry and error string, the struck-through span on the
   product page and on `Price.astro`/`ProductCard.astro` (`compareAt` is not a prop any more), the
@@ -35,10 +52,17 @@
   split live through `a5a192c`. The NP **create-inspect-delete volume pass** was run by the client
   (confirmed 2026-08-09) — the `/1_000_000` volumetric fix is verified against the cabinet, closing
   the follow-up from the 2026-08-07 post-ship review.
-- **In progress:** nothing. Migrations `0006`–`0018` are all applied to the **dev** database.
-- **Next step:** back to what was owed before this feature: the register flow
-  with real parcels, and the browser passes — `/checkout`'s delivery step, `/categories`,
-  `/settings`, `/users`, image upload preview, `/orders/new` card order. Then Phase 5.
+- **Production database exists (2026-09-07):** Neon `curly-smoke-75808809`, Frankfurt, PG 18.6,
+  **all 19 migrations applied**, empty of data; pooled string in the four `.dev.vars`. Linked
+  via the `neon` CLI (`neon.ts` + `.claude/skills` + `skills-lock.json` untracked). Catalog draft
+  from the client's photo folder in `docs/plans/catalog.md` — 17 products, copy, prices, photo
+  map, and the table the client must fill (dimensions, weight, leather).
+- **In progress:** the catalog review; the Instagram tab is open logged-out.
+- **Next step:** commit L3. Then `docs/plans/launch.md` L2 — nothing moves until the client's
+  Cloudflare account and Neon project exist and the credentials are in the four `.dev.vars`;
+  L1's legal pages gate the Monobank merchant, so the client's texts are on the critical path. The browser passes still owed (`/checkout`'s delivery step,
+  `/categories`, `/settings`, `/users`, image upload preview, `/orders/new` card order) are folded
+  into L5.
   **A production deploy needs `pnpm db:migrate` against that database and one
   `pnpm admin:user role <email> admin`**; migrations `0008`/`0009` (and now `0015`–`0018`) must land
   before that deploy — the gate reads `sessions_valid_from`/`archived_at` on every request, so code
@@ -185,6 +209,16 @@
 > Empty by design. Everything through the end of Phase 4 was moved to **`docs/history.md`** on
 > 2026-08-05, not rewritten — this file is read in full at every session start and had reached
 > 852 lines. New session entries go here; move a phase's entries across once the phase is done.
+
+**2026-09-07 (launch plan).** «analyse repository and write down steps needed for launch».
+Read STATE, roadmap, OVERVIEW, the NP and Sentry plans, all three `wrangler.jsonc`, the four
+`.dev.vars.example`, the seed, settings queries and every place a dev hostname is hardcoded;
+wrote `docs/plans/launch.md` in the plan-file mould (L0–L6 + teardown). Two findings that were
+not in any doc: Sentry BALIER-5 shows the deployed dev cron still sweeping `stock_reservations`
+(dropped by `0016`) — `pnpm cron:deploy` never ran after `ec0797e`; and `worker-configuration.d.ts`
+types `ORDER_EMAIL_FROM` as a string *literal*, so changing that var needs `pnpm cf-typegen` or
+`pnpm check` fails. Nothing in the app changed; STATE.md's «uncommitted» lines corrected to
+`ec0797e`. No gate run — fresh clone, no `node_modules`.
 
 **2026-08-10 (без скидок).** «Убрать "Стара ціна" полностью, система скидок не нужна сейчас».
 The one thing worth asking was depth — code-only or the column too — and the client took the
