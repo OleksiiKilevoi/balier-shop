@@ -79,6 +79,10 @@ A full second setup, not a transfer. Only schema and migrations carry over; no d
 - [ ] **Cloudflare account** (client-owned, developer invited as a member). Add the `balier.ua`
       zone, move nameservers at the registrar, wait for **Active** — custom-domain routes fail to
       deploy before that.
+      **2026-09-10: `balier.ua` is NXDOMAIN at the `.ua` registry** — no nameservers set anywhere,
+      so there is nothing to import and Active waits on the registrar change; confirm with the
+      client that the registration itself is complete (direct `.ua` names need a registered
+      trademark). Decision confirmed 2026-09-10: client-owned account, developer invited.
 - [ ] **Workers Paid plan** on that account — Email Sending requires it (as on the dev account
       since 2026-08-04).
 - [ ] R2: `wrangler r2 bucket create balier-media`. Empty on purpose — the dev photos are test
@@ -133,7 +137,7 @@ Every dev-scoped value, by file:
 - [ ] **Not yet:** `SITE_IS_INDEXABLE` in `apps/site/src/layouts/BaseLayout.astro:20` stays
       `false` until L6.
 - [x] `pnpm check && pnpm build` green (build with `CLOUDFLARE_VITE_FORCE_LOCAL=true` here).
-      Commit owed — **do not push to `main` while the previous developer's Workers Builds may
+      **Committed 2026-09-10 as `2adbb7e`** — **do not push to `main` while the previous developer's Workers Builds may
       still watch it**: the renamed Workers and `balier.ua` routes would fail their build,
       harmlessly, but it is noise on an account we do not control. The Monobank webhook URL needs no change — `createOrder`
       builds it from the request origin (`apps/site/src/pages/api/checkout.ts:75`), and
@@ -146,7 +150,8 @@ Every dev-scoped value, by file:
        present, `in_stock` / `weight_grams` / `arrived` verified by query. **Do not run `pnpm db:seed`**: it inserts the synthetic
        and test products. The two settings it would seed (`cod_limit` 5 000 ₴,
        `payment_ttl_minutes` 30) have code defaults and `/settings` writes them as an upsert.
-2. [ ] `pnpm admin:user create <client email> --role=admin` against that database. Also one for
+2. [ ] `pnpm admin:user create <client email> --role=admin` against that database (no admins
+       there — checked 2026-09-10). Also one for
        the developer, `disable`d after handover if the client prefers. (STATE.md's rule: the
        gate reads `sessions_valid_from`/`archived_at` on every request — schema **before** panel
        code, which step 1 guarantees.)

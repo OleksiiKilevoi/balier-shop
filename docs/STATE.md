@@ -4,180 +4,51 @@
 
 ## 📍 CURRENT STATE (overwrite this block; keep tight)
 
-- **Last done:** **Launch plan written — `docs/plans/launch.md`** (2026-09-07). A repository
-  read-through turned into the Phase 5 checklist: client decisions (L0), content (L1), the
-  client's accounts (L2), the dev-scoped values in the repo (L3 — `ADMIN_HOST` in the site
-  middleware, `DEFAULT_URL` in `scripts/telegram-webhook.ts`, `SITE_ORIGIN`, names/routes/vars in
-  the three `wrangler.jsonc`), the strictly ordered stand-up (L4), the verification pass (L5) and
-  go-live (L6). Found on the way, via Sentry: **the dev cron was never redeployed after
-  `ec0797e`** — BALIER-5, 2 693 events, the sweep still deletes from `stock_reservations` every
-  15 minutes; `pnpm cron:deploy` is owed on dev *now*. Also: the two 2026-08-10 features below are
-  committed (`ec0797e`). Same session, after the client's answers: **dev is unreachable** (the
-  previous developer holds every dev account; this laptop's wrangler login is an unrelated
-  account — never deploy from here until the client's login exists), only the `balier.ua`
-  domain exists on the client's side, and the L0 defaults are taken. **L3 is done in the
-  working tree, uncommitted:** Worker names `balier`/`balier-admin`, routes on `balier.ua`,
-  `SITE_ORIGIN`, `ORDER_EMAIL_FROM`, Sentry `production`, `ADMIN_HOST`, the webhook script's
-  default URL, blank bot/manager vars, KV id as a loud `REPLACE_AT_L2…` placeholder, typegen
-  regenerated (the admin `.dev.vars.example` was missing `NOVAPOSHTA_API_KEY` — added). Gate
-  green (`pnpm check`; site build needs `CLOUDFLARE_VITE_FORCE_LOCAL=true` on this laptop).
-- **Before that:** **«Стара ціна» removed, root and branch** (2026-08-10, client's call,
-  committed in `ec0797e`). There is no discount model in the shop now: `products.compare_at_price` is gone
-  (migration **`0018`**, applied to dev — the values went with it), and with it the panel's
-  «Стара ціна» field, its validation entry and error string, the struck-through span on the
-  product page and on `Price.astro`/`ProductCard.astro` (`compareAt` is not a prop any more), the
-  column in both card and detail selects, and the seed's 2900 ₴. `optionalPriceSchema` stays —
-  `price_override` is still the nullable-means-«not set» case it was written for. Gate green,
-  325 tests.
-- **Previously:** **Stock counting replaced by an availability toggle** (2026-08-10, client's call,
-  uncommitted). `product_variants.stock` and the whole `stock_reservations` table are gone;
-  a variant now carries `in_stock boolean not null default true`, and **nothing but a manager
-  writes it** — an order does not decrement, a cancellation does not restore, and two customers
-  buying the last piece was raised and accepted. Migrations **`0016`** (add + backfill
-  `in_stock = stock > 0`, drop the table, rename the setting) and **`0017`** (drop `stock`), both
-  applied to dev. What went with it: the cart's `reduced` notice and every quantity clamp (the
-  stepper's ceiling is `MAX_ITEM_QUANTITY` now), `updateStatus`'s restock/re-decrement blocks and
-  its `insufficient_stock` refusal, `lockCheckoutVariants`' `FOR UPDATE` (renamed
-  `findCheckoutVariants` — it was buying nothing once there was no count to race for), and
-  `status.ts`'s `STOCK_COMMITTED`, which survives renamed as `LIVE_SALE` because the line it draws
-  is attempt-versus-sale, not inventory. The cron's sweep now measures an unpaid order's **age**
-  against `payment_ttl_minutes` (the renamed `reservation_ttl_minutes`, the same value that stamps
-  the invoice's validity) instead of a reservation's expiry. Panel: the «Залишок» number is a
-  «В наявності» checkbox on each variant row and on the add form, the list column and the editor's
-  «На вітрині» card count `N / M` in stock, and a published product with nothing in stock says so.
-  `docs/plans/roadmap.md` still describes the counted model in its Phase 2/3 entries **on purpose**
-  — it records what was built then; `CONVENTIONS.md`, `OVERVIEW.md` and CLAUDE.md's hard rule 3
-  carry the new one.
-- **Context:** the OTP PRG fix went out as `95060e7` before this session; NP-1..NP-5 + `arrived`
-  split live through `a5a192c`. The NP **create-inspect-delete volume pass** was run by the client
-  (confirmed 2026-08-09) — the `/1_000_000` volumetric fix is verified against the cabinet, closing
-  the follow-up from the 2026-08-07 post-ship review.
-- **Production database exists (2026-09-07):** Neon `curly-smoke-75808809`, Frankfurt, PG 18.6,
-  **all 19 migrations applied**, empty of data; pooled string in the four `.dev.vars`. Linked
-  via the `neon` CLI (`neon.ts` + `.claude/skills` + `skills-lock.json` untracked). Catalog draft
-  from the client's photo folder in `docs/plans/catalog.md` — 17 products, copy, prices, photo
-  map, and the table the client must fill (dimensions, weight, leather).
-- **In progress:** the catalog review; the Instagram tab is open logged-out.
-- **Next step:** commit L3. Then `docs/plans/launch.md` L2 — nothing moves until the client's
-  Cloudflare account and Neon project exist and the credentials are in the four `.dev.vars`;
-  L1's legal pages gate the Monobank merchant, so the client's texts are on the critical path. The browser passes still owed (`/checkout`'s delivery step,
-  `/categories`, `/settings`, `/users`, image upload preview, `/orders/new` card order) are folded
-  into L5.
-  **A production deploy needs `pnpm db:migrate` against that database and one
-  `pnpm admin:user role <email> admin`**; migrations `0008`/`0009` (and now `0015`–`0018`) must land
-  before that deploy — the gate reads `sessions_valid_from`/`archived_at` on every request, so code
-  ahead of schema is a panel nobody can open. The dev sender settings still point at **Київ,
-  Відділення №1** as a placeholder handover branch.
-- **Loose end, unresolved (2026-08-06):** `qa-live@balier.test` was once found switched on with
-  `sessions_valid_from` stamped, unexplained by any command of that session; set back to disabled
-  and written down rather than tidied away.
-- **Rules that bind any future panel screen** (now written up in `docs/CONVENTIONS.md` → «Admin
-  panel»: the `admin.css` utilities, `src/components/admin/`, and the no-reload/toast contract):
-  - **A schema is only verified against the body the form actually sends.** `curl -F` composes a
-    body by hand and will happily supply a field no control on the page renders, so a screen can
-    pass a full curl pass and be unusable in a browser — which is exactly what happened to image
-    upload for three sessions. Validation tests build their body from a real `FormData`, and «tested
-    over curl» is not «tested».
-  - **The no-script rule is dead as of 2026-08-05.** The replacement is progressive enhancement: the
-    form must work as a plain form, and script may make it better on top. The catalog screens take
-    the plain-PRG end of that; `/admin/orders/new` takes the reload-free end. Requiring script is
-    not legitimate. (`docs/CONVENTIONS.md` may still word the old rule.)
+- **Last done (2026-09-10):** **L3 committed** — `2adbb7e` (production env values) and `17e0a5e`
+  (launch plan, catalog draft, STATE); gate green; **not pushed** (the previous developer's
+  Workers Builds may still watch `main`). Decision confirmed by the client: production lives on a
+  **client-owned Cloudflare account** with `oleksii.kilevoi@drizzle.team` invited. The wrangler
+  login on this laptop is the developer's own account (`52a29667…`, one membership, no invites) —
+  nothing deploys from here until the invite is accepted and `wrangler login` is re-run. Two
+  facts checked, not assumed: **`balier.ua` is NXDOMAIN at the `.ua` registry** (no nameservers
+  anywhere — the zone cannot go Active until the client sets Cloudflare's NS at the registrar),
+  and the production database answers with **zero admin accounts**.
+- **In progress:** waiting on the client (list below). Catalog review (`docs/plans/catalog.md`)
+  still open.
+- **Next step:** the moment the Cloudflare invite lands: `wrangler login` → check the zone is
+  Active → `docs/plans/launch.md` L2 (Workers Paid, R2 `balier-media`, KV `RATE_LIMIT` id into
+  both `wrangler.jsonc`, Email Sending on `mail.balier.ua`) → L4 in its order. L4.2 can go first
+  at any time: `pnpm admin:user create <email> --role=admin` (password is prompted — run by hand).
+- **Blockers (waiting on me / the client):**
+  - Cloudflare account created by the client; developer invited as Administrator; payment method
+    and Workers Paid added by the client (an Administrator cannot touch billing).
+  - `balier.ua` registration confirmed and registrar access, or the client ready to change NS.
+  - L1 texts for the seven static pages; `/offer` + `/privacy` gate the Monobank merchant.
+  - Nova Poshta API key; new Telegram bot token, notification chat id, manager handle.
+  - Catalog table (dimensions, weight, leather); Neon plan upgrade to Launch in the console.
+- **Loose ends carried:** the neon CLI's link files (`neon.ts`, `@neon/config` + `@neon/env` in
+  the root `package.json`, `.claude/skills`, `skills-lock.json`) are **uncommitted on purpose** —
+  developer tooling, decide at teardown. The `qa-live@balier.test` mystery (2026-08-06) is
+  dev-only now.
+- **Rules that bind any future panel screen** (written up in `docs/CONVENTIONS.md` → «Admin
+  panel»):
+  - A schema is only verified against the body the form actually sends — `curl -F` can supply a
+    field no control renders; validation tests build their body from a real `FormData`.
+  - Progressive enhancement, not no-script: the form must work as a plain form; script improves it.
 - **Still worth carrying:**
-  - **`balier-cron` is fully provisioned and its reconciliation is live** (verified 2026-08-06, not
-    assumed): all five secrets present per `wrangler secret list` — `DATABASE_URL`,
-    `NOVAPOSHTA_API_KEY`, `MONOBANK_TOKEN`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` — and the
-    deployed code has the sweep, since version `27405ec5` (2026-08-05 16:46 UTC) postdates commit
-    `e8d8447` (16:43 UTC) by three minutes. The workspace split alone did not require a cron
-    redeploy; the 2026-08-06 sync change did, and got one — `26fa1ef6`, secrets verified after. `send_email` / `ORDER_EMAIL_FROM` were already in that deploy and the DNS records
-    now exist, so the sweep's order-paid email delivers too.
-  - **Admin sessions did not survive the split** — `balier-admin-dev` got a **fresh
-    `ADMIN_SESSION_SECRET`** at deploy (the `__Host-` cookie could not cross hostnames anyway).
-    Log in again on `admin.balier.mlosko.dev`. The old secret is still set on `balier-dev` where
-    nothing reads it now — cleanup item below.
-  - **Dev writes to the real R2 bucket** — both apps' MEDIA bindings carry `"remote": true`
-    (2026-08-06). Before that, dev bound MEDIA to Miniflare's simulated bucket under
-    `.wrangler/state/v3/r2/`, so a photo uploaded through the panel was written to disk while
-    its `product_images` row went to the *real* Neon database — local R2 against remote Postgres is
-    the one combination that produces broken data rather than a broken screen. Two consequences:
-    dev needs Cloudflare auth to read or serve media at all, and an upload made while testing is a
-    real object in the real bucket. `CLOUDFLARE_VITE_FORCE_LOCAL=true pnpm dev` forces the old
-    isolated behaviour for a session without editing config.
-  - **`MAX_ITERATIONS = 100_000` in `src/lib/auth/password.ts` is a hard runtime ceiling, not a
-    tuning choice** — the Workers runtime refuses PBKDF2 above it, and *only the deployed runtime
-    does*: Node, Vite's dev server and `wrangler dev`'s own workerd all derive 210 000 happily, so
-    no local gate can catch a breach of it. It is also under OWASP's 600 000 — an open decision,
-    deliberately not taken.
-  - **Sessions are revocable per account as of 2026-08-06** (`sessions_valid_from` + the gate's
-    per-request row read). Rotating `ADMIN_SESSION_SECRET` is still the way to end *everyone's* at
-    once, and it is still the only lever if the database itself is the problem.
-  - **`pnpm admin:user` cannot reach the archive** — no command writes `archived_at`, and `enable`
-    now says so out loud when the account it just re-flagged is archived anyway. Archiving and
-    purging are panel actions on purpose: the irreversible one should take a screen that shows what
-    is being deleted. `list` prints `[arch]` ahead of `[on]`/`[off]` for the same reason — an
-    archived row is usually still `is_active`, and the recovery tool must not say `[on]` about an
-    account that cannot sign in.
-  - **Turnstile is commented out, not deleted** (`grep -rn "Turnstile:" src wrangler.jsonc` to
-    restore), so **the KV rate limiter is the only bot defence on `/api/checkout`** — 10/min per IP.
-  - Leftovers from earlier phases: Phase 3 is code-complete but still wants a real browser pass
-    through `/checkout` (no longer Turnstile-gated, so curl can drive it) and the Email Sending DNS
-    records below; Phase 2's seven static pages still render a heading, a lead and a
-    `ContentPlaceholder` — writing them is a Phase 5 content item, and the legal ones gate Monobank.
-  - Deliberately not built and unasked-for: any customer-facing notification on an admin status
-    change. Telegram and email stay wired to order creation and payment only.
-- **Blockers (waiting on me):**
-  - Phase 0 externals unchanged: Monobank Acquiring registration, Nova Poshta business account +
-    cash-on-delivery setup, Telegram manager account / bot / chat.
-  - **A Nova Poshta API key — no longer a dev blocker** (2026-08-07): the key already in
-    `.dev.vars` has a sender counterparty and contact person behind it (checked via
-    `Counterparty.getCounterparties` / `getCounterpartyContactPersons`), so waybill creation works
-    on it. Test waybills are made in the developer's name — create-then-delete. The client's own
-    account remains a Phase 5 item, and the **business account** still blocks only cash on
-    delivery, whose code gets written regardless.
-  - `PUBLIC_TELEGRAM_MANAGER` in `wrangler.jsonc` is a **placeholder handle**.
-  - Small cleanup on `balier-dev` (run from `apps/site`): `wrangler secret delete
-    CF_ACCESS_TEAM_DOMAIN` / `CF_ACCESS_AUD` (dead since the auth switch), and now also
-    `ADMIN_SESSION_SECRET` / `NOVAPOSHTA_API_KEY` (moved to the admin and cron Workers
-    respectively — nothing on the site Worker reads either).
-  - Dormant, not resolved: the Turnstile widget (`0x4AAAAAAEF8vF0-cXNWdOOY`) was created when
-    `localhost` and the `workers.dev` URL were the only allowed hosts, so its hostname allowlist may
-    not include `balier.mlosko.dev`. Never tested either way; it matters again the moment Turnstile
-    is uncommented.
-- **Active branch:** `main` at `8d103f6`, in sync with origin. **Workers Builds works**: today's
-  push auto-deployed `balier-dev` and `balier-admin-dev` (15:06 UTC, verified via
-  `wrangler deployments list` — the list prints oldest-first, read the bottom). Only
-  `balier-cron` deploys by hand (`pnpm cron:deploy`, now also the sourcemap-upload path).
-- **Dev DB state (real rows, harmless, deliberately not cleaned up):** the ten below plus
-  `B260810-B4FNH` (COD, `confirmed`, 7 × CROSS-MINI-BLK — the availability drive's proof that an
-  order decrements nothing) and a disabled `qa-stock@balier.test` (admin) alongside the five other
-  disabled accounts. From the Phase 3
-  and admin passes: `B260805-XVFYQ` (COD, placed by curl with no captcha token — the proof Turnstile
-  is off), `B260804-6DN8Q` (card, paid through the real webhook), `B260804-BYP3K` / `B260804-S86Y7`
-  (COD), `B260804-DAMN7` (walked all over by the admin screens — `delivered`, fake TTN
-  `20450123456789`), and `B260804-L6NJG` / `B260804-LHB7A`, `cancelled` from before migration `0003`
-  so they correctly offer no revert. From the panel's own create screen: `B260805-67RJB` (COD,
-  `confirmed`), `B260805-A88BY` (card, `awaiting_payment`, real Monobank invoice) and
-  `B260805-BLF43` (COD courier with an email address — the one that proves the confirmation email
-  fires on that path), and `B260806-A9AYA` (COD warehouse, `lxstspxrk@gmail.com` — the first order
-  placed *after* the Email Sending DNS records existed, i.e. the first whose email could actually
-  deliver). From the catalog session, the first rows the *panel* created: product
-  `sumka-test-liunet` left **archived** (two variants; its three image rows were removed again
-  during the 2026-08-06 upload testing) and category `testova-katehoriia` left **deactivated** —
-  archived rather than deleted on purpose, since archive-only is the rule the feature ships. The
-  five seeded products are untouched and all `active`. **`admin@balier.com` is the only enabled
-  admin account, and the only one with the `admin` role.** Five disabled rows sit alongside it:
-  `qa-catalog@`, `qa-users@balier.test` (admin), `anna@balier.test`, `qa-live@balier.test` (the
-  account created *through the deployed panel* as proof it works) and `qa-arch@balier.test` (admin,
-  created by `pnpm admin:user` to drive the archive pass). **One row is archived on purpose:**
-  `qa-settings@balier.test` — its original row was **purged** during the pass and the address
-  immediately re-used for a new account, which is the proof that a purge frees the email; the new
-  row was then archived and left there so the «Архів» tab has something in it for the browser pass.
-- **Media state (checked 2026-08-06, not inferred):** all **17** `product_images` rows —
-  `lorem-ipsum`, `lunet`, `space`, `wallet` — point at seeded objects that are in `balier-media`,
-  so nothing in the catalog is a broken image. Five objects sit in the *local* Miniflare store and
-  nowhere else (`1c04e803…webp`, `4564fe2f…png`, `8708b591…jpg`, `9603d232…avif`, `b2054604…jpg`),
-  referenced by no row: leftovers from uploads whose rows were later removed. **Removing a photo
-  deletes the row and deliberately not the object** — keys are content hashes, so an object may be
-  shared, and orphaned bytes are the safe side of that trade. There is no reaper for them.
+  - `MAX_ITERATIONS = 100_000` in `packages/lib/src/auth/password.ts` is a hard runtime ceiling —
+    the deployed Workers runtime refuses PBKDF2 above it, and no local gate can catch a breach.
+  - Sessions are revocable per account (`sessions_valid_from`); rotating `ADMIN_SESSION_SECRET`
+    ends everyone's at once.
+  - `pnpm admin:user` cannot reach the archive — archiving and purging are panel actions on
+    purpose.
+  - Turnstile is commented out, not deleted (`grep -rn "Turnstile:" src wrangler.jsonc`); the KV
+    limiter (10/min per IP) is the only bot defence on `/api/checkout`.
+  - No customer-facing notification on an admin status change — deliberately not built.
+  - The dev environment (`*.mlosko.dev`, dev Neon, `balier-dev` / `balier-admin-dev` /
+    `balier-cron`) is unreachable since 2026-09-07. Its last recorded state — QA rows, media,
+    secrets, cleanup items — is this block as of `17e0a5e`. BALIER-5 (the dev cron sweeping a
+    dropped table) is the previous developer's to fix.
 
 ## ✅ Phase tracker (high-level; detail in docs/plans/roadmap.md)
 
@@ -199,7 +70,8 @@
       statuses. NP-1..NP-4 deployed and client-verified live; NP-5 built and driven live
       2026-08-07, awaiting commit+push. Phase 5's account migration has to carry the sender
       settings and API key across
-- [ ] Phase 5 — Launch (incl. migrating off the dev Neon/Cloudflare accounts)
+- [~] Phase 5 — Launch (plan in `docs/plans/launch.md`; L3 committed 2026-09-10, waiting on the
+      client's Cloudflare account)
 - [ ] Phase 6 — Improvements
 
 ---
@@ -209,6 +81,15 @@
 > Empty by design. Everything through the end of Phase 4 was moved to **`docs/history.md`** on
 > 2026-08-05, not rewritten — this file is read in full at every session start and had reached
 > 852 lines. New session entries go here; move a phase's entries across once the phase is done.
+
+**2026-09-10 (launch, L3 → L2).** «guide me until launch». `wrangler whoami` showed the login
+made minutes earlier is the developer's own account — one membership, no invites — and
+`dig NS balier.ua` came back NXDOMAIN from the `.ua` registry: the domain has no delegation at
+all. The client chose a client-owned Cloudflare account with the developer invited. Committed L3
+as `2adbb7e` and the docs as `17e0a5e` (gate green, nothing pushed); the neon CLI's link files
+stay untracked. `pnpm admin:user list` against production: no admins. Wrote the client's
+account checklist; nothing deploys until the invite is accepted. CURRENT STATE cut from 177
+lines to the handover — the dev environment's state lives in this file at `17e0a5e`.
 
 **2026-09-07 (launch plan).** «analyse repository and write down steps needed for launch».
 Read STATE, roadmap, OVERVIEW, the NP and Sentry plans, all three `wrangler.jsonc`, the four
