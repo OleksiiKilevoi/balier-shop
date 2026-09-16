@@ -44,23 +44,6 @@ const teasers = [
   title="Balier"
   description="Шкіряні вироби ручної роботи. Обмежені партії, доставка Новою Поштою по всій Україні."
 >
-  <section
-    class="from-espresso via-espresso to-espresso-light bg-gradient-to-br text-white"
-    aria-labelledby="hero-heading"
-  >
-    {/* 32rem of hero eats a whole phone screen before anything else is visible,
-        so the tall version starts at the tablet breakpoint. */}
-    <Container class="flex min-h-[24rem] flex-col justify-center py-16 sm:min-h-[32rem] sm:py-28">
-      {/* 2rem keeps the forced break on one line down to a 320px viewport. */}
-      <h1 id="hero-heading" class="max-w-2xl text-[2rem] text-white sm:text-5xl lg:text-6xl">
-        Шкіряні вироби<br />ручної роботи
-      </h1>
-      <p class="mt-4 max-w-md text-white/80 sm:mt-5">
-        Кожен виріб розповідає історію майстерності та традицій.
-      </p>
-    </Container>
-  </section>
-
   {
     featured.length > 0 && (
       <Container as="section" class="py-12 sm:py-16" aria-labelledby="featured-heading">
@@ -79,11 +62,12 @@ const teasers = [
           </a>
         </div>
 
-        {/* No card is `eager` here, unlike `/products`: the hero owns the LCP and
-            every one of these starts below the fold. */}
+        {/* The grid is the first thing on the page now (the hero went 2026-09-16,
+            «сразу должны быть товары»), so it owns the LCP. */}
         <div class="mt-6 grid grid-cols-2 gap-3 sm:mt-8 sm:gap-5 lg:grid-cols-4 lg:gap-6">
           {featured.map((product) => (
             <ProductCard
+              eager
               slug={product.slug}
               title={product.title}
               category={product.categoryTitle}
