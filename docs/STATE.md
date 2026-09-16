@@ -4,7 +4,13 @@
 
 ## 📍 CURRENT STATE (overwrite this block; keep tight)
 
-- **Last done (2026-09-16, evening):** **Zone Active, Workers Paid on, Email Sending onboarded on
+- **Last done (2026-09-16, night):** **first `pnpm deploy:site` by the owner: Worker `balier`
+  uploaded, custom domain refused** (`100117`, the imported zone has the old hosting's proxied
+  A/AAAA on the apex and a wildcard `*`; admin and cron not deployed yet). Owner deletes the
+  A/AAAA/CNAME records, keeps MX/SPF and the `mail.` records, redeploys all three. Side effects
+  recorded in launch.md L4.3: auto-provisioned `balier-session` KV (unused Astro `SESSION`
+  binding) and wrangler's whitespace rewrite of `wrangler.jsonc` (reverted). Before that: **Zone
+  Active, Workers Paid on, Email Sending onboarded on
   `mail.balier.com.ua`** (dashboard: Compute & AI → Email Service; the CLI returns `2036` to every
   Email Sending call until the account has onboarded its first domain there — after that it works).
   All sender records verified on the authoritative NS; a CLI test send to the owner was «Queued».

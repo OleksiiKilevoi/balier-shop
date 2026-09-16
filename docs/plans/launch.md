@@ -168,9 +168,20 @@ Every dev-scoped value, by file:
        the developer, `disable`d after handover if the client prefers. (STATE.md's rule: the
        gate reads `sessions_valid_from`/`archived_at` on every request — schema **before** panel
        code, which step 1 guarantees.)
-3. [ ] First deploy by hand from each directory, so the Workers and routes exist:
+3. [~] First deploy by hand from each directory, so the Workers and routes exist:
        `pnpm deploy:site`, `pnpm deploy:admin`, `pnpm cron:deploy`. DB-backed routes 500 until
        step 4 — expected, nothing is indexable or linked yet.
+       **2026-09-16:** `balier` uploaded (version `c8186822`) but its custom domain failed with
+       `100117: Hostname 'balier.com.ua' already has externally managed DNS records` — the zone
+       import carried the old hosting's proxied A/AAAA for the apex plus a wildcard `*`, so every
+       hostname (admin included) still hits the dead ukraine.com.ua nginx (302 loop). Fix: delete
+       every A/AAAA/CNAME in the zone (apex, `www`, `*`), keep the apex MX + SPF TXT and the
+       `mail.`/`cf-bounce.`/`_dmarc.` records, redeploy all three. Two side effects of the first
+       deploy: **wrangler auto-provisioned a KV namespace `balier-session` (`f376dc06…`) for the
+       Astro Cloudflare adapter's default `SESSION` binding** — nothing in the site uses
+       `Astro.session`, it is empty and free, left alone (the admin deploy will make a second one);
+       and wrangler rewrote `apps/site/wrangler.jsonc` with tabs and expanded arrays, content
+       unchanged — reverted with `git checkout`, expect it again on every hand deploy.
 4. [ ] Secrets, `wrangler secret put <NAME>` **from each Worker's directory** — they are
        per-Worker and do not carry over. Each `put` redeploys the same code with the secret.
        - `apps/site`: `DATABASE_URL`, `MONOBANK_TOKEN` (test token until Monobank approves),
