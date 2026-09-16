@@ -4,7 +4,11 @@
 
 ## 📍 CURRENT STATE (overwrite this block; keep tight)
 
-- **Last done (2026-09-16, night):** **first `pnpm deploy:site` by the owner: Worker `balier`
+- **Last done (2026-09-16, night):** **All three Workers deployed and reachable on
+  `balier.com.ua` / `admin.balier.com.ua`** after the owner deleted the imported A/AAAA/wildcard
+  records; static pages, images and the 404 verified through the edge, DB pages 500 until secrets,
+  cron schedules registered (launch.md L4.3 has the details and the macOS resolver-cache trap).
+  Before that: **first `pnpm deploy:site` by the owner: Worker `balier`
   uploaded, custom domain refused** (`100117`, the imported zone has the old hosting's proxied
   A/AAAA on the apex and a wildcard `*`; admin and cron not deployed yet). Owner deletes the
   A/AAAA/CNAME records, keeps MX/SPF and the `mail.` records, redeploys all three. Side effects
@@ -33,13 +37,11 @@
   the 26-step plan approved (`~/.claude/plans/squishy-finding-hennessy.md`).
 - **In progress:** waiting on the client (list below). Catalog review (`docs/plans/catalog.md`)
   still open.
-- **Next step:** owner runs the three deploys and creates the admin account; credentials into the
-  four `.dev.vars` → secrets → `pnpm np:sync` → Telegram webhook (`docs/plans/launch.md` L4; the
+- **Next step:** owner creates the admin account; credentials into the four `.dev.vars` → secrets → `pnpm np:sync` → Telegram webhook (`docs/plans/launch.md` L4; the
   approved plan's block C). Then the offer's seller details, then Monobank. L4.2 can go first
   at any time: `pnpm admin:user create <email> --role=admin` (password is prompted — run by hand).
 - **Blockers (waiting on me / the client):**
-  - The three deploys and the admin account (`pnpm admin:user create`, password prompted) — both
-    the owner's hands.
+  - The admin account (`pnpm admin:user create`, password prompted) — the owner's hands.
   - Seller identity for `/offer` (ФОП name, РНОКПП, address).
   - L1 texts for the seven static pages; `/offer` + `/privacy` gate the Monobank merchant.
   - Nova Poshta API key; new Telegram bot token, notification chat id, manager handle.

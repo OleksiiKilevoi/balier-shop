@@ -168,7 +168,7 @@ Every dev-scoped value, by file:
        the developer, `disable`d after handover if the client prefers. (STATE.md's rule: the
        gate reads `sessions_valid_from`/`archived_at` on every request — schema **before** panel
        code, which step 1 guarantees.)
-3. [~] First deploy by hand from each directory, so the Workers and routes exist:
+3. [x] First deploy by hand from each directory, so the Workers and routes exist:
        `pnpm deploy:site`, `pnpm deploy:admin`, `pnpm cron:deploy`. DB-backed routes 500 until
        step 4 — expected, nothing is indexable or linked yet.
        **2026-09-16:** `balier` uploaded (version `c8186822`) but its custom domain failed with
@@ -182,6 +182,15 @@ Every dev-scoped value, by file:
        `Astro.session`, it is empty and free, left alone (the admin deploy will make a second one);
        and wrangler rewrote `apps/site/wrangler.jsonc` with tabs and expanded arrays, content
        unchanged — reverted with `git checkout`, expect it again on every hand deploy.
+       **Done 2026-09-16 13:17–13:22 UTC after the DNS cleanup:** `balier` (852feeb8),
+       `balier-admin`, `balier-cron` all exist; custom domains `balier.com.ua` → `balier`,
+       `admin.balier.com.ua` → `balier-admin`; cron schedules `*/15` + `0 4` registered; a second
+       auto-provisioned KV `balier-admin-session`. Verified through the edge (`curl --resolve` to
+       `188.114.96.11` — macOS's mDNSResponder kept the old hosting IP cached long after `dig`
+       showed Cloudflare, which made the apex look like it still served the old nginx and its
+       `default-ssl.default-host.net` cert): `/about` `/offer` `/contacts` 200, images 200, 404
+       page 404, `/` and `/products` 500 (no `DATABASE_URL` yet), `admin…/login` 200. Universal
+       cert (GTS, `balier.com.ua` + `*.balier.com.ua`) active.
 4. [ ] Secrets, `wrangler secret put <NAME>` **from each Worker's directory** — they are
        per-Worker and do not carry over. Each `put` redeploys the same code with the secret.
        - `apps/site`: `DATABASE_URL`, `MONOBANK_TOKEN` (test token until Monobank approves),
