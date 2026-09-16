@@ -4,9 +4,8 @@ import StaticPageLayout from '~/layouts/StaticPageLayout.astro';
 // Static HTML, built once — see StaticPageLayout.
 export const prerender = true;
 
-// Required for the Monobank Acquiring application. The seller's identity is
-// still in square brackets on purpose — those are the owner's legal details
-// (launch.md L1), and an invented value here would be worse than a visible gap.
+// Required for the Monobank Acquiring application. Seller details supplied by
+// the owner 2026-09-16.
 ---
 
 <StaticPageLayout
@@ -34,9 +33,9 @@ export const prerender = true;
   </p>
 
   <h2>2. Інформація про продавця</h2>
-  <p>Продавець: [повна назва ФОП / компанії]</p>
-  <p>РНОКПП: [номер]</p>
-  <p>Адреса: [адреса]</p>
+  <p>Продавець: ФОП Баланюк Владислав Вікторович / BALIER</p>
+  <p>РНОКПП: 3486812038</p>
+  <p>Адреса: Майдан Озерний, 19, м. Дніпро</p>
   <p>E-mail: baliershopua@gmail.com</p>
   <p>Телефон: +38 (098) 602-66-26</p>
 
@@ -182,9 +181,9 @@ export const prerender = true;
     на сайті.
   </p>
 
-  <p>Продавець: [ПІБ ФОП / назва компанії]</p>
-  <p>РНОКПП: [номер]</p>
+  <p>Продавець: ФОП Баланюк Владислав Вікторович / BALIER</p>
+  <p>РНОКПП: 3486812038</p>
   <p>E-mail: baliershopua@gmail.com</p>
   <p>Телефон: +38 (098) 602-66-26</p>
-  <p>Адреса: [адреса]</p>
+  <p>Адреса: Майдан Озерний, 19, м. Дніпро</p>
 </StaticPageLayout>

@@ -69,10 +69,10 @@ one config change. Each one changes a config value or a line of copy.
       photos on the care page. Fixed on the way: «поверення», «закордон».
 - [ ] **`/offer` and `/privacy` are the Monobank gate** — the merchant is approved against live
       legal pages on the real domain. They must be deployed on `balier.com.ua` (noindex is fine)
-      *before* the Monobank application. **Still open in `/offer`: the seller's legal identity is
-      in square brackets** — `[повна назва ФОП / компанії]`, `РНОКПП: [номер]`, `Адреса: [адреса]`
-      (section 2 and the signature block). Email and phone are filled. Monobank will not accept
-      brackets; the owner supplies the values.
+      *before* the Monobank application. Seller details filled 2026-09-16 (ФОП Баланюк
+      Владислав Вікторович / BALIER, РНОКПП 3486812038, Майдан Озерний, 19, м. Дніпро — the city
+      added by the developer, confirm). **Both legal pages are complete; the gate is now only
+      «deploy, then apply».**
 - [x] Homepage teasers for `/about` and `/care` rewritten from the real pages.
 - [~] `/contacts`: phone `+38 (098) 602-66-26`, `baliershopua@gmail.com`, Instagram. **No address
       or hours** — the owner has not decided whether to publish them; the Telegram manager handle
