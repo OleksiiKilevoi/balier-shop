@@ -4,8 +4,9 @@
  * Design tokens. Nothing outside this file should contain a raw colour value.
  *
  * The palette is shadcn/ui's «neutral» theme (ui.shadcn.com, 2026-09-16, the
- * owner's call): white surfaces, near-black ink and primary, grey hairlines,
- * soft focus rings. The token *names* predate it — `paper`, `ink`, `line`,
+ * owner's call): white surfaces, near-black ink, grey hairlines, soft focus
+ * rings — with the brand's own deep green (#1f2f2b, the background of its
+ * Instagram graphics) as the primary and the colour of the dark sections. The token *names* predate it — `paper`, `ink`, `line`,
  * `brand` — and were kept so every component keeps compiling; only the values
  * changed. Telegram keeps its brand blue on purpose — it reads as "another
  * channel", not as a second-choice button.
@@ -32,16 +33,19 @@
   --color-line: oklch(0.922 0 0);
   --color-line-strong: oklch(0.87 0 0);
 
-  /* --ring: focus indication only. */
-  --color-ring: oklch(0.708 0 0);
+  /* --ring: focus indication only, the brand green at half opacity. */
+  --color-ring: #1f2f2b;
 
-  /* --primary. Every "add to cart" / "place order" button is this. */
-  --color-brand: oklch(0.205 0 0);
-  --color-brand-hover: oklch(0.3 0 0);
+  /* --primary, the brand green. Every "add to cart" / "place order" button,
+     every link. The hover step is one shade lighter, not darker: on white a
+     darker green reads as black. */
+  --color-brand: #1f2f2b;
+  --color-brand-hover: #2f4540;
 
-  /* Hero gradient and footer — the dark sections. */
-  --color-espresso: oklch(0.145 0 0);
-  --color-espresso-light: oklch(0.269 0 0);
+  /* The dark sections (footer, any full-bleed band): the same green, and one
+     step lighter for gradients. */
+  --color-espresso: #1f2f2b;
+  --color-espresso-light: #2f4540;
 
   --color-telegram: #26a5e4;
   --color-telegram-hover: #1e93cd;
