@@ -25,13 +25,19 @@ const {
 
 // shadcn/ui's button, minus React: same base, same four roles (default,
 // outline, secondary-as-Telegram, ghost), our touch-height sizes.
+// Motion: every button presses in (`active:scale`), the filled ones also lift
+// a pixel with a shadow on hover. Ghost stays flat — a shadow under a
+// transparent box reads as a stray rectangle. `prefers-reduced-motion` zeroes
+// the durations globally (global.css), so the states still apply, instantly.
 const base =
-  'inline-flex shrink-0 cursor-pointer items-center justify-center gap-2 rounded-btn text-center font-medium whitespace-nowrap transition-all duration-150 disabled:pointer-events-none disabled:opacity-50';
+  'inline-flex shrink-0 cursor-pointer items-center justify-center gap-2 rounded-btn text-center font-medium whitespace-nowrap transition-all duration-200 ease-out active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50';
+
+const lift = 'hover:-translate-y-px hover:shadow-md active:translate-y-0 active:shadow-xs';
 
 const variants: Record<Variant, string> = {
-  primary: 'bg-brand text-white shadow-xs hover:bg-brand/90',
-  secondary: 'border border-line bg-paper-raised text-ink shadow-xs hover:bg-tag hover:text-ink',
-  telegram: 'bg-telegram text-white shadow-xs hover:bg-telegram-hover',
+  primary: `bg-brand text-white shadow-xs hover:bg-brand/90 ${lift}`,
+  secondary: `border border-line bg-paper-raised text-ink shadow-xs hover:bg-tag hover:text-ink ${lift}`,
+  telegram: `bg-telegram text-white shadow-xs hover:bg-telegram-hover ${lift}`,
   ghost: 'text-ink-muted hover:bg-tag hover:text-ink',
 };
 
