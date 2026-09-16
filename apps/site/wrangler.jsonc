@@ -98,5 +98,5 @@
   // and the id it prints goes here AND in `apps/admin/wrangler.jsonc`. The
   // placeholder below makes a deploy fail loudly rather than bind to nothing.
   // CACHE is not created — nothing needs it.
-  "kv_namespaces": [{ "binding": "RATE_LIMIT", "id": "REPLACE_AT_L2_WITH_CLIENT_KV_ID" }]
+  "kv_namespaces": [{ "binding": "RATE_LIMIT", "id": "5a26a4dd230e4874ad6f3fb8c349bc52" }]
 }

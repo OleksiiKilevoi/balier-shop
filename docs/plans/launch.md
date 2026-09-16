@@ -86,9 +86,9 @@ A full second setup, not a transfer. Only schema and migrations carry over; no d
       the developer's own account `52a29667…`**; nothing here is «client-owned» any more.
 - [ ] **Workers Paid plan** on that account — Email Sending requires it (as on the dev account
       since 2026-08-04).
-- [ ] R2: `wrangler r2 bucket create balier-media`. Empty on purpose — the dev photos are test
+- [x] R2: `wrangler r2 bucket create balier-media` (done 2026-09-16, by hand). Empty on purpose — the dev photos are test
       products; real photography goes in through the panel.
-- [ ] KV: `wrangler kv namespace create RATE_LIMIT` → new id, goes into **both**
+- [x] KV: `wrangler kv namespace create RATE_LIMIT` → `5a26a4dd230e4874ad6f3fb8c349bc52` (2026-09-16), in **both**
       `apps/site/wrangler.jsonc` and `apps/admin/wrangler.jsonc` (shared on purpose).
 - [ ] Email Sending: `wrangler email sending enable <sender subdomain>` then the dashboard
       auto-onboard button for the DNS records (wrangler's OAuth token has no DNS-edit scope, per
@@ -116,8 +116,8 @@ Every dev-scoped value, by file:
 - [x] `apps/site/wrangler.jsonc`: `name` → `balier` (a mismatch silently creates a second Worker
       — the sharp edge in OVERVIEW); `routes` → `balier.ua`; `ORDER_EMAIL_FROM`;
       `PUBLIC_TELEGRAM_MANAGER` (blank until known); `PUBLIC_TURNSTILE_SITE_KEY` left, unused;
-      `SENTRY_ENVIRONMENT` → `production`; the `RATE_LIMIT` KV id — **`REPLACE_AT_L2_WITH_CLIENT_KV_ID`**,
-      a deliberate deploy-time failure until L2 fills it.
+      `SENTRY_ENVIRONMENT` → `production`; the `RATE_LIMIT` KV id — placeholder until 2026-09-16, now the real
+      namespace id.
 - [x] `apps/admin/wrangler.jsonc`: `name` → `balier-admin`; `routes` → `admin.balier.ua`;
       **`SITE_ORIGIN` → `https://balier.ua`** (panel-minted invoices point webhook and redirect at
       it — wrong value = card orders from `/orders/new` never reach `paid`); `ORDER_EMAIL_FROM`;

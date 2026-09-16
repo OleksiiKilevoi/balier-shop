@@ -40,7 +40,7 @@
   // brute-force budget (`src/pages/login.astro`) keeps counting in one place.
   // The id is the one `wrangler kv namespace create RATE_LIMIT` prints at
   // launch.md L2 — the same value as in `apps/site/wrangler.jsonc`.
-  "kv_namespaces": [{ "binding": "RATE_LIMIT", "id": "REPLACE_AT_L2_WITH_CLIENT_KV_ID" }],
+  "kv_namespaces": [{ "binding": "RATE_LIMIT", "id": "5a26a4dd230e4874ad6f3fb8c349bc52" }],
   // Secrets are NOT set here. Locally they live in `.dev.vars`; in production
   // they are set with `wrangler secret put <NAME>` from this directory:
   //   DATABASE_URL, ADMIN_SESSION_SECRET, MONOBANK_TOKEN, NOVAPOSHTA_API_KEY,
