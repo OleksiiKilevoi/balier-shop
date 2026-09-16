@@ -4,17 +4,19 @@
 
 ## 📍 CURRENT STATE (overwrite this block; keep tight)
 
-- **Last done (2026-09-10):** **L3 committed** — `2adbb7e` (production env values) and `17e0a5e`
-  (launch plan, catalog draft, STATE); gate green; **not pushed** (the previous developer's
-  Workers Builds may still watch `main`). Decision, reversed within the session («я сам буду
-  заниматься сайтом»): **the owner runs the site — production lives on this account**
-  (`52a29667…`, `oleksii.kilevoi@drizzle.team`, which also hosts eight unrelated Workers and the
-  `ugs` bucket). No `balier.ua` zone on it yet. `wrangler r2 bucket create balier-media` and
-  `wrangler kv namespace create RATE_LIMIT` were **blocked by the session's permission
-  classifier** — owed by hand from `apps/site`. Two
-  facts checked, not assumed: **`balier.ua` is NXDOMAIN at the `.ua` registry** (no nameservers
-  anywhere — the zone cannot go Active until the client sets Cloudflare's NS at the registrar),
-  and the production database answers with **zero admin accounts**.
+- **Last done (2026-09-16):** «какие дальше шаги» — a re-check showed **nothing moved in six
+  days**: no `balier.ua` zone, no `balier-media` bucket, no `RATE_LIMIT` KV (both `wrangler.jsonc`
+  still hold `REPLACE_AT_L2_WITH_CLIENT_KV_ID`), no NS at the registrar, only `DATABASE_URL`
+  filled in the four `.dev.vars`. Wrote and got approved a 26-step order-of-work plan
+  (`~/.claude/plans/squishy-finding-hennessy.md`, Russian; it is `docs/plans/launch.md` L2–L6
+  sequenced by who does what). Done from it: a fresh `ADMIN_SESSION_SECRET` is in
+  `apps/admin/.dev.vars`; and **Sentry is not launch-blocking** — all three deploys are gated on
+  `SENTRY_AUTH_TOKEN` (`astro.config.mjs` ×2, `workers/cron/deploy.mjs`) and build/deploy without
+  it, only skipping sourcemap upload. Earlier in the same stretch (2026-09-10): L3 committed as
+  `2adbb7e`, the owner runs the site — **production lives on this account** (`52a29667…`,
+  `oleksii.kilevoi@drizzle.team`, which also hosts eight unrelated Workers and the `ugs`
+  bucket); `wrangler r2 bucket create` / `kv namespace create` are **blocked for the agent by the
+  session's permission classifier** and run by hand from `apps/site`.
 - **In progress:** waiting on the client (list below). Catalog review (`docs/plans/catalog.md`)
   still open.
 - **Next step:** add the `balier.ua` zone in the dashboard and set its NS at the registrar →
@@ -46,6 +48,11 @@
   - Turnstile is commented out, not deleted (`grep -rn "Turnstile:" src wrangler.jsonc`); the KV
     limiter (10/min per IP) is the only bot defence on `/api/checkout`.
   - No customer-facing notification on an admin status change — deliberately not built.
+  - **After a `wrangler login` switch, each package's `node_modules/.cache/wrangler/wrangler-account.json`
+    still pins the previous account** (found 2026-09-10: `apps/site`, `apps/admin`, `workers/cron`
+    all held a `qio.finance` account id and every API call 401'd with «Authentication error
+    [code: 10000]»). Delete the three files; the root one is rewritten by the next command.
+    Upgrade path if it bites again: `account_id` in the three `wrangler.jsonc`.
   - The dev environment (`*.mlosko.dev`, dev Neon, `balier-dev` / `balier-admin-dev` /
     `balier-cron`) is unreachable since 2026-09-07. Its last recorded state — QA rows, media,
     secrets, cleanup items — is this block as of `17e0a5e`. BALIER-5 (the dev cron sweeping a
@@ -82,6 +89,14 @@
 > Empty by design. Everything through the end of Phase 4 was moved to **`docs/history.md`** on
 > 2026-08-05, not rewritten — this file is read in full at every session start and had reached
 > 852 lines. New session entries go here; move a phase's entries across once the phase is done.
+
+**2026-09-16 (next steps).** «какие дальше шаги», in plan mode. Read-only checks against the
+account and the tree: nothing from the 2026-09-10 hand-off had been done (no zone, bucket, KV,
+NS; `.dev.vars` still empty except `DATABASE_URL`; seven pages still placeholder). Wrote the
+ordered plan (blocks A–F, owner vs agent), approved. Executed the two agent-side items that need
+nobody: `ADMIN_SESSION_SECRET` generated into `apps/admin/.dev.vars`; confirmed by reading both
+`astro.config.mjs` and `deploy.mjs` that a missing `SENTRY_AUTH_TOKEN` only skips sourcemaps.
+Recorded the per-package wrangler account-cache trap. Nothing deployed; nothing pushed.
 
 **2026-09-10 (launch, L3 → L2).** «guide me until launch». `wrangler whoami` showed the login
 made minutes earlier is the developer's own account — one membership, no invites — and
