@@ -35,7 +35,9 @@ const base =
 const lift = 'hover:-translate-y-px hover:shadow-md active:translate-y-0 active:shadow-xs';
 
 const variants: Record<Variant, string> = {
-  primary: `bg-brand text-white shadow-xs hover:bg-brand/90 ${lift}`,
+  // Black on purpose, not the brand green: the owner's call (2026-09-16). The
+  // green stays on links, the footer and the focus ring.
+  primary: `bg-ink text-white shadow-xs hover:bg-ink/90 ${lift}`,
   secondary: `border border-line bg-paper-raised text-ink shadow-xs hover:bg-tag hover:text-ink ${lift}`,
   telegram: `bg-telegram text-white shadow-xs hover:bg-telegram-hover ${lift}`,
   ghost: 'text-ink-muted hover:bg-tag hover:text-ink',
