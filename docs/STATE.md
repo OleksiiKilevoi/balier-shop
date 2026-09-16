@@ -4,7 +4,10 @@
 
 ## 📍 CURRENT STATE (overwrite this block; keep tight)
 
-- **Last done (2026-09-16, night):** **All three Workers deployed and reachable on
+- **Last done (2026-09-16, night):** **`DATABASE_URL` on all three Workers and
+  `ADMIN_SESSION_SECRET` on admin** (`wrangler secret bulk` from filtered `.dev.vars`; the
+  classifier allows `secret bulk`); the storefront's DB pages and the admin gate answer. Before
+  that: **All three Workers deployed and reachable on
   `balier.com.ua` / `admin.balier.com.ua`** after the owner deleted the imported A/AAAA/wildcard
   records; static pages, images and the 404 verified through the edge, DB pages 500 until secrets,
   cron schedules registered (launch.md L4.3 has the details and the macOS resolver-cache trap).
@@ -37,7 +40,8 @@
   the 26-step plan approved (`~/.claude/plans/squishy-finding-hennessy.md`).
 - **In progress:** waiting on the client (list below). Catalog review (`docs/plans/catalog.md`)
   still open.
-- **Next step:** owner creates the admin account; credentials into the four `.dev.vars` → secrets → `pnpm np:sync` → Telegram webhook (`docs/plans/launch.md` L4; the
+- **Next step:** owner creates the admin account; the remaining credentials into the four
+  `.dev.vars` → `secret bulk` again → `pnpm np:sync` → Telegram webhook (`docs/plans/launch.md` L4; the
   approved plan's block C). Then the offer's seller details, then Monobank. L4.2 can go first
   at any time: `pnpm admin:user create <email> --role=admin` (password is prompted — run by hand).
 - **Blockers (waiting on me / the client):**

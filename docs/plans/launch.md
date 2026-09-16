@@ -191,8 +191,14 @@ Every dev-scoped value, by file:
        `default-ssl.default-host.net` cert): `/about` `/offer` `/contacts` 200, images 200, 404
        page 404, `/` and `/products` 500 (no `DATABASE_URL` yet), `admin…/login` 200. Universal
        cert (GTS, `balier.com.ua` + `*.balier.com.ua`) active.
-4. [ ] Secrets, `wrangler secret put <NAME>` **from each Worker's directory** — they are
+4. [~] Secrets, `wrangler secret put <NAME>` **from each Worker's directory** — they are
        per-Worker and do not carry over. Each `put` redeploys the same code with the secret.
+       **2026-09-16: `DATABASE_URL` on all three, `ADMIN_SESSION_SECRET` on admin** — pushed with
+       `wrangler secret bulk <json>` from a JSON built out of each `.dev.vars` with only the
+       *filled* keys (an empty `MONOBANK_TOKEN=""` would otherwise become a real empty secret,
+       and `SITE_ORIGIN` is a var, not a secret). The remaining ones land the same way once the
+       owner fills `.dev.vars`. Verified after: `/`, `/products`, `/search`, `/cart` 200 on the
+       empty catalog; `admin…/orders` → 303 to `/login?next=`.
        - `apps/site`: `DATABASE_URL`, `MONOBANK_TOKEN` (test token until Monobank approves),
          `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`; `TURNSTILE_SECRET_KEY` if on.
        - `apps/admin`: `DATABASE_URL`, **fresh** `ADMIN_SESSION_SECRET`
