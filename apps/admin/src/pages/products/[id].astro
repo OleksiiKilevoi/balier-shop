@@ -8,6 +8,7 @@ import {
   addProductImage,
   addVariant,
   findAdminProduct,
+  findProductIdBySlug,
   listCategoryOptions,
   moveProductImage,
   removeProductImage,
@@ -66,6 +67,17 @@ const productId = Astro.params.id!;
 const selfUrl = `/products/${encodeURIComponent(productId)}`;
 
 const db = createDb(env.DATABASE_URL);
+
+// The list links by id, but a storefront URL pasted onto this host arrives
+// with the slug — and the uuid column answers that with a 500, not a 404
+// (seen 2026-09-16). Resolve a slug to its editor address before anything
+// below queries by id; anything else that is not an id is simply not found.
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+if (!UUID.test(productId)) {
+  const id = await findProductIdBySlug(db, productId);
+  if (id) return Astro.redirect(`/products/${id}`, 301);
+  return new Response('Not found', { status: 404 });
+}
 
 /* ------------------------------------------------------------- POST handling */
 
@@ -1339,6 +1351,7 @@ function imageMeta(image: (typeof images)[number]): string {
   */}
   <script>
     import { enhanceAdminForms } from '@balier/lib/admin/forms';
+    import { EXPECTED_HEIGHT, MAX_UPLOAD_BYTES } from '@balier/lib/media/upload';
 
     const editor = document.getElementById('product-editor');
     const toastHost = document.getElementById('product-toast');
@@ -1385,6 +1398,54 @@ function imageMeta(image: (typeof images)[number]): string {
       // The rest of it — the swap in place, the toast, the focus and the
       // fallback to a real submit — is the same on every screen made of forms.
       enhanceAdminForms({ root: editor, toastHost, messageId: 'editor-message' });
+
+      /*
+       * Photos straight off a phone are 3–5 MB and 4000 px; the server takes
+       * 1 MB and stores whatever it gets (no resizing there, by decision). So
+       * the browser shrinks the file the moment it is picked: long side to
+       * EXPECTED_HEIGHT, WebP where the browser can encode it, JPEG otherwise.
+       * Anything that fails to decode is left alone and the server's own check
+       * says what is wrong. Delegated for the same reason as the swatches.
+       */
+      editor.addEventListener('change', async (event) => {
+        const input = event.target;
+        if (!(input instanceof HTMLInputElement) || input.type !== 'file') return;
+        const file = input.files?.[0];
+        if (!file || !file.type.startsWith('image/')) return;
+        const shrunk = await downscale(file);
+        if (!shrunk) return;
+        const list = new DataTransfer();
+        list.items.add(shrunk);
+        input.files = list.files;
+      });
+
+      /** A smaller copy of `file`, or null when it already fits or cannot be read. */
+      async function downscale(file: File): Promise<File | null> {
+        try {
+          const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
+          const longest = Math.max(bitmap.width, bitmap.height);
+          if (longest <= EXPECTED_HEIGHT && file.size <= MAX_UPLOAD_BYTES) return null;
+          const scale = Math.min(1, EXPECTED_HEIGHT / longest);
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.round(bitmap.width * scale);
+          canvas.height = Math.round(bitmap.height * scale);
+          canvas.getContext('2d')?.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+          bitmap.close();
+          const encode = (type: string) =>
+            new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, type, 0.82));
+          let blob = await encode('image/webp');
+          let ext = 'webp';
+          if (!blob || blob.type !== 'image/webp') {
+            blob = await encode('image/jpeg');
+            ext = 'jpg';
+          }
+          if (!blob) return null;
+          const stem = file.name.replace(/\.[^.]+$/, '');
+          return new File([blob], `${stem}.${ext}`, { type: blob.type });
+        } catch {
+          return null;
+        }
+      }
 
       /** Fills the circle, or marks it empty — `admin.css` draws both states. */
       function paint(swatch: HTMLElement | null, value: string) {

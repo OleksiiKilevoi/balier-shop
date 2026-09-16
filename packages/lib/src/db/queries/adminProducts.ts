@@ -259,6 +259,19 @@ export interface AdminProductDetail {
  * the storefront's `getProductBySlug` hand-joins because it needs the `active`
  * filters woven into the joins themselves, and here there are none.
  */
+/**
+ * The id behind a slug. The editor's URL carries the id, the storefront's the
+ * slug, and a storefront URL pasted onto the admin host arrives with the
+ * latter — resolved here so the page can redirect to its canonical address.
+ */
+export async function findProductIdBySlug(db: Db, slug: string): Promise<string | null> {
+  const row = await db.query.products.findFirst({
+    columns: { id: true },
+    where: (p, { eq: eqCol }) => eqCol(p.slug, slug),
+  });
+  return row?.id ?? null;
+}
+
 export async function findAdminProduct(db: Db, id: string): Promise<AdminProductDetail | null> {
   const row = await db.query.products.findFirst({
     where: (p, { eq: eqCol }) => eqCol(p.id, id),
