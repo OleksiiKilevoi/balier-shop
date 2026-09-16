@@ -430,9 +430,11 @@ function imageMeta(image: (typeof images)[number]): string {
             </div>
             <div class="flex flex-wrap items-center gap-2">
               
+              {/* Absolute on purpose: the storefront is another host since the
+                  split, and a relative `/products/<slug>` stays on this one. */}
               {isLive && (
                 <a
-                  href={`/products/${product!.slug}`}
+                  href={`${env.SITE_ORIGIN}/products/${product!.slug}`}
                   target="_blank"
                   rel="noreferrer"
                   class="admin-btn admin-btn-secondary"
