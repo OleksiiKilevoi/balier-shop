@@ -57,11 +57,22 @@ export default defineConfig({
   // so `font-display` compiles to nothing, and its own default `--font-sans`
   // silently overrides ours.
   fonts: [
-    // One humanist sans for everything, headings included — the look the owner
-    // pointed at (optimusgang.com runs Assistant). Assistant itself ships no
-    // Cyrillic on Google Fonts (Hebrew + Latin only), so the site uses Source
-    // Sans 3, the family Assistant was cut from, which does. Bold for the
-    // display role, 400–600 for copy and UI.
+    // Display: the brand's own face. The Instagram identity (logo, post
+    // overlays, «BÁLIER × …» captions) is a Garamond-cut serif with wide
+    // tracking; Cormorant Garamond is the Google Fonts cut of it with Cyrillic.
+    // Headings, the wordmark and footer titles; never body copy.
+    {
+      provider: fontProviders.google(),
+      name: 'Cormorant Garamond',
+      cssVariable: '--font-cormorant',
+      weights: [600, 700],
+      styles: ['normal'],
+      subsets: ['cyrillic', 'latin'],
+      fallbacks: ['Georgia', 'serif'],
+    },
+    // Copy and UI: one humanist sans, the small text of the same graphics.
+    // (Assistant, the sans the owner first pointed at, ships no Cyrillic on
+    // Google Fonts; Source Sans 3 is the family it was cut from, and does.)
     {
       provider: fontProviders.google(),
       name: 'Source Sans 3',

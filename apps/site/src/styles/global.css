@@ -11,12 +11,12 @@
  * channel", not as a second-choice button.
  */
 @theme {
-  /* Astro's font pipeline (see astro.config.mjs) injects --font-source-sans at
-     runtime. It is aliased into both theme keys here so Tailwind compiles
-     `font-display` / `font-sans` utilities and so our --font-sans wins over
-     Tailwind's default: one face for headings, logo, footer titles and copy,
-     weight alone tells them apart. */
-  --font-display: var(--font-source-sans);
+  /* Astro's font pipeline (see astro.config.mjs) injects --font-cormorant and
+     --font-source-sans at runtime. They are aliased into theme keys here so
+     Tailwind compiles `font-display` / `font-sans` utilities and so our
+     --font-sans wins over Tailwind's default. Headings, the wordmark and the
+     footer titles render in the serif; everything else in the sans. */
+  --font-display: var(--font-cormorant);
   --font-sans: var(--font-source-sans);
 
   /* shadcn --background / --card */
@@ -113,9 +113,11 @@
   h3 {
     color: var(--color-ink);
     font-family: var(--font-display);
+    /* Cormorant is light for its size: one weight step up and a touch larger
+       than the sans would be, no negative tracking — a Garamond wants air. */
     font-weight: 700;
-    letter-spacing: -0.015em;
-    line-height: 1.15;
+    letter-spacing: 0;
+    line-height: 1.1;
     text-wrap: balance;
   }
 

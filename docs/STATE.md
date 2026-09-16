@@ -4,7 +4,18 @@
 
 ## 📍 CURRENT STATE (overwrite this block; keep tight)
 
-- **Last done (2026-09-16, night):** **Catalog loaded into production** — `scripts/launch-catalog.ts`
+- **Last done (2026-09-16, late):** **Design pass on the storefront, three commits + this one, none
+  deployed yet** (`pnpm deploy:site` is the owner's): static pages centred (`f9f0b10`); shadcn/ui
+  neutral theme by swapping the token values, shadcn-style Button, hero CTA as outline (`1240e5d`);
+  type = **Cormorant Garamond** for display + wordmark «BÁLIER» (the Instagram identity is a
+  Garamond serif) and **Source Sans 3** for copy (Assistant, the owner's first pick from
+  optimusgang.com, has no Cyrillic). All verified in Chrome against `pnpm dev`. **Brand read from
+  Instagram → `docs/plans/brand.md`**: real model names (AVELINE, Lunet, FORMA, DUAL, Hidden,
+  BASIC, Baguette, Slimbag), sizes and prices from 20 captions — the catalog's prices are off
+  (travel bag 15 500 not 9 900; most bags 4 200–5 500), the backpack is one model in sizes M/L,
+  and five lines are missing. Production data untouched — pricing and naming are the owner's
+  call. `docs/CONVENTIONS.md`'s design section still describes the cream/rust palette — not
+  touched (docs change on request). Before that: **Catalog loaded into production** — `scripts/launch-catalog.ts`
   + `scripts/load-catalog.ts` (one-off, idempotent per slug): 4 categories, 17 active products,
   22 variants, 130 photos in `balier-media`, all verified 200 through the edge; `/`, `/products`,
   product pages, `/products/category/*` and `/search` render them. Nothing on the storefront links
@@ -122,7 +133,10 @@ NS; `.dev.vars` still empty except `DATABASE_URL`; seven pages still placeholder
 ordered plan (blocks A–F, owner vs agent), approved. Executed the two agent-side items that need
 nobody: `ADMIN_SESSION_SECRET` generated into `apps/admin/.dev.vars`; confirmed by reading both
 `astro.config.mjs` and `deploy.mjs` that a missing `SENTRY_AUTH_TOKEN` only skips sourcemaps.
-Recorded the per-package wrangler account-cache trap. Then the owner created the bucket and the
+Recorded the per-package wrangler account-cache trap. Later the same day: L1 pages from the PDF,
+the catalog loader, the three deploys, secrets, then a design pass (centred static pages, shadcn
+neutral theme, Cormorant + Source Sans) and the Instagram brand read (`docs/plans/brand.md`).
+Earlier: the owner created the bucket and the
 KV by hand, and the zone check showed **`balier.com.ua`** — the real domain; every production
 hostname renamed (7 files + typegen), launch.md rewritten to it. Nothing deployed; nothing pushed.
 
