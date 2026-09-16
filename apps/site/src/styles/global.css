@@ -9,13 +9,13 @@
  * "another channel", not as a second-choice button.
  */
 @theme {
-  /* Astro's font pipeline (see astro.config.mjs) injects --font-playfair and
-     --font-inter at runtime. They are aliased into theme keys here so Tailwind
-     compiles `font-display` / `font-sans` utilities and so our --font-sans wins
-     over Tailwind's default system stack. Declaring them here is what makes the
-     logo and the footer titles render in Playfair. */
-  --font-display: var(--font-playfair);
-  --font-sans: var(--font-inter);
+  /* Astro's font pipeline (see astro.config.mjs) injects --font-source-sans at
+     runtime. It is aliased into both theme keys here so Tailwind compiles
+     `font-display` / `font-sans` utilities and so our --font-sans wins over
+     Tailwind's default: one face for headings, logo, footer titles and copy,
+     weight alone tells them apart. */
+  --font-display: var(--font-source-sans);
+  --font-sans: var(--font-source-sans);
 
   --color-paper: #fcf4e5;
   --color-paper-raised: #ffffff;

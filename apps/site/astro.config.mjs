@@ -57,29 +57,22 @@ export default defineConfig({
   // so `font-display` compiles to nothing, and its own default `--font-sans`
   // silently overrides ours.
   fonts: [
+    // One humanist sans for everything, headings included — the look the owner
+    // pointed at (optimusgang.com runs Assistant). Assistant itself ships no
+    // Cyrillic on Google Fonts (Hebrew + Latin only), so the site uses Source
+    // Sans 3, the family Assistant was cut from, which does. Bold for the
+    // display role, 400–600 for copy and UI.
     {
       provider: fontProviders.google(),
-      name: 'Playfair Display',
-      cssVariable: '--font-playfair',
-      // Every display use in the design is bold (headings, logo, footer titles),
-      // and none are italic. Without pinning `weights`/`styles`, Astro ships and
-      // preloads faces that are never painted.
-      weights: [700],
-      styles: ['normal'],
-      subsets: ['cyrillic', 'latin'],
-      fallbacks: ['Georgia', 'serif'],
-    },
-    {
-      provider: fontProviders.google(),
-      name: 'Inter',
-      cssVariable: '--font-inter',
-      weights: [400, 500, 600],
+      name: 'Source Sans 3',
+      cssVariable: '--font-source-sans',
+      weights: [400, 500, 600, 700],
       styles: ['normal'],
       subsets: ['cyrillic', 'latin'],
       fallbacks: ['system-ui', 'sans-serif'],
     },
     // Geist lives in `apps/admin/astro.config.mjs` — the panel's only face,
-    // never loaded here, just as the storefront's two never load there.
+    // never loaded here, just as the storefront's never loads there.
   ],
   vite: {
     // Sentry's plugin goes after all others (its own requirement).

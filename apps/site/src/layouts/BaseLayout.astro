@@ -51,8 +51,7 @@ const ogImageUrl = ogImage ? new URL(ogImage, Astro.site ?? Astro.url).href : un
     {/* Only the display face is preloaded — it paints the LCP heading. Body
         text has a metric-matched fallback, so preloading Inter's three weights
         would compete with the hero for bandwidth without moving first paint. */}
-    <Font cssVariable="--font-playfair" preload />
-    <Font cssVariable="--font-inter" />
+    <Font cssVariable="--font-source-sans" preload />
 
     <title>{fullTitle}</title>
     {description && <meta name="description" content={description} />}
