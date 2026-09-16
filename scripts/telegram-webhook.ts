@@ -24,7 +24,7 @@ loadEnv({ path: 'apps/admin/.dev.vars', quiet: true });
 loadEnv({ path: '.dev.vars', quiet: true });
 loadEnv({ quiet: true });
 
-const DEFAULT_URL = 'https://admin.balier.ua/telegram/webhook';
+const DEFAULT_URL = 'https://admin.balier.com.ua/telegram/webhook';
 
 const token = process.env.TELEGRAM_BOT_TOKEN;
 if (!token) {

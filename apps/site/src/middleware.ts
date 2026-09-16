@@ -34,12 +34,12 @@ const sentry = defineMiddleware((context, next) => {
 
 /**
  * The admin panel lives on its own Worker and hostname now
- * (`admin.balier.ua`, `apps/admin`). This Worker carries no admin
+ * (`admin.balier.com.ua`, `apps/admin`). This Worker carries no admin
  * surface at all — the only trace left is this permanent redirect, which keeps
  * old bookmarks working by mapping `/admin/orders/…` to `/orders/…` on the
  * admin host. Everything after the prefix is the same path over there.
  */
-const ADMIN_HOST = 'https://admin.balier.ua';
+const ADMIN_HOST = 'https://admin.balier.com.ua';
 
 const adminRedirect = defineMiddleware(async ({ url }, next) => {
   const pathname = url.pathname;

@@ -6,9 +6,9 @@
   // deployment was `balier-admin-dev` on `admin.balier.mlosko.dev`. Like the
   // site Worker, a name mismatch silently creates a second, empty Worker.
   "name": "balier-admin",
-  // Custom domain on the same `balier.ua` zone as the storefront. Cloudflare
+  // Custom domain on the same `balier.com.ua` zone as the storefront. Cloudflare
   // creates the DNS record and certificate itself once the zone is Active.
-  "routes": [{ "pattern": "admin.balier.ua", "custom_domain": true }],
+  "routes": [{ "pattern": "admin.balier.com.ua", "custom_domain": true }],
   // One hostname on purpose, same reasoning as the site Worker: a
   // `workers.dev` URL would be a second public surface. The in-app session
   // gate (`src/middleware.ts`) holds anywhere the Worker is reachable anyway.
@@ -57,10 +57,10 @@
     // Where the *storefront* lives. `/orders/new` mints Monobank invoices, and
     // both the webhook and the customer's success/failure redirect must land on
     // that origin, never this one. `.dev.vars` overrides it for local dev.
-    "SITE_ORIGIN": "https://balier.ua",
+    "SITE_ORIGIN": "https://balier.com.ua",
     // `from` address for order-confirmation emails, same value as the site
     // Worker's — the customer cannot tell which Worker created their order.
-    "ORDER_EMAIL_FROM": "noreply@mail.balier.ua",
+    "ORDER_EMAIL_FROM": "noreply@mail.balier.com.ua",
     // The bot's public username — `/settings` builds the account-linking deep
     // link (`t.me/<bot>?start=…`) from it. A username is public by nature,
     // hence a var; the *token* stays a secret. EMPTY until the launch bot

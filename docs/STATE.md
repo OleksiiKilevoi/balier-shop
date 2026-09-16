@@ -4,28 +4,30 @@
 
 ## 📍 CURRENT STATE (overwrite this block; keep tight)
 
-- **Last done (2026-09-16):** «какие дальше шаги» — a re-check showed **nothing moved in six
-  days**: no `balier.ua` zone, no `balier-media` bucket, no `RATE_LIMIT` KV (both `wrangler.jsonc`
-  still hold `REPLACE_AT_L2_WITH_CLIENT_KV_ID`), no NS at the registrar, only `DATABASE_URL`
-  filled in the four `.dev.vars`. Wrote and got approved a 26-step order-of-work plan
-  (`~/.claude/plans/squishy-finding-hennessy.md`, Russian; it is `docs/plans/launch.md` L2–L6
-  sequenced by who does what). Done from it: a fresh `ADMIN_SESSION_SECRET` is in
-  `apps/admin/.dev.vars`; and **Sentry is not launch-blocking** — all three deploys are gated on
-  `SENTRY_AUTH_TOKEN` (`astro.config.mjs` ×2, `workers/cron/deploy.mjs`) and build/deploy without
-  it, only skipping sourcemap upload. Earlier in the same stretch (2026-09-10): L3 committed as
-  `2adbb7e`, the owner runs the site — **production lives on this account** (`52a29667…`,
-  `oleksii.kilevoi@drizzle.team`, which also hosts eight unrelated Workers and the `ugs`
-  bucket); `wrangler r2 bucket create` / `kv namespace create` are **blocked for the agent by the
-  session's permission classifier** and run by hand from `apps/site`.
+- **Last done (2026-09-16):** **The domain is `balier.com.ua`.** The zone the owner added to the
+  account is `balier.com.ua` (status pending; NS already `lia`/`rudy.ns.cloudflare.com` at the
+  registrar), which is why `balier.ua` was NXDOMAIN all along — it was never registered. Every
+  production value renamed: routes `balier.com.ua` / `admin.balier.com.ua`, `SITE_ORIGIN`,
+  `PUBLIC_SITE_URL`, `ORDER_EMAIL_FROM` → `noreply@mail.balier.com.ua`, `site` in
+  `astro.config.mjs`, `ADMIN_HOST`, the webhook script's default URL; typegen regenerated. Test
+  fixtures (`anna@balier.ua`) and the Instagram handle stay. The old host (`185.104.45.95`,
+  ukraine.com.ua nginx) is a bare 404; its apex MX is untouched by our `mail.` subdomain.
+  Same day, before that: R2 `balier-media` and KV `RATE_LIMIT` (`5a26a4dd…`) created by hand,
+  KV id committed in both apps (`8552fd8`); `ADMIN_SESSION_SECRET` generated into
+  `apps/admin/.dev.vars`; **Sentry is not launch-blocking** — all three deploys build without
+  `SENTRY_AUTH_TOKEN`, only skipping sourcemaps. Order-of-work plan approved
+  (`~/.claude/plans/squishy-finding-hennessy.md`). `CLAUDE.md` / `OVERVIEW.md` still say
+  `balier.ua` as the project name — not touched (docs change on request).
 - **In progress:** waiting on the client (list below). Catalog review (`docs/plans/catalog.md`)
   still open.
-- **Next step:** add the `balier.ua` zone in the dashboard and set its NS at the registrar →
-  the two `wrangler … create` commands above → KV id into both `wrangler.jsonc` → Workers Paid →
-  Email Sending on `mail.balier.ua` (`docs/plans/launch.md` L2) → L4 in its order. L4.2 can go first
+- **Next step:** wait for the `balier.com.ua` zone to read **Active** → Workers Paid (owner, in the
+  dashboard) → Email Sending on `mail.balier.com.ua` → first deploy of the three Workers →
+  secrets → `pnpm np:sync` → Telegram webhook (`docs/plans/launch.md` L2/L4; the approved plan's
+  block C). L4.2 can go first
   at any time: `pnpm admin:user create <email> --role=admin` (password is prompted — run by hand).
 - **Blockers (waiting on me / the client):**
-  - `balier.ua` zone added in the dashboard, NS changed at the registrar, zone **Active**;
-    registration itself confirmed (the registry has no record). Workers Paid on the account.
+  - Zone `balier.com.ua` **Active** (pending as of 2026-09-16 12:20 UTC, NS already switched).
+    Workers Paid on the account. Own admin account (`pnpm admin:user create`, password prompted).
   - L1 texts for the seven static pages; `/offer` + `/privacy` gate the Monobank merchant.
   - Nova Poshta API key; new Telegram bot token, notification chat id, manager handle.
   - Catalog table (dimensions, weight, leather); Neon plan upgrade to Launch in the console.
@@ -96,7 +98,9 @@ NS; `.dev.vars` still empty except `DATABASE_URL`; seven pages still placeholder
 ordered plan (blocks A–F, owner vs agent), approved. Executed the two agent-side items that need
 nobody: `ADMIN_SESSION_SECRET` generated into `apps/admin/.dev.vars`; confirmed by reading both
 `astro.config.mjs` and `deploy.mjs` that a missing `SENTRY_AUTH_TOKEN` only skips sourcemaps.
-Recorded the per-package wrangler account-cache trap. Nothing deployed; nothing pushed.
+Recorded the per-package wrangler account-cache trap. Then the owner created the bucket and the
+KV by hand, and the zone check showed **`balier.com.ua`** — the real domain; every production
+hostname renamed (7 files + typegen), launch.md rewritten to it. Nothing deployed; nothing pushed.
 
 **2026-09-10 (launch, L3 → L2).** «guide me until launch». `wrangler whoami` showed the login
 made minutes earlier is the developer's own account — one membership, no invites — and

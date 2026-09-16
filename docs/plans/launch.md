@@ -2,7 +2,7 @@
 
 ## Goal
 
-The store runs on **balier.ua**, on the client's own Cloudflare and Neon accounts, with the
+The store runs on **balier.com.ua**, on the client's own Cloudflare and Neon accounts, with the
 client's Monobank merchant, Nova Poshta key and Telegram bot; every page is indexable, the legal
 pages are real, one real card payment and one real waybill have gone through, and the client can
 run the panel without a developer. Written 2026-09-07 from the repository as it stands at
@@ -15,7 +15,7 @@ not).
 - **Nothing production exists yet.** Every account is the developer's (Cloudflare, Neon, R2, KV,
   `mlosko.dev`, the Turnstile widget, the NP key). The Sentry org stays ours by decision.
 - **Never done, in any environment:** a browser pass through `/checkout`; a real (non-test)
-  Monobank payment; a waybill on the client's NP account; a delivered email from a `balier.ua`
+  Monobank payment; a waybill on the client's NP account; a delivered email from a `balier.com.ua`
   sender.
 - **The dev cron is broken right now** (found via Sentry, issue BALIER-5, 2 693 events, last one
   minutes ago): its deployed sweep still runs `delete from "stock_reservations"`, a table migration
@@ -26,7 +26,7 @@ not).
   ours to fix or reuse, BALIER-5 included. The wrangler login on this laptop is an unrelated
   account with no balier Workers — never `wrangler deploy` here until L2's login exists.
   Launch is a fresh setup from the repository alone, which is what the plan always said.
-- On the client's side only the **`balier.ua` domain** exists (registered). No Cloudflare
+- On the client's side only the **`balier.com.ua` domain** exists (registered). No Cloudflare
   account, Neon project, Monobank merchant, NP key or Telegram bot yet.
 - Local: `pnpm install` done, 327 lib tests pass, four `.dev.vars` created from the examples
   with **empty values** — fill them as the credentials arrive (they are gitignored). The site
@@ -43,14 +43,14 @@ sequential (schema → secrets → code → data), L6 is the last thing that hap
 Taken by the developer on the client's behalf, recorded so any of them can be overridden with
 one config change. Each one changes a config value or a line of copy.
 
-- **Hostnames:** apex `balier.ua` for the store, `admin.balier.ua` for the panel. `www` → one
+- **Hostnames:** apex `balier.com.ua` for the store, `admin.balier.com.ua` for the panel. `www` → one
   Cloudflare redirect rule to the apex, added at L6 if the zone gets `www` traffic.
 - **Telegram:** a **new bot** created at launch (the dev `balierua_bot` token stayed with the
   previous developer), one new group for notifications. `PUBLIC_TELEGRAM_BOT` and
   `PUBLIC_TELEGRAM_MANAGER` are **blank in the repo** until the bot and the manager account
   exist — blank hides the button / the sign-in section rather than pointing at a stranger.
   The manager handle is the one value only the client can supply.
-- **Email sender:** `noreply@mail.balier.ua` (subdomain keeps the apex MX free).
+- **Email sender:** `noreply@mail.balier.com.ua` (subdomain keeps the apex MX free).
 - **Turnstile:** off at launch; the KV limiter stays the only bot defence.
 - **NP commission:** recipient pays, as the checkout already says («за тарифами
   перевізника»); a personal NP account is enough (COD worked on one in NP-3).
@@ -66,7 +66,7 @@ one config change. Each one changes a config value or a line of copy.
       page written. The frame is `StaticPageLayout` + the `prose-page` utility, so a finished page
       is plain headings and paragraphs.
 - [ ] **`/offer` and `/privacy` are the Monobank gate** — the merchant is approved against live
-      legal pages on the real domain. They must be deployed on `balier.ua` (noindex is fine)
+      legal pages on the real domain. They must be deployed on `balier.com.ua` (noindex is fine)
       *before* the Monobank application, which puts L1 ahead of the real token in L4.
 - [ ] Homepage teaser copy for `/about` and `/care` is placeholder-grade; rewrite alongside those
       pages.
@@ -76,14 +76,16 @@ one config change. Each one changes a config value or a line of copy.
 
 A full second setup, not a transfer. Only schema and migrations carry over; no data does.
 
-- [ ] **Cloudflare account** (client-owned, developer invited as a member). Add the `balier.ua`
+- [ ] **Cloudflare account** (client-owned, developer invited as a member). Add the `balier.com.ua`
       zone, move nameservers at the registrar, wait for **Active** — custom-domain routes fail to
       deploy before that.
-      **2026-09-10: `balier.ua` is NXDOMAIN at the `.ua` registry** — no nameservers set anywhere,
-      so there is nothing to import and Active waits on the registrar change; confirm with the
-      client that the registration itself is complete (direct `.ua` names need a registered
-      trademark). Decision 2026-09-10, revised the same session: **the owner runs the site — production on
-      the developer's own account `52a29667…`**; nothing here is «client-owned» any more.
+      **2026-09-16: the domain is `balier.com.ua`, not `balier.ua`** (which is NXDOMAIN — never
+      registered; direct `.ua` names need a trademark). Zone `balier.com.ua` added to the account,
+      NS already switched at the registrar to `lia`/`rudy.ns.cloudflare.com`, status **pending**
+      until Cloudflare re-checks. The old host (`185.104.45.95`, ukraine.com.ua nginx) serves a bare
+      404 — nothing to keep; its apex MX (`mx.ukraine.com.ua`) is untouched by our `mail.`
+      subdomain. Decision 2026-09-10: **the owner runs the site — production on the developer's
+      own account `52a29667…`**; nothing here is «client-owned» any more.
 - [ ] **Workers Paid plan** on that account — Email Sending requires it (as on the dev account
       since 2026-08-04).
 - [x] R2: `wrangler r2 bucket create balier-media` (done 2026-09-16, by hand). Empty on purpose — the dev photos are test
@@ -105,7 +107,7 @@ A full second setup, not a transfer. Only schema and migrations carry over; no d
 - [ ] Nova Poshta: the client's API key (cabinet → Налаштування → Безпека). The cron's nightly
       sync and the panel's waybills both use it.
 - [ ] Telegram: per L0 — the bot token, the notification chat id, the manager handle.
-- [ ] Turnstile widget for `balier.ua`, only if L0 says on.
+- [ ] Turnstile widget for `balier.com.ua`, only if L0 says on.
 - [ ] Sentry stays ours: no new project. Only the environment tag flips (L3).
 
 ### Phase L3 — Environment changes in the repository [done 2026-09-07 except the L2 ids]
@@ -114,12 +116,12 @@ Made on the working tree at `ec0797e`, uncommitted; the three values that need L
 Every dev-scoped value, by file:
 
 - [x] `apps/site/wrangler.jsonc`: `name` → `balier` (a mismatch silently creates a second Worker
-      — the sharp edge in OVERVIEW); `routes` → `balier.ua`; `ORDER_EMAIL_FROM`;
+      — the sharp edge in OVERVIEW); `routes` → `balier.com.ua`; `ORDER_EMAIL_FROM`;
       `PUBLIC_TELEGRAM_MANAGER` (blank until known); `PUBLIC_TURNSTILE_SITE_KEY` left, unused;
       `SENTRY_ENVIRONMENT` → `production`; the `RATE_LIMIT` KV id — placeholder until 2026-09-16, now the real
       namespace id.
-- [x] `apps/admin/wrangler.jsonc`: `name` → `balier-admin`; `routes` → `admin.balier.ua`;
-      **`SITE_ORIGIN` → `https://balier.ua`** (panel-minted invoices point webhook and redirect at
+- [x] `apps/admin/wrangler.jsonc`: `name` → `balier-admin`; `routes` → `admin.balier.com.ua`;
+      **`SITE_ORIGIN` → `https://balier.com.ua`** (panel-minted invoices point webhook and redirect at
       it — wrong value = card orders from `/orders/new` never reach `paid`); `ORDER_EMAIL_FROM`;
       `PUBLIC_TELEGRAM_BOT` (blank until the new bot exists); `SENTRY_ENVIRONMENT`; the KV id
       (same placeholder).
@@ -139,10 +141,10 @@ Every dev-scoped value, by file:
       `false` until L6.
 - [x] `pnpm check && pnpm build` green (build with `CLOUDFLARE_VITE_FORCE_LOCAL=true` here).
       **Committed 2026-09-10 as `2adbb7e`** — **do not push to `main` while the previous developer's Workers Builds may
-      still watch it**: the renamed Workers and `balier.ua` routes would fail their build,
+      still watch it**: the renamed Workers and `balier.com.ua` routes would fail their build,
       harmlessly, but it is noise on an account we do not control. The Monobank webhook URL needs no change — `createOrder`
       builds it from the request origin (`apps/site/src/pages/api/checkout.ts:75`), and
-      `astro.config.mjs` already has `site: 'https://balier.ua'` for canonical/OG.
+      `astro.config.mjs` already has `site: 'https://balier.com.ua'` for canonical/OG.
 
 ### Phase L4 — Stand it up, in this order [todo]
 
@@ -182,10 +184,10 @@ Every dev-scoped value, by file:
        database and `/checkout`'s pickers render nothing until they are filled. Run
        `pnpm np:sync` from the laptop (root `.dev.vars` needs `NOVAPOSHTA_API_KEY`) rather than
        waiting for the 04:00 cron. ~80 k rows, a few minutes.
-7. [ ] `pnpm tg:webhook set https://admin.balier.ua/telegram/webhook` — Telegram allows one
+7. [ ] `pnpm tg:webhook set https://admin.balier.com.ua/telegram/webhook` — Telegram allows one
        webhook per bot, so this **moves the bot off the dev panel**; dev OTP sign-in stops
        working from that moment. Then `pnpm tg:webhook info` to confirm.
-8. [ ] Sign in at `admin.balier.ua`. `/settings`: link the client's Telegram account (OTP
+8. [ ] Sign in at `admin.balier.com.ua`. `/settings`: link the client's Telegram account (OTP
        sign-in), «Підтягнути з акаунта» for the NP sender, pick the **real handover branch**
        (dev still says Київ, Відділення №1 as a placeholder), sender phone, default seat
        dimensions and cargo description, COD limit.
@@ -244,7 +246,7 @@ What has to be *seen*, not deduced. Use a real phone for the 320 px checks.
       are the carrier's, only «Створити ТТН» and revert/cancel are theirs), waybills and the
       register, products/variants/`in_stock`, `/settings`, `/users`, what the Telegram messages
       mean, what to do when a payment lands on a cancelled order (refund alert).
-- [ ] Instagram bio link → `balier.ua`.
+- [ ] Instagram bio link → `balier.com.ua`.
 - [ ] Handover notes: which account holds what, where each secret lives, how to rotate
       `ADMIN_SESSION_SECRET` (signs everyone out), `pnpm admin:user` for recovery.
 

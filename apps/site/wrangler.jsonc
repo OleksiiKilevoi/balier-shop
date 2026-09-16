@@ -7,9 +7,9 @@
   // L2/L3). The retired dev deployment was `balier-dev` on `balier.mlosko.dev`.
   "name": "balier",
   // Custom domain. Cloudflare creates the DNS record and the certificate
-  // itself, but only once the `balier.ua` zone reads Active on the account —
+  // itself, but only once the `balier.com.ua` zone reads Active on the account —
   // deploying this route before that fails.
-  "routes": [{ "pattern": "balier.ua", "custom_domain": true }],
+  "routes": [{ "pattern": "balier.com.ua", "custom_domain": true }],
   // Explicit, not incidental: adding `routes` makes wrangler disable the
   // `workers.dev` URL by default anyway, and one hostname is what we want — a
   // `workers.dev` URL would be a second public surface. `true` brings it back.
@@ -42,9 +42,9 @@
   ],
   // Cloudflare Email Sending — order-confirmation emails to customers
   // (`@balier/lib/notify/email`). Requires Workers Paid. Sending is enabled on
-  // a dedicated subdomain rather than the apex, so `balier.ua` keeps its MX
+  // a dedicated subdomain rather than the apex, so `balier.com.ua` keeps its MX
   // records free for the client's real inbound mail:
-  //   wrangler email sending enable mail.balier.ua   (+ the dashboard's DNS
+  //   wrangler email sending enable mail.balier.com.ua   (+ the dashboard's DNS
   //   auto-onboard button — wrangler's OAuth token has no DNS-edit scope)
   // Sends fail closed with `E_SENDER_NOT_VERIFIED` (caught, logged, never
   // thrown into checkout — same best-effort contract as `NotifierPort`) until
@@ -63,11 +63,11 @@
   // dashboard as Text is silently dropped by the next deploy. Anything
   // sensitive is an encrypted Secret, never a var (docs/OVERVIEW.md).
   "vars": {
-    "PUBLIC_SITE_URL": "https://balier.ua",
+    "PUBLIC_SITE_URL": "https://balier.com.ua",
     // `from` address for order-confirmation emails. Not `PUBLIC_` — server-only,
     // never sent to the client. Does nothing until the sender subdomain above
     // is onboarded.
-    "ORDER_EMAIL_FROM": "noreply@mail.balier.ua",
+    "ORDER_EMAIL_FROM": "noreply@mail.balier.com.ua",
     // Telegram account the product page's «Замовити через Телеграм» deep-links
     // to. Public by definition — it ends up in an href. EMPTY ON PURPOSE until
     // the client names the manager account (launch.md L0): `orderDeepLink`
@@ -80,7 +80,7 @@
     // CURRENTLY UNUSED: Turnstile is commented out (2026-08-05, on request,
     // and off at launch by decision) — see the `Turnstile:` markers in
     // `src/pages/checkout.astro`. Bringing it back means a new widget on the
-    // client's account for `balier.ua`; this key belongs to the retired dev
+    // client's account for `balier.com.ua`; this key belongs to the retired dev
     // widget and is kept only so the var stays typed.
     "PUBLIC_TURNSTILE_SITE_KEY": "0x4AAAAAAEF8vF0-cXNWdOOY",
     // Sentry (`docs/plans/sentry.md`) — a DSN is a public project identifier,

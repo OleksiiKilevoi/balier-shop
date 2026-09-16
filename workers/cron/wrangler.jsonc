@@ -27,7 +27,7 @@
   // like the app's sends.
   "send_email": [{ "name": "EMAIL" }],
   "vars": {
-    "ORDER_EMAIL_FROM": "noreply@mail.balier.ua",
+    "ORDER_EMAIL_FROM": "noreply@mail.balier.com.ua",
     // Sentry (`docs/plans/sentry.md`) — a DSN is a public project identifier,
     // not a secret. Same single project as the site and admin Workers; the
     // `withSentry` wrapper in `index.ts` tags events `worker:cron`.

@@ -50,7 +50,7 @@ export interface CreateOrderDeps {
   email: NotifierPort;
   /**
    * Origin the customer's browser is actually on — e.g. `http://localhost:4321`
-   * or `https://balier.ua` — used to build the
+   * or `https://balier.com.ua` — used to build the
    * post-checkout redirect (`/checkout/success`). Deliberately request-derived
    * rather than a fixed site URL, so the redirect works wherever this is being
    * tested from.
@@ -59,7 +59,7 @@ export interface CreateOrderDeps {
   /**
    * Where Monobank calls back. Also request-derived (same origin as
    * `redirectBaseUrl`) rather than a fixed site URL: `PUBLIC_SITE_URL`
-   * (`balier.ua`) isn't deployed yet, so pinning the webhook to it meant
+   * (`balier.com.ua`) isn't deployed yet, so pinning the webhook to it meant
    * Monobank's server-to-server call had nowhere real to land and orders sat
    * in `awaiting_payment` forever, even against the deployed dev Worker. This
    * still needs a real, internet-reachable address — Monobank's servers hit

@@ -30,7 +30,7 @@ const sentryUpload = process.env.SENTRY_AUTH_TOKEN
 
 // https://astro.build/config
 export default defineConfig({
-  site: 'https://balier.ua',
+  site: 'https://balier.com.ua',
   output: 'server',
   // Prerendered pages are emitted as `about.html`, not `about/index.html`.
   // Cloudflare's asset server (`html_handling: auto-trailing-slash`, the default
