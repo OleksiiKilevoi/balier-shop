@@ -38,16 +38,18 @@ const { title, lead, description = lead } = Astro.props;
 
 <BaseLayout title={title} description={description}>
   <Container class="py-8 sm:py-12">
-    <Breadcrumbs items={[{ label: 'Головна', href: '/' }, { label: title }]} />
+    <Breadcrumbs class="flex justify-center" items={[{ label: 'Головна', href: '/' }, { label: title }]} />
 
     {/* Capped to the same measure as the body copy so the heading breaks with
-        it instead of running the full 82rem gutter on a desktop. */}
-    <header class="mt-5 max-w-[65ch] sm:mt-6">
+        it instead of running the full 82rem gutter on a desktop. The whole
+        column sits in the middle of the page; the copy itself stays
+        left-aligned inside it, only the title block is centred. */}
+    <header class="mx-auto mt-5 max-w-[65ch] text-center sm:mt-6">
       <h1 class="text-3xl sm:text-4xl lg:text-5xl">{title}</h1>
       {lead && <p class="text-ink-muted mt-3">{lead}</p>}
     </header>
 
-    <div class="prose-page mt-8">
+    <div class="prose-page mx-auto mt-8">
       <slot />
     </div>
   </Container>
