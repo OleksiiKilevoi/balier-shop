@@ -1,12 +1,14 @@
 @import 'tailwindcss';
 
 /*
- * Design tokens, taken from the mockups in /design.
- * Nothing outside this file should contain a raw colour value.
+ * Design tokens. Nothing outside this file should contain a raw colour value.
  *
- * The palette is warm leather: cream paper, espresso darks, a rust accent for
- * every primary action. Telegram keeps its brand blue on purpose — it reads as
- * "another channel", not as a second-choice button.
+ * The palette is shadcn/ui's «neutral» theme (ui.shadcn.com, 2026-09-16, the
+ * owner's call): white surfaces, near-black ink and primary, grey hairlines,
+ * soft focus rings. The token *names* predate it — `paper`, `ink`, `line`,
+ * `brand` — and were kept so every component keeps compiling; only the values
+ * changed. Telegram keeps its brand blue on purpose — it reads as "another
+ * channel", not as a second-choice button.
  */
 @theme {
   /* Astro's font pipeline (see astro.config.mjs) injects --font-source-sans at
@@ -17,33 +19,40 @@
   --font-display: var(--font-source-sans);
   --font-sans: var(--font-source-sans);
 
-  --color-paper: #fcf4e5;
-  --color-paper-raised: #ffffff;
+  /* shadcn --background / --card */
+  --color-paper: oklch(1 0 0);
+  --color-paper-raised: oklch(1 0 0);
 
-  --color-ink: #2e1a0f;
-  --color-ink-soft: #4a3728;
-  --color-ink-muted: #8a7767;
+  /* --foreground, body copy, --muted-foreground */
+  --color-ink: oklch(0.145 0 0);
+  --color-ink-soft: oklch(0.205 0 0);
+  --color-ink-muted: oklch(0.556 0 0);
 
-  --color-line: #eadfcb;
-  --color-line-strong: #ddcdb2;
+  /* --border / --input, and one step darker for emphasised edges */
+  --color-line: oklch(0.922 0 0);
+  --color-line-strong: oklch(0.87 0 0);
 
-  /* Primary action. Every "add to cart" / "place order" button is this. */
-  --color-brand: #8b430b;
-  --color-brand-hover: #723709;
+  /* --ring: focus indication only. */
+  --color-ring: oklch(0.708 0 0);
 
-  /* Hero gradient and footer. */
-  --color-espresso: #3b1a0b;
-  --color-espresso-light: #6b3517;
+  /* --primary. Every "add to cart" / "place order" button is this. */
+  --color-brand: oklch(0.205 0 0);
+  --color-brand-hover: oklch(0.3 0 0);
+
+  /* Hero gradient and footer — the dark sections. */
+  --color-espresso: oklch(0.145 0 0);
+  --color-espresso-light: oklch(0.269 0 0);
 
   --color-telegram: #26a5e4;
   --color-telegram-hover: #1e93cd;
 
-  /* Category pill on product cards and the product page. */
-  --color-tag: #f5e7d3;
-  --color-tag-ink: #7a4a22;
+  /* --secondary / --accent: category pill, hover surfaces, quiet fills. */
+  --color-tag: oklch(0.97 0 0);
+  --color-tag-ink: oklch(0.205 0 0);
 
-  --radius-card: 0.5rem;
-  --radius-btn: 0.375rem;
+  /* shadcn --radius is 0.625rem; cards take the `xl` step, buttons the `md`. */
+  --radius-card: 0.75rem;
+  --radius-btn: 0.5rem;
 
   --spacing-gutter: 1.25rem;
 
@@ -110,9 +119,10 @@
     text-wrap: balance;
   }
 
+  /* shadcn's focus: a soft 3px ring in --ring at half opacity, no offset. */
   :focus-visible {
-    outline: 2px solid var(--color-brand);
-    outline-offset: 2px;
+    outline: 3px solid color-mix(in oklch, var(--color-ring) 50%, transparent);
+    outline-offset: 0;
   }
 
   @media (prefers-reduced-motion: reduce) {
