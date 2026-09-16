@@ -4,7 +4,13 @@
 
 ## 📍 CURRENT STATE (overwrite this block; keep tight)
 
-- **Last done (2026-09-16, later):** **L1 content written** from the owner's PDF (`про
+- **Last done (2026-09-16, evening):** **Zone Active, Workers Paid on, Email Sending onboarded on
+  `mail.balier.com.ua`** (dashboard: Compute & AI → Email Service; the CLI returns `2036` to every
+  Email Sending call until the account has onboarded its first domain there — after that it works).
+  All sender records verified on the authoritative NS; a CLI test send to the owner was «Queued».
+  Deploys are the owner's to run (`pnpm deploy:site` / `deploy:admin` / `cron:deploy` — the
+  agent's permission classifier blocks them); no admin account yet; no credentials beyond
+  `DATABASE_URL` and `ADMIN_SESSION_SECRET`. Before that: **L1 content written** from the owner's PDF (`про
   нас_merged.pdf`, 7 pages): all seven static pages, two photos extracted with `pdfimages` and
   resized with `sips` into `apps/site/public/images/` (`about-founder.jpg` 1204×1600 shown as a
   3:2 crop, `about-workshop.jpg` 903×1200), homepage teasers rewritten, `ContentPlaceholder`
@@ -21,14 +27,14 @@
   the 26-step plan approved (`~/.claude/plans/squishy-finding-hennessy.md`).
 - **In progress:** waiting on the client (list below). Catalog review (`docs/plans/catalog.md`)
   still open.
-- **Next step:** wait for the `balier.com.ua` zone to read **Active** → Workers Paid (owner, in the
-  dashboard) → Email Sending on `mail.balier.com.ua` → first deploy of the three Workers →
-  secrets → `pnpm np:sync` → Telegram webhook (`docs/plans/launch.md` L2/L4; the approved plan's
-  block C). L4.2 can go first
+- **Next step:** owner runs the three deploys and creates the admin account; credentials into the
+  four `.dev.vars` → secrets → `pnpm np:sync` → Telegram webhook (`docs/plans/launch.md` L4; the
+  approved plan's block C). Then the offer's seller details, then Monobank. L4.2 can go first
   at any time: `pnpm admin:user create <email> --role=admin` (password is prompted — run by hand).
 - **Blockers (waiting on me / the client):**
-  - Zone `balier.com.ua` **Active** (pending as of 2026-09-16 12:20 UTC, NS already switched).
-    Workers Paid on the account. Own admin account (`pnpm admin:user create`, password prompted).
+  - The three deploys and the admin account (`pnpm admin:user create`, password prompted) — both
+    the owner's hands.
+  - Seller identity for `/offer` (ФОП name, РНОКПП, address).
   - L1 texts for the seven static pages; `/offer` + `/privacy` gate the Monobank merchant.
   - Nova Poshta API key; new Telegram bot token, notification chat id, manager handle.
   - Catalog table (dimensions, weight, leather); Neon plan upgrade to Launch in the console.

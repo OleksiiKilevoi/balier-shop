@@ -92,15 +92,19 @@ A full second setup, not a transfer. Only schema and migrations carry over; no d
       404 — nothing to keep; its apex MX (`mx.ukraine.com.ua`) is untouched by our `mail.`
       subdomain. Decision 2026-09-10: **the owner runs the site — production on the developer's
       own account `52a29667…`**; nothing here is «client-owned» any more.
-- [ ] **Workers Paid plan** on that account — Email Sending requires it (as on the dev account
-      since 2026-08-04).
+- [x] **Workers Paid plan** on that account — Email Sending requires it (as on the dev account
+      since 2026-08-04). Done 2026-09-16.
 - [x] R2: `wrangler r2 bucket create balier-media` (done 2026-09-16, by hand). Empty on purpose — the dev photos are test
       products; real photography goes in through the panel.
 - [x] KV: `wrangler kv namespace create RATE_LIMIT` → `5a26a4dd230e4874ad6f3fb8c349bc52` (2026-09-16), in **both**
       `apps/site/wrangler.jsonc` and `apps/admin/wrangler.jsonc` (shared on purpose).
-- [ ] Email Sending: `wrangler email sending enable <sender subdomain>` then the dashboard
-      auto-onboard button for the DNS records (wrangler's OAuth token has no DNS-edit scope, per
-      2026-08-06). Verify with `wrangler email sending send`.
+- [x] Email Sending on `mail.balier.com.ua` (2026-09-16). **The CLI answers `2036 Unauthorized`
+      to every Email Sending call — even `list` — until the account has onboarded its first
+      domain in the dashboard** (Compute & AI → Email Service → Email Sending → Onboard Domain,
+      subdomain `mail`, «Add records and onboard»); after that `wrangler email sending list` /
+      `dns get` work. Records verified on `lia.ns.cloudflare.com`: MX ×3 + SPF on
+      `cf-bounce.mail…`, DKIM `cf-bounce._domainkey.mail…`, DMARC `p=reject`. Test send from
+      the CLI — see STATE for the result.
 - [x] **Neon project** — `curly-smoke-75808809` («Acelerator», org `org-silent-tooth-80755892`),
       aws-eu-central-1, Postgres 18.6, branch `production`, database `neondb`; linked from the
       repo root with the `neon` CLI (`.neon`, `.env.local`, `neon.ts` — the last is the only one
