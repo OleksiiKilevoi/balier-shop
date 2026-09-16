@@ -1,11 +1,55 @@
 ---
 import StaticPageLayout from '~/layouts/StaticPageLayout.astro';
-import ContentPlaceholder from '~/components/ContentPlaceholder.astro';
 
 // Static HTML, built once — see StaticPageLayout.
 export const prerender = true;
 ---
 
-<StaticPageLayout title="Про нас" lead="Хто робить Balier і як з'являються наші речі.">
-  <ContentPlaceholder />
+<StaticPageLayout title="Про нас" lead="Хто робить BÁLIER і як з'являються наші речі.">
+  <img
+    src="/images/about-founder.jpg"
+    alt="Засновник BÁLIER у майстерні"
+    width="1204"
+    height="1600"
+    class="rounded-card mb-6 aspect-3/2 w-full object-cover object-[50%_15%]"
+  />
+  <p>
+    <strong>BÁLIER</strong> — український бренд шкіряних виробів, заснований у 2018 році в м.
+    Дніпро, Україна.
+  </p>
+  <p>
+    Ми створюємо сумки, аксесуари, портфелі тощо, поєднуючи натуральну шкіру, функціональність і
+    стриманий дизайн.
+  </p>
+
+  <h2>За 8 років ми:</h2>
+  <ul>
+    <li>створили понад 150 моделей;</li>
+    <li>виготовили понад 5800 виробів;</li>
+    <li>виконали понад 30 корпоративних замовлень.</li>
+  </ul>
+  <p>
+    Кожен виріб проходить шлях від власної розробки та тестування до ручного виготовлення і
+    контролю якості.
+  </p>
+
+  <img
+    src="/images/about-workshop.jpg"
+    alt="Майстерня BÁLIER"
+    width="903"
+    height="1200"
+    class="rounded-card my-6 w-full max-w-xs"
+  />
+  <p>
+    Ми не прагнемо створити якомога більше. Ми прагнемо створити річ, якою захочеться користуватися
+    щодня — і через роки.
+  </p>
+
+  <h2>Наш принцип</h2>
+  <ul>
+    <li>Якість — у деталях.</li>
+    <li>Характер — у простоті.</li>
+    <li>Цінність — у тому, що залишається з вами.</li>
+  </ul>
+  <p><strong>BÁLIER</strong> — твій щоденний акцент у преміум якості.</p>
 </StaticPageLayout>

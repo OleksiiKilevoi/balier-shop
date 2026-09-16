@@ -61,16 +61,22 @@ one config change. Each one changes a config value or a line of copy.
 
 ### Phase L1 — Content [todo — needs the client]
 
-- [ ] Seven static pages: `/about`, `/care`, `/delivery`, `/returns`, `/contacts`, `/offer`,
-      `/privacy`. Each still imports `ContentPlaceholder`; deleting that import is what marks a
-      page written. The frame is `StaticPageLayout` + the `prose-page` utility, so a finished page
-      is plain headings and paragraphs.
+- [x] Seven static pages written 2026-09-16 from the owner's PDF (`про нас_merged.pdf`, 7 pages):
+      `/about` (+ two photos extracted from the PDF into `public/images/`, 1600/1200 px JPEG),
+      `/care`, `/delivery`, `/returns`, `/contacts`, `/offer`, `/privacy`. `ContentPlaceholder`
+      deleted — nothing imports it. Left out on purpose: the owner's notes-to-self («он у нас есть
+      вообще?» on exchange, «АДРЕС И ГРАФИК РАБОТЫ ПИШЕМ?» on contacts) and the eight product
+      photos on the care page. Fixed on the way: «поверення», «закордон».
 - [ ] **`/offer` and `/privacy` are the Monobank gate** — the merchant is approved against live
       legal pages on the real domain. They must be deployed on `balier.com.ua` (noindex is fine)
-      *before* the Monobank application, which puts L1 ahead of the real token in L4.
-- [ ] Homepage teaser copy for `/about` and `/care` is placeholder-grade; rewrite alongside those
-      pages.
-- [ ] `/contacts`: the client's actual phone, address, hours, Instagram.
+      *before* the Monobank application. **Still open in `/offer`: the seller's legal identity is
+      in square brackets** — `[повна назва ФОП / компанії]`, `РНОКПП: [номер]`, `Адреса: [адреса]`
+      (section 2 and the signature block). Email and phone are filled. Monobank will not accept
+      brackets; the owner supplies the values.
+- [x] Homepage teasers for `/about` and `/care` rewritten from the real pages.
+- [~] `/contacts`: phone `+38 (098) 602-66-26`, `baliershopua@gmail.com`, Instagram. **No address
+      or hours** — the owner has not decided whether to publish them; the Telegram manager handle
+      is still unknown (L0).
 
 ### Phase L2 — The client's accounts [todo — needs the client, or the developer on their behalf]
 

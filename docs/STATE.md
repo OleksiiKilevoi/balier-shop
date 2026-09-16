@@ -4,20 +4,21 @@
 
 ## 📍 CURRENT STATE (overwrite this block; keep tight)
 
-- **Last done (2026-09-16):** **The domain is `balier.com.ua`.** The zone the owner added to the
-  account is `balier.com.ua` (status pending; NS already `lia`/`rudy.ns.cloudflare.com` at the
-  registrar), which is why `balier.ua` was NXDOMAIN all along — it was never registered. Every
-  production value renamed: routes `balier.com.ua` / `admin.balier.com.ua`, `SITE_ORIGIN`,
-  `PUBLIC_SITE_URL`, `ORDER_EMAIL_FROM` → `noreply@mail.balier.com.ua`, `site` in
-  `astro.config.mjs`, `ADMIN_HOST`, the webhook script's default URL; typegen regenerated. Test
-  fixtures (`anna@balier.ua`) and the Instagram handle stay. The old host (`185.104.45.95`,
-  ukraine.com.ua nginx) is a bare 404; its apex MX is untouched by our `mail.` subdomain.
-  Same day, before that: R2 `balier-media` and KV `RATE_LIMIT` (`5a26a4dd…`) created by hand,
-  KV id committed in both apps (`8552fd8`); `ADMIN_SESSION_SECRET` generated into
-  `apps/admin/.dev.vars`; **Sentry is not launch-blocking** — all three deploys build without
-  `SENTRY_AUTH_TOKEN`, only skipping sourcemaps. Order-of-work plan approved
-  (`~/.claude/plans/squishy-finding-hennessy.md`). `CLAUDE.md` / `OVERVIEW.md` still say
-  `balier.ua` as the project name — not touched (docs change on request).
+- **Last done (2026-09-16, later):** **L1 content written** from the owner's PDF (`про
+  нас_merged.pdf`, 7 pages): all seven static pages, two photos extracted with `pdfimages` and
+  resized with `sips` into `apps/site/public/images/` (`about-founder.jpg` 1204×1600 shown as a
+  3:2 crop, `about-workshop.jpg` 903×1200), homepage teasers rewritten, `ContentPlaceholder`
+  deleted (nothing imports it; `docs/OVERVIEW.md`'s component table still lists it — not
+  touched). Gate + site build green, prerendered as `about.html` etc. **Open in the copy:**
+  `/offer` carries the seller's identity in square brackets (ФОП name, РНОКПП, address — section
+  2 and the signature block) and Monobank will not accept that; `/contacts` has phone, email,
+  Instagram but no address/hours (the owner's own note asks whether to publish them); the
+  returns page speaks «ти» while every other page says «ви» — the owner's voice, left as is;
+  the delivery page promises Meest / Nova Post abroad, which `/checkout` cannot do (contact
+  path only). Earlier the same day: **the domain is `balier.com.ua`** (zone pending, NS already
+  on Cloudflare; every production hostname renamed, `3d5ae8e`), R2 + KV created by hand and the
+  KV id committed (`8552fd8`), `ADMIN_SESSION_SECRET` generated, Sentry confirmed non-blocking,
+  the 26-step plan approved (`~/.claude/plans/squishy-finding-hennessy.md`).
 - **In progress:** waiting on the client (list below). Catalog review (`docs/plans/catalog.md`)
   still open.
 - **Next step:** wait for the `balier.com.ua` zone to read **Active** → Workers Paid (owner, in the
@@ -110,6 +111,12 @@ site, production on this account. R2/KV creation was blocked by the permission c
 as `2adbb7e` and the docs as `17e0a5e` (gate green, nothing pushed); the neon CLI's link files
 stay untracked. `pnpm admin:user list` against production: no admins. Nothing deploys until the zone exists. CURRENT STATE cut from 177
 lines to the handover — the dev environment's state lives in this file at `17e0a5e`.
+
+**2026-09-16 (L1 from the PDF).** «'про нас_merged.pdf' добавь на сайт». The PDF turned out to be
+all seven pages, not one. Transcribed each into its `StaticPageLayout` slot as h2/h3/p/ul,
+dropped two notes-to-self and the care page's eight product photos, fixed two typos, filled the
+legal pages' email/phone from the contacts page and left the seller's identity as visible
+brackets. Photos via `pdfimages` → `sips`. `ContentPlaceholder` deleted. Gate + build green.
 
 **2026-09-07 (launch plan).** «analyse repository and write down steps needed for launch».
 Read STATE, roadmap, OVERVIEW, the NP and Sentry plans, all three `wrangler.jsonc`, the four

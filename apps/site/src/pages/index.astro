@@ -22,21 +22,19 @@ const featured = await listFeaturedProducts(db, FEATURED_COUNT);
 
 /**
  * Teasers for the two content pages, so `/about` and `/care` have an entry point
- * that is not the nav. The copy is placeholder-grade and stays generic on
- * purpose: the real text arrives with the pages themselves (roadmap.md, Phase 5),
- * and inventing a brand story here would just mean writing it twice.
+ * that is not the nav. One sentence each, condensed from the pages themselves.
  */
 const teasers = [
   {
     href: '/about',
     title: 'Про нас',
-    text: 'Невелика майстерня, у якій кожна річ шиється вручну й малими партіями.',
+    text: 'Український бренд шкіряних виробів із Дніпра: з 2018 року — понад 150 моделей і 5800 виробів ручної роботи.',
     cta: 'Наша історія',
   },
   {
     href: '/care',
     title: 'Догляд за шкірою',
-    text: 'Кілька простих правил, які подовжать життя вашій речі на роки.',
+    text: 'Кілька простих правил для шкіри, замші та нубуку, щоб виріб служив роками.',
     cta: 'Як доглядати',
   },
 ];
