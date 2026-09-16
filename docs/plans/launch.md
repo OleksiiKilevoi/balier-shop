@@ -227,7 +227,16 @@ Every dev-scoped value, by file:
        sign-in), «Підтягнути з акаунта» for the NP sender, pick the **real handover branch**
        (dev still says Київ, Відділення №1 as a placeholder), sender phone, default seat
        dimensions and cargo description, COD limit.
-9. [ ] Catalog — **drafted in `docs/plans/catalog.md`** (17 products from the client's 130
+9. [x] Catalog **loaded 2026-09-16** by `scripts/load-catalog.ts` from `scripts/launch-catalog.ts`
+       (the draft as data, every `[уточнити]` claim dropped): 4 categories, 17 products (all
+       `active`, 7 featured), 22 colour variants, 132 image rows over 130 objects — photos from
+       `~/Downloads/balier` resized by `sips` to 1440 px JPEG (it cannot write WebP) and stored
+       through the panel's own `storeImage` via `getPlatformProxy({ remoteBindings: true })`.
+       Wrangler's remote-binding proxy logged «Network connection lost» a dozen times and
+       recovered; every one of the 130 `/media/…` URLs was then HEAD-checked through the edge:
+       130 × 200. **Still the owner's, in the panel:** weight on every variant (no waybill
+       without it), dimensions, leather notes, prices (all are proposals), the «Міні-рюкзак»
+       question, and whether the photos need a studio pass. Was: drafted in `docs/plans/catalog.md` (17 products from the client's 130
        photos, copy + market prices, 2026-09-07) and loaded by script once approved, not by hand;
        weight on every variant (NP refuses a waybill without it, by design no default), photos at
        the L0 size, «featured» flags for the homepage row (limit 4).

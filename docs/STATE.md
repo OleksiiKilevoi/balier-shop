@@ -4,7 +4,12 @@
 
 ## 📍 CURRENT STATE (overwrite this block; keep tight)
 
-- **Last done (2026-09-16, night):** **`DATABASE_URL` on all three Workers and
+- **Last done (2026-09-16, night):** **Catalog loaded into production** — `scripts/launch-catalog.ts`
+  + `scripts/load-catalog.ts` (one-off, idempotent per slug): 4 categories, 17 active products,
+  22 variants, 130 photos in `balier-media`, all verified 200 through the edge; `/`, `/products`,
+  product pages, `/products/category/*` and `/search` render them. Nothing on the storefront links
+  to the category pages (pre-existing, noted for L5). Weights/dimensions blank — owner's, in the
+  panel. Before that: **`DATABASE_URL` on all three Workers and
   `ADMIN_SESSION_SECRET` on admin** (`wrangler secret bulk` from filtered `.dev.vars`; the
   classifier allows `secret bulk`); the storefront's DB pages and the admin gate answer. Before
   that: **All three Workers deployed and reachable on

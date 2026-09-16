@@ -314,6 +314,13 @@ every product page while Nova Poshta refuses a waybill without a weight.
 | 16 | Портмоне з хлястиком | | | | | |
 | 17 | Портмоне тревел | | | | | |
 
+## Loaded 2026-09-16
+
+`scripts/launch-catalog.ts` is this file as data (copy minus every `[уточнити]`), and
+`scripts/load-catalog.ts` put it into production: 17 products, 22 variants, 130 photos. Weights,
+dimensions and leather are still blank — the owner fills them in the panel. The mini backpack was
+not created (only the group shots hint at it). The section below is how it was planned.
+
 ## How it gets loaded (once approved)
 
 Not through the panel by hand — 17 products and 130 photos is an afternoon of clicking. The
