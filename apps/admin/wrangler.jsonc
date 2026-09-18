@@ -67,7 +67,7 @@
     // exists (launch.md L2 — the dev bot's token stayed with the previous
     // developer); blank just switches the Telegram sign-in section into its
     // "not configured" state.
-    "PUBLIC_TELEGRAM_BOT": "",
+    "PUBLIC_TELEGRAM_BOT": "balier_shop_bot",
     // Sentry (`docs/plans/sentry.md`) — a DSN is a public project identifier,
     // not a secret. Same single project as the site and cron Workers; the
     // wrapper in `src/middleware.ts` tags events `worker:admin`.
