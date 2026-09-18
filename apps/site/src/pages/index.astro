@@ -24,16 +24,44 @@ const featured = await listFeaturedProducts(db, FEATURED_COUNT);
  * Teasers for the content pages, so `/about`, `/care`, `/personalization` and `/palette` have an entry point
  * that is not the nav. One sentence each, condensed from the pages themselves.
  */
-/** Who the site belongs to, for the knowledge panel and the Instagram link-up. */
-const organization = {
-  '@context': 'https://schema.org',
-  '@type': 'Organization',
-  name: 'BÁLIER',
-  url: (Astro.site ?? Astro.url).origin,
-  logo: new URL('/images/og-default.jpg', Astro.site ?? Astro.url).href,
-  sameAs: ['https://www.instagram.com/balier.ua/'],
-  address: { '@type': 'PostalAddress', addressLocality: 'Дніпро', addressCountry: 'UA' },
-};
+/**
+ * Who the site belongs to (knowledge panel, Instagram link-up) and how to
+ * search it — `SearchAction` tells crawlers and agents that `/search?q=` is the
+ * site's own search, so they can query the catalog instead of guessing URLs.
+ */
+const origin = (Astro.site ?? Astro.url).origin;
+const structuredData = [
+  {
+    '@context': 'https://schema.org',
+    '@type': 'Organization',
+    '@id': `${origin}/#organization`,
+    name: 'BÁLIER',
+    url: origin,
+    logo: `${origin}/images/og-default.jpg`,
+    sameAs: ['https://www.instagram.com/balier.ua/'],
+    address: { '@type': 'PostalAddress', addressLocality: 'Дніпро', addressCountry: 'UA' },
+    contactPoint: {
+      '@type': 'ContactPoint',
+      telephone: '+380986026626',
+      email: 'baliershopua@gmail.com',
+      contactType: 'customer service',
+      availableLanguage: 'uk',
+    },
+  },
+  {
+    '@context': 'https://schema.org',
+    '@type': 'WebSite',
+    url: origin,
+    name: 'BÁLIER',
+    inLanguage: 'uk',
+    publisher: { '@id': `${origin}/#organization` },
+    potentialAction: {
+      '@type': 'SearchAction',
+      target: { '@type': 'EntryPoint', urlTemplate: `${origin}/search?q={query}` },
+      'query-input': 'required name=query',
+    },
+  },
+];
 
 const teasers = [
   {
@@ -67,7 +95,7 @@ const teasers = [
   title="Balier"
   description="Шкіряні вироби ручної роботи. Обмежені партії, доставка Новою Поштою по всій Україні."
 >
-  <script type="application/ld+json" slot="head" is:inline set:html={JSON.stringify(organization).replace(/</g, '\\u003c')} />
+  <script type="application/ld+json" slot="head" is:inline set:html={JSON.stringify(structuredData).replace(/</g, '\\u003c')} />
   {
     featured.length > 0 && (
       <Container as="section" class="py-12 sm:py-16" aria-labelledby="featured-heading">

@@ -1,6 +1,16 @@
 # Crawl everything; pages that must stay out of the index say so themselves
 # with a robots meta tag (a blocked crawler never sees that tag).
+#
+# AI crawlers are welcome on the same terms — being cited by an assistant is
+# how a small brand gets found now. The Content-Signal line is Cloudflare's
+# machine-readable version of that consent (contentsignals.org):
+#   search   — indexing and search results
+#   ai-input — answering questions from the page's content (RAG, AI search)
+#   ai-train — training or fine-tuning models
+# A summary written for assistants lives at /llms.txt.
+
 User-agent: *
 Disallow: /api/
+Content-Signal: search=yes, ai-input=yes, ai-train=yes
 
 Sitemap: https://balier.com.ua/sitemap.xml
