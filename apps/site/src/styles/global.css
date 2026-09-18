@@ -20,8 +20,10 @@
   --font-display: var(--font-cormorant);
   --font-sans: var(--font-source-sans);
 
-  /* shadcn --background / --card */
-  --color-paper: oklch(1 0 0);
+  /* shadcn --background / --card. The page is the owner's cream (#f6f4e8,
+     swatch of 2026-09-18), cards stay white so photos on white read as
+     framed rather than floating. */
+  --color-paper: #f6f4e8;
   --color-paper-raised: oklch(1 0 0);
 
   /* --foreground, body copy, --muted-foreground */
@@ -29,9 +31,10 @@
   --color-ink-soft: oklch(0.205 0 0);
   --color-ink-muted: oklch(0.556 0 0);
 
-  /* --border / --input, and one step darker for emphasised edges */
-  --color-line: oklch(0.922 0 0);
-  --color-line-strong: oklch(0.87 0 0);
+  /* --border / --input, and one step darker for emphasised edges. Warmed to
+     the paper's hue — a neutral grey hairline reads blue on cream. */
+  --color-line: oklch(0.9 0.012 98);
+  --color-line-strong: oklch(0.84 0.012 98);
 
   /* --ring: focus indication only, the brand green at half opacity. */
   --color-ring: #1f2f2b;
@@ -51,7 +54,7 @@
   --color-telegram-hover: #1e93cd;
 
   /* --secondary / --accent: category pill, hover surfaces, quiet fills. */
-  --color-tag: oklch(0.97 0 0);
+  --color-tag: oklch(0.935 0.012 98);
   --color-tag-ink: oklch(0.205 0 0);
 
   /* shadcn --radius is 0.625rem; cards take the `xl` step, buttons the `md`. */
