@@ -73,7 +73,7 @@
     // the client names the manager account (launch.md L0): `orderDeepLink`
     // validates it, and an empty value hides the button rather than shipping a
     // link to a stranger.
-    "PUBLIC_TELEGRAM_MANAGER": "",
+    "PUBLIC_TELEGRAM_MANAGER": "balierua",
     // Turnstile site key — public by definition, it was embedded in the
     // checkout page's HTML. The paired secret (`TURNSTILE_SECRET_KEY`) is a
     // Worker secret, never here.
