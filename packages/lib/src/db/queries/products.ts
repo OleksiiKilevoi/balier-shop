@@ -189,6 +189,15 @@ export async function listActiveProducts(db: Db): Promise<ProductCardData[]> {
   return hydrateProductCards(db, rows);
 }
 
+/** «Усі товари» in the category nav — products without a category included. */
+export async function countActiveProducts(db: Db): Promise<number> {
+  const [row] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(products)
+    .where(eq(products.status, 'active'));
+  return row?.count ?? 0;
+}
+
 /** The `/products/category/[slug]` grid: one category, same order as `/products`. */
 export async function listProductsInCategory(
   db: Db,

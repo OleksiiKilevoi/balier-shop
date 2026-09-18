@@ -1,0 +1,70 @@
+---
+import type { CategoryNavItem } from '@balier/lib/db/queries/categories';
+
+/**
+ * Category navigation for the catalog pages. A sidebar list from `lg` up, a
+ * horizontally scrolling row of chips below it — on a phone a vertical list
+ * would push the first products under the fold, which is the one thing the
+ * catalog page must not do.
+ *
+ * The same `<ul>` serves both: only the utility classes change per
+ * breakpoint, so there is one markup, one set of links, one `aria-current`.
+ */
+interface Props {
+  categories: CategoryNavItem[];
+  /** The category page's slug; `null` on `/products` («Усі товари»). */
+  current: string | null;
+  /** All active products, for the «Усі товари» count. */
+  total: number;
+  class?: string;
+}
+
+const { categories, current, total, class: className } = Astro.props;
+
+const items = [
+  { href: '/products', label: 'Усі товари', count: total, active: current === null },
+  ...categories.map((category) => ({
+    href: `/products/category/${category.slug}`,
+    label: category.title,
+    count: category.productCount,
+    active: category.slug === current,
+  })),
+];
+---
+
+<nav aria-label="Категорії" class:list={[className]}>
+  {/* `-mx-4 px-4`: the chip row scrolls edge to edge on a phone instead of
+      clipping at the container gutter; the sidebar undoes it. */}
+  <ul
+    class="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 text-sm [scrollbar-width:none] lg:mx-0 lg:flex-col lg:gap-0.5 lg:overflow-visible lg:px-0 lg:pb-0"
+  >
+    {
+      items.map((item) => (
+        <li class="shrink-0">
+          <a
+            href={item.href}
+            aria-current={item.active ? 'page' : undefined}
+            class="group border-line bg-paper-raised text-ink-soft hover:border-line-strong hover:text-ink aria-[current=page]:border-ink aria-[current=page]:bg-ink lg:hover:bg-tag lg:aria-[current=page]:border-transparent lg:aria-[current=page]:bg-tag lg:aria-[current=page]:text-ink inline-flex min-h-touch items-center gap-2 rounded-full border px-3.5 py-1.5 whitespace-nowrap transition-colors aria-[current=page]:font-medium aria-[current=page]:text-white lg:min-h-0 lg:w-full lg:justify-between lg:rounded-btn lg:border-transparent lg:bg-transparent lg:px-3 lg:py-2"
+          >
+            <span>{item.label}</span>
+            <span class="text-ink-muted group-aria-[current=page]:text-white/80 lg:group-aria-[current=page]:text-ink-muted text-xs tabular-nums">
+              {item.count}
+            </span>
+          </a>
+        </li>
+      ))
+    }
+  </ul>
+</nav>
+
+<script>
+  // Chip row only (the sidebar never scrolls): bring the active category into
+  // view, otherwise a phone opening «Гаманці» sees the row start at «Усі
+  // товари» with the current one off the right edge.
+  const list = document.querySelector<HTMLElement>('nav[aria-label="Категорії"] ul');
+  const active = list?.querySelector<HTMLElement>('[aria-current="page"]');
+  if (list && active && list.scrollWidth > list.clientWidth) {
+    list.scrollLeft =
+      active.getBoundingClientRect().left - list.getBoundingClientRect().left + list.scrollLeft - 16;
+  }
+</script>

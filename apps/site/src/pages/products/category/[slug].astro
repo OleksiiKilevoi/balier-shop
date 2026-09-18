@@ -4,9 +4,10 @@ import BaseLayout from '~/layouts/BaseLayout.astro';
 import Container from '~/components/Container.astro';
 import Breadcrumbs from '~/components/Breadcrumbs.astro';
 import ProductCard from '~/components/ProductCard.astro';
+import CategoryNav from '~/components/CategoryNav.astro';
 import { createDb } from '@balier/lib/db';
-import { getCategoryBySlug } from '@balier/lib/db/queries/categories';
-import { listProductsInCategory } from '@balier/lib/db/queries/products';
+import { getCategoryBySlug, listActiveCategories } from '@balier/lib/db/queries/categories';
+import { countActiveProducts, listProductsInCategory } from '@balier/lib/db/queries/products';
 import { pluralUk } from '@balier/lib/i18n/plural';
 
 export const prerender = false;
@@ -15,7 +16,11 @@ const db = createDb(env.DATABASE_URL);
 const category = await getCategoryBySlug(db, Astro.params.slug ?? '');
 if (!category) return Astro.rewrite('/404');
 
-const products = await listProductsInCategory(db, category.id);
+const [products, categories, total] = await Promise.all([
+  listProductsInCategory(db, category.id),
+  listActiveCategories(db),
+  countActiveProducts(db),
+]);
 
 // Same reasoning as /products: only the two cards of the first phone row load eagerly.
 const EAGER_CARDS = 2;
@@ -47,10 +52,17 @@ const countLabel = `${products.length} ${pluralUk(products.length, {
       {category.description && <p class="text-ink-muted mt-3 max-w-prose">{category.description}</p>}
     </header>
 
+    {/* Mirrors /products: sidebar + grid from lg, chip row above the grid below. */}
+    <div class="mt-6 sm:mt-8 lg:grid lg:grid-cols-[12rem_minmax(0,1fr)] lg:gap-10">
+      <CategoryNav
+        categories={categories}
+        current={category.slug}
+        total={total}
+        class="lg:sticky lg:top-24 lg:self-start"
+      />
     {
       products.length > 0 ? (
-        /* Mirrors /products: two columns down to 320px, the mockup's four at lg. */
-        <div class="mt-6 grid grid-cols-2 gap-3 sm:mt-8 sm:gap-5 md:grid-cols-3 lg:grid-cols-4 lg:gap-6">
+        <div class="mt-5 grid grid-cols-2 gap-3 sm:gap-5 md:grid-cols-3 lg:mt-0 lg:gap-6 xl:grid-cols-4">
           {products.map((product, index) => (
             <ProductCard
               slug={product.slug}
@@ -66,7 +78,7 @@ const countLabel = `${products.length} ${pluralUk(products.length, {
           ))}
         </div>
       ) : (
-        <p class="text-ink-muted mt-8">
+        <p class="text-ink-muted mt-5 lg:mt-0">
           У цій категорії поки немає товарів.{' '}
           <a href="/products" class="text-brand hover:text-brand-hover underline underline-offset-2">
             Переглянути всі товари
@@ -74,5 +86,6 @@ const countLabel = `${products.length} ${pluralUk(products.length, {
         </p>
       )
     }
+    </div>
   </Container>
 </BaseLayout>

@@ -4,15 +4,17 @@ import BaseLayout from '~/layouts/BaseLayout.astro';
 import Container from '~/components/Container.astro';
 import Breadcrumbs from '~/components/Breadcrumbs.astro';
 import ProductCard from '~/components/ProductCard.astro';
+import CategoryNav from '~/components/CategoryNav.astro';
 import { createDb } from '@balier/lib/db';
 import { listActiveProducts } from '@balier/lib/db/queries/products';
+import { listActiveCategories } from '@balier/lib/db/queries/categories';
 import { pluralUk } from '@balier/lib/i18n/plural';
 
 export const prerender = false;
 
 // Per request — never a module-scope singleton, every request is a fresh isolate.
 const db = createDb(env.DATABASE_URL);
-const products = await listActiveProducts(db);
+const [products, categories] = await Promise.all([listActiveProducts(db), listActiveCategories(db)]);
 
 /**
  * The first row is two cards on a phone, so only those two skip lazy loading.
@@ -42,12 +44,20 @@ const countLabel = `${products.length} ${pluralUk(products.length, {
       <p class="text-ink-muted mt-1.5 text-sm">{countLabel}</p>
     </header>
 
+    {/* Sidebar + grid from lg; below that the nav is a chip row above the grid. */}
+    <div class="mt-6 sm:mt-8 lg:grid lg:grid-cols-[12rem_minmax(0,1fr)] lg:gap-10">
+      <CategoryNav
+        categories={categories}
+        current={null}
+        total={products.length}
+        class="lg:sticky lg:top-24 lg:self-start"
+      />
     {
       products.length > 0 ? (
         /* Two columns down to 320px: one full-width card per row wastes the
-           screen, and three squeezes the title to two words a line. The mockup's
-           four arrive at lg. */
-        <div class="mt-6 grid grid-cols-2 gap-3 sm:mt-8 sm:gap-5 md:grid-cols-3 lg:grid-cols-4 lg:gap-6">
+           screen, and three squeezes the title to two words a line. Four columns
+           wait for xl now that the sidebar takes 12rem of lg's width. */
+        <div class="mt-5 grid grid-cols-2 gap-3 sm:gap-5 md:grid-cols-3 lg:mt-0 lg:gap-6 xl:grid-cols-4">
           {products.map((product, index) => (
             <ProductCard
               slug={product.slug}
@@ -63,8 +73,9 @@ const countLabel = `${products.length} ${pluralUk(products.length, {
           ))}
         </div>
       ) : (
-        <p class="text-ink-muted mt-8">Товарів поки немає. Зазирніть, будь ласка, трохи пізніше.</p>
+        <p class="text-ink-muted mt-5 lg:mt-0">Товарів поки немає. Зазирніть, будь ласка, трохи пізніше.</p>
       )
     }
+    </div>
   </Container>
 </BaseLayout>
