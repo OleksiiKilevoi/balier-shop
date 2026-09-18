@@ -67,6 +67,13 @@ const ogImageUrl = ogImage ? new URL(ogImage, Astro.site ?? Astro.url).href : un
     {ogImageUrl && <meta property="og:image" content={ogImageUrl} />}
     <meta name="twitter:card" content="summary_large_image" />
 
+    {/* One Dollar Stats, added 2026-09-18 on request. Production builds only
+        (`import.meta.env.PROD`), so `pnpm dev` and preview runs never count as
+        visits. `is:inline` keeps Astro from bundling it. */}
+    {import.meta.env.PROD && (
+      <script is:inline defer src="https://assets.onedollarstats.com/stonks.js"></script>
+    )}
+
     <slot name="head" />
   </head>
 
