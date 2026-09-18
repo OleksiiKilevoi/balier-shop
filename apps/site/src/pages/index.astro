@@ -24,6 +24,17 @@ const featured = await listFeaturedProducts(db, FEATURED_COUNT);
  * Teasers for the content pages, so `/about`, `/care`, `/personalization` and `/palette` have an entry point
  * that is not the nav. One sentence each, condensed from the pages themselves.
  */
+/** Who the site belongs to, for the knowledge panel and the Instagram link-up. */
+const organization = {
+  '@context': 'https://schema.org',
+  '@type': 'Organization',
+  name: 'BÁLIER',
+  url: (Astro.site ?? Astro.url).origin,
+  logo: new URL('/images/og-default.jpg', Astro.site ?? Astro.url).href,
+  sameAs: ['https://www.instagram.com/balier.ua/'],
+  address: { '@type': 'PostalAddress', addressLocality: 'Дніпро', addressCountry: 'UA' },
+};
+
 const teasers = [
   {
     href: '/about',
@@ -56,6 +67,7 @@ const teasers = [
   title="Balier"
   description="Шкіряні вироби ручної роботи. Обмежені партії, доставка Новою Поштою по всій Україні."
 >
+  <script type="application/ld+json" slot="head" is:inline set:html={JSON.stringify(organization).replace(/</g, '\\u003c')} />
   {
     featured.length > 0 && (
       <Container as="section" class="py-12 sm:py-16" aria-labelledby="featured-heading">

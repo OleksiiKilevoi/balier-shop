@@ -282,11 +282,17 @@ What has to be *seen*, not deduced. Use a real phone for the 320 px checks.
 
 ### Phase L6 — Go live [todo]
 
-- [ ] `MONOBANK_TOKEN` swapped to the real one on **all three** Workers (site mints at checkout,
+- [x] `MONOBANK_TOKEN` swapped to the real one on **all three** Workers (site mints at checkout,
       admin mints from `/orders/new`, cron reconciles) — one forgotten Worker means orders that
-      can never be paid or never get cancelled. Then L5's real-payment check.
-- [ ] `SITE_IS_INDEXABLE = true`, push. Every page currently ships `noindex, nofollow`.
-- [ ] `www` redirect rule if L0 says so; Cloudflare Web Analytics on if L0 says so.
+      can never be paid or never get cancelled. Done 2026-09-18: `merchant/details` answers
+      «balier.ua», ЄДРПОУ 3486812038; `wrangler secret list` shows it on site, admin, cron.
+- [x] `SITE_IS_INDEXABLE = true` (2026-09-18, with the SEO pass: `.html` stripped from the
+      prerendered pages' canonical, default `og:image`, `robots.txt` + `/sitemap.xml`, Product
+      + BreadcrumbList JSON-LD on product pages, Organization on the home page; cart, checkout,
+      search and 404 keep `noindex`). Deploy pending.
+- [ ] `www` redirect: DNS `www` CNAME → `balier.com.ua` (proxied) + a Redirect Rule to the
+      apex, both in the dashboard — the CLI token has no DNS edit. Google Search Console:
+      verify the domain, submit `/sitemap.xml`.
 - [ ] Training session with the client on the panel: orders and their statuses (forward moves
       are the carrier's, only «Створити ТТН» and revert/cancel are theirs), waybills and the
       register, products/variants/`in_stock`, `/settings`, `/users`, what the Telegram messages

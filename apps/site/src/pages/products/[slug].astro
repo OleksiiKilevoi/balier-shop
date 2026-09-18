@@ -48,6 +48,59 @@ const telegramHref = orderDeepLink(manager, {
 });
 
 const inStock = defaultVariant.inStock;
+
+/**
+ * Structured data for the product rich result. Prices are the default
+ * variant's, in hryvnias (schema.org wants a decimal, not kopiykas); images
+ * are absolute because the crawler resolves nothing. Colour variants are not
+ * modelled as separate offers — one price, one SKU, one availability flag is
+ * what the page itself shows before a swatch is picked.
+ */
+const origin = (Astro.site ?? Astro.url).origin;
+const structuredData = [
+  {
+    '@context': 'https://schema.org',
+    '@type': 'Product',
+    name: product.title,
+    description: product.metaDescription ?? product.description ?? undefined,
+    sku: defaultVariant.sku,
+    image: product.images.map((image) => new URL(image.url, origin).href),
+    brand: { '@type': 'Brand', name: 'BÁLIER' },
+    ...(product.categoryTitle ? { category: product.categoryTitle } : {}),
+    offers: {
+      '@type': 'Offer',
+      url: productUrl,
+      priceCurrency: 'UAH',
+      price: (defaultVariant.price / 100).toFixed(2),
+      availability: inStock ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock',
+      itemCondition: 'https://schema.org/NewCondition',
+    },
+  },
+  {
+    '@context': 'https://schema.org',
+    '@type': 'BreadcrumbList',
+    itemListElement: [
+      { '@type': 'ListItem', position: 1, name: 'Головна', item: `${origin}/` },
+      { '@type': 'ListItem', position: 2, name: 'Товари', item: `${origin}/products` },
+      ...(product.categoryTitle && product.categorySlug
+        ? [
+            {
+              '@type': 'ListItem',
+              position: 3,
+              name: product.categoryTitle,
+              item: `${origin}/products/category/${product.categorySlug}`,
+            },
+          ]
+        : []),
+      {
+        '@type': 'ListItem',
+        position: product.categoryTitle && product.categorySlug ? 4 : 3,
+        name: product.title,
+        item: productUrl,
+      },
+    ],
+  },
+];
 ---
 
 <BaseLayout
@@ -55,6 +108,7 @@ const inStock = defaultVariant.inStock;
   description={product.metaDescription ?? product.description ?? undefined}
   ogImage={product.images[0]?.url}
 >
+  <script type="application/ld+json" slot="head" is:inline set:html={JSON.stringify(structuredData).replace(/</g, '\\u003c')} />
   <Container class="py-6 sm:py-10 lg:py-14">
     {/* One column on a phone: the gallery leads, then everything that decides
         the purchase. The mockup's side-by-side split needs both halves ~550px,

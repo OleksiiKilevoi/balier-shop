@@ -1,0 +1,6 @@
+# Crawl everything; pages that must stay out of the index say so themselves
+# with a robots meta tag (a blocked crawler never sees that tag).
+User-agent: *
+Disallow: /api/
+
+Sitemap: https://balier.com.ua/sitemap.xml

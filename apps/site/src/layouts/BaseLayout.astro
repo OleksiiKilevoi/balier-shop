@@ -6,18 +6,17 @@ import CartPopup from '~/components/CartPopup.astro';
 import '~/styles/global.css';
 
 /**
- * Pre-launch: every page is `noindex, nofollow`.
- *
- * The store is reachable at a public workers.dev URL while the catalog, the
- * checkout and the legal pages do not exist yet, and none of that should end up
- * in an index — a page pulled out of the index later still leaves a stale cached
- * copy behind. Flipping this to `true` is a Phase 5 launch step; see roadmap.md.
+ * Flipped to `true` 2026-09-18 (launch L6): the catalog, checkout and legal
+ * pages are live on balier.com.ua with the production Monobank merchant. Before
+ * that every page was `noindex, nofollow` so nothing half-built could be cached
+ * by an index. Pages that must never be indexed (cart, checkout, search, 404)
+ * pass `noindex` themselves.
  *
  * Deliberately NOT paired with `Disallow` in robots.txt: a blocked crawler never
  * fetches the page, so it never sees this tag, and the URL can still be indexed
  * from external links. Allow the crawl, refuse the index.
  */
-const SITE_IS_INDEXABLE = false;
+const SITE_IS_INDEXABLE = true;
 
 interface Props {
   title: string;
@@ -33,12 +32,14 @@ const { title, description, ogImage, noindex = !SITE_IS_INDEXABLE } = Astro.prop
 const siteName = 'Balier';
 const fullTitle = title === siteName ? title : `${title} — ${siteName}`;
 // Without the trim, the prerendered pages and the SSR ones disagree: a built
-// page's own pathname is the directory form it is emitted as (`/about/`), while
-// the same route rendered per request sees `/about`. One route must advertise one
-// canonical URL, and the no-slash form is the one every link on the site uses.
-const path = Astro.url.pathname.replace(/(.)\/$/, '$1');
+// page's own pathname is the file it is emitted as (`/about.html` under
+// `build.format: 'file'`, `/about/` under the directory format), while the same
+// route rendered per request sees `/about`. One route must advertise one
+// canonical URL, and the bare form is the one every link on the site uses.
+const path = Astro.url.pathname.replace(/\.html$/, '').replace(/(.)\/$/, '$1');
 const canonical = new URL(path, Astro.site ?? Astro.url).href;
-const ogImageUrl = ogImage ? new URL(ogImage, Astro.site ?? Astro.url).href : undefined;
+// Every page gets a share image: the page's own, or the brand's python leather.
+const ogImageUrl = new URL(ogImage ?? '/images/og-default.jpg', Astro.site ?? Astro.url).href;
 ---
 
 <html lang="uk">
@@ -64,7 +65,7 @@ const ogImageUrl = ogImage ? new URL(ogImage, Astro.site ?? Astro.url).href : un
     <meta property="og:title" content={fullTitle} />
     <meta property="og:url" content={canonical} />
     {description && <meta property="og:description" content={description} />}
-    {ogImageUrl && <meta property="og:image" content={ogImageUrl} />}
+    <meta property="og:image" content={ogImageUrl} />
     <meta name="twitter:card" content="summary_large_image" />
 
     {/* One Dollar Stats, added 2026-09-18 on request. Production builds only
