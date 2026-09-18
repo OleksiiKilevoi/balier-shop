@@ -119,13 +119,11 @@ export interface NpSenderSettings {
   /** City and branch the parcels are handed over at. */
   cityRef: string | null;
   warehouseRef: string | null;
-  /** Default dimensions of one seat, in whole centimetres. */
-  seatDimensionsCm: { length: number; width: number; height: number } | null;
   /** What the waybill says is inside, e.g. «Аксесуари зі шкіри». */
   cargoDescription: string | null;
 }
 
-/** One row per value — the same shape the COD limit uses, times nine. */
+/** One row per value — the same shape the COD limit uses, times eight. */
 const NP_KEYS = {
   counterpartyRef: 'np_sender_counterparty_ref',
   contactRef: 'np_sender_contact_ref',
@@ -134,20 +132,11 @@ const NP_KEYS = {
   phone: 'np_sender_phone',
   cityRef: 'np_sender_city_ref',
   warehouseRef: 'np_sender_warehouse_ref',
-  seatDimensionsCm: 'np_seat_dimensions',
   cargoDescription: 'np_cargo_description',
 } as const;
 
 function asText(value: unknown): string | null {
   return typeof value === 'string' && value !== '' ? value : null;
-}
-
-function asDimensions(value: unknown): NpSenderSettings['seatDimensionsCm'] {
-  if (typeof value !== 'object' || value === null) return null;
-  const { length, width, height } = value as Record<string, unknown>;
-  return typeof length === 'number' && typeof width === 'number' && typeof height === 'number'
-    ? { length, width, height }
-    : null;
 }
 
 /**
@@ -179,7 +168,6 @@ export async function getNpSenderSettings(
       phone: asText(byKey.get(NP_KEYS.phone)),
       cityRef: asText(byKey.get(NP_KEYS.cityRef)),
       warehouseRef: asText(byKey.get(NP_KEYS.warehouseRef)),
-      seatDimensionsCm: asDimensions(byKey.get(NP_KEYS.seatDimensionsCm)),
       cargoDescription: asText(byKey.get(NP_KEYS.cargoDescription)),
     },
     updatedAt,

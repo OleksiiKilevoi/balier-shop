@@ -1,8 +1,8 @@
 import { and, desc, eq, inArray, isNotNull, isNull, or, sql } from 'drizzle-orm';
 import type { SQL } from 'drizzle-orm';
 import type { Db, Tx, TxDb } from '../index';
-import type { Order, OrderItem, OrderStatus, Payment } from '../schema';
-import { orderItems, orders, productVariants } from '../schema';
+import type { Order, OrderItem, OrderStatus, ParcelSize, Payment } from '../schema';
+import { orderItems, orders, products, productVariants } from '../schema';
 import type { Kopiykas } from '../../money';
 import { likeContains } from './like';
 
@@ -45,35 +45,28 @@ export async function findAdminOrder(
 }
 
 /**
- * What each line of an order weighs — the waybill form's starting point.
- *
- * The one deliberate join back from an order to the live catalog: unlike the
- * title and price, weight was never snapshotted at order time (the column is
- * newer than most orders), and the physical parcel is being weighed *now*, so
- * the variant's current number is the more honest starting value. It is only a
- * prefill — the operator confirms or corrects it on the form.
- *
- * `weightGrams` NULL means the variant was never weighed; the form refuses to
- * prefill a guessed total and names these lines instead (no silent default —
- * docs/plans/novaposhta.md).
+ * The one deliberate join back from an order to the live catalog: the box a
+ * product ships in was never snapshotted at order time, and the parcel is
+ * being packed *now*, so the product's current choice is the honest prefill.
+ * `parcelSizeForOrder` turns these into the form's default; the operator
+ * confirms or overrules it there.
  */
-export interface OrderItemWeight {
+export interface OrderItemParcel {
   productTitle: string;
-  variantName: string | null;
   quantity: number;
-  weightGrams: number | null;
+  parcelSize: ParcelSize;
 }
 
-export async function getOrderItemWeights(db: Db, orderId: string): Promise<OrderItemWeight[]> {
+export async function getOrderItemParcelSizes(db: Db, orderId: string): Promise<OrderItemParcel[]> {
   return db
     .select({
       productTitle: orderItems.productTitle,
-      variantName: orderItems.variantName,
       quantity: orderItems.quantity,
-      weightGrams: productVariants.weightGrams,
+      parcelSize: products.parcelSize,
     })
     .from(orderItems)
     .innerJoin(productVariants, eq(productVariants.id, orderItems.variantId))
+    .innerJoin(products, eq(products.id, productVariants.productId))
     .where(eq(orderItems.orderId, orderId));
 }
 

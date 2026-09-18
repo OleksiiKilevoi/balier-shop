@@ -134,6 +134,13 @@
       "when": 1786357636827,
       "tag": "0018_crazy_the_liberteens",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1789740289955,
+      "tag": "0019_tiny_firebird",
+      "breakpoints": true
     }
   ]
 }

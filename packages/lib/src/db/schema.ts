@@ -40,6 +40,12 @@ export const orderStatus = pgEnum('order_status', [
   'cancelled',
   'refunded',
 ]);
+/**
+ * Nova Poshta's parcel tiers. Replaced per-variant grams on 2026-09-18: the
+ * shop packs into two boxes and the tier is what the carrier charges by, so a
+ * weight nobody measured was only ever standing in for this choice.
+ */
+export const parcelSize = pgEnum('parcel_size', ['small', 'large']);
 export const paymentMethod = pgEnum('payment_method', ['card', 'cod']);
 export const deliveryMethod = pgEnum('delivery_method', [
   'np_warehouse',
@@ -100,6 +106,8 @@ export const products = pgTable(
      * every locale we plan to ship. Rendered as its own block on the product page.
      */
     dimensions: text('dimensions'),
+    /** Which box it ships in — `small` («до 2 кг») unless the owner says otherwise. */
+    parcelSize: parcelSize('parcel_size').notNull().default('small'),
     status: productStatus('status').notNull().default('draft'),
     isFeatured: boolean('is_featured').notNull().default(false),
     position: integer('position').notNull().default(0),
@@ -144,15 +152,6 @@ export const productVariants = pgTable(
     colorHex: text('color_hex'),
     /** Kopiykas. NULL means "use products.base_price". */
     priceOverride: integer('price_override'),
-    /**
-     * Grams. Nova Poshta requires a weight on every waybill, and an order's
-     * weight is the sum over its items — so it lives here, on the thing an
-     * order item references. NULL means «never weighed», and deliberately has
-     * no fallback: a waybill for an order containing a weightless variant is
-     * refused by name, because a silently assumed kilogram is a wrong waybill
-     * and an argument at the counter (docs/plans/novaposhta.md).
-     */
-    weightGrams: integer('weight_grams'),
     /**
      * Is this colour on sale right now? A flag rather than a count, decided
      * 2026-08-10: the shop's stock is one-off pieces a person keeps in their
@@ -676,6 +675,7 @@ export type OrderItem = typeof orderItems.$inferSelect;
 export type Payment = typeof payments.$inferSelect;
 export type Locale = (typeof locale.enumValues)[number];
 export type ProductStatus = (typeof productStatus.enumValues)[number];
+export type ParcelSize = (typeof parcelSize.enumValues)[number];
 export type OrderStatus = (typeof orderStatus.enumValues)[number];
 export type PaymentMethod = (typeof paymentMethod.enumValues)[number];
 export type DeliveryMethod = (typeof deliveryMethod.enumValues)[number];

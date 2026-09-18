@@ -18,13 +18,14 @@ import {
   updateVariant,
 } from '@balier/lib/db/queries/adminProducts';
 import type { CatalogFailure } from '@balier/lib/db/queries/adminProducts';
-import { productStatus } from '@balier/lib/db/schema';
+import { parcelSize, productStatus } from '@balier/lib/db/schema';
 import {
   ADMIN_CATALOG_ERRORS,
   ADMIN_PRODUCT_MESSAGES,
   ADMIN_STOREFRONT_NOTES,
   ADMIN_UPLOAD_ERRORS,
   ADMIN_UPLOAD_HINT,
+  PARCEL_SIZE_LABELS,
   PRODUCT_STATUS_HINTS,
   PRODUCT_STATUS_LABELS,
   formatAdminDateTime,
@@ -643,6 +644,26 @@ function imageMeta(image: (typeof images)[number]): string {
                     class:list={['admin-field mt-1', invalid.has('dimensions') && 'border-danger']}
                   />
                 </div>
+
+                {/* Which Nova Poshta box the waybill form preselects — the
+                    tier is what the carrier charges by; the box's own
+                    numbers live in `PARCEL_SIZES`. */}
+                <div class="w-full sm:w-40">
+                  <label for="parcelSize" class="text-fg-subtle text-xs">Коробка для ТТН</label>
+                  <select id="parcelSize" name="parcelSize" class="admin-field admin-select mt-1">
+                    {parcelSize.enumValues.map((value) => (
+                      <option
+                        value={value}
+                        selected={value === (redraw('product_save', 'parcelSize', product!.parcelSize) || 'small')}
+                      >
+                        {PARCEL_SIZE_LABELS[value]}
+                      </option>
+                    ))}
+                  </select>
+                  {invalid.has('parcelSize') && (
+                    <p class="text-danger mt-1 text-xs">{ADMIN_CATALOG_ERRORS.parcelSize}</p>
+                  )}
+                </div>
               </div>
 
               <div class="mt-4 flex flex-wrap gap-4">
@@ -848,27 +869,6 @@ function imageMeta(image: (typeof images)[number]): string {
                         />
                       </div>
 
-                      <div class="w-full sm:w-32">
-                        <label for={`weightGrams-${variant.id}`} class="text-fg-subtle text-xs">
-                          Вага, г
-                        </label>
-                        <input
-                          id={`weightGrams-${variant.id}`}
-                          name="weightGrams"
-                          type="text"
-                          inputmode="numeric"
-                          value={redrawVariant(variant.id, 'weightGrams', variant.weightGrams)}
-                          autocomplete="off"
-                          placeholder="не зважено"
-                          class:list={[
-                            'admin-field mt-1',
-                            variantRowFailed(variant.id) &&
-                              invalid.has('weightGrams') &&
-                              'border-danger',
-                          ]}
-                        />
-                      </div>
-
                       {/* The whole of "how much of this is there". A tick is
                           the storefront's «Додати до кошика»; untick it and the
                           page says «Немає в наявності» instead. Nothing else
@@ -1040,25 +1040,6 @@ function imageMeta(image: (typeof images)[number]): string {
                       id="new-colorHex"
                       value={redraw('variant_add', 'colorHex', '')}
                       invalid={failedIntent === 'variant_add' && invalid.has('colorHex')}
-                    />
-                  </div>
-
-                  <div class="w-full sm:w-32">
-                    <label for="new-weightGrams" class="text-fg-subtle text-xs">Вага, г</label>
-                    <input
-                      id="new-weightGrams"
-                      name="weightGrams"
-                      type="text"
-                      inputmode="numeric"
-                      value={redraw('variant_add', 'weightGrams', '')}
-                      autocomplete="off"
-                      placeholder="не зважено"
-                      class:list={[
-                        'admin-field mt-1',
-                        failedIntent === 'variant_add' &&
-                          invalid.has('weightGrams') &&
-                          'border-danger',
-                      ]}
                     />
                   </div>
 

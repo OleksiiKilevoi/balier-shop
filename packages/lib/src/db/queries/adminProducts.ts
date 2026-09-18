@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import type { SQL } from 'drizzle-orm';
 import type { Db, Tx, TxDb } from '../index';
-import type { Category, Product, ProductImage, ProductStatus, ProductVariant } from '../schema';
+import type { Category, Product, ProductImage, ParcelSize, ProductStatus, ProductVariant } from '../schema';
 import {
   categories,
   categoryTranslations,
@@ -389,6 +389,7 @@ export interface ProductFields {
   basePrice: Kopiykas;
   dimensions: string | null;
   categoryId: string | null;
+  parcelSize: ParcelSize;
   status: ProductStatus;
   isFeatured: boolean;
   position: number;
@@ -414,6 +415,7 @@ export async function updateProduct(
           basePrice: fields.basePrice,
           dimensions: fields.dimensions,
           categoryId: fields.categoryId,
+          parcelSize: fields.parcelSize,
           status: fields.status,
           isFeatured: fields.isFeatured,
           position: fields.position,
@@ -457,8 +459,6 @@ export interface VariantFields {
   colorName: string | null;
   colorHex: string | null;
   priceOverride: Kopiykas | null;
-  /** Grams; NULL = not weighed, which blocks a waybill rather than defaulting. */
-  weightGrams: number | null;
   inStock: boolean;
   position: number;
 }

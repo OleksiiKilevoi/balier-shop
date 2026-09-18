@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { productStatus } from '../db/schema';
+import { parcelSize, productStatus } from '../db/schema';
 import { SKU_MAX_LENGTH, SLUG_MAX_LENGTH } from '../products/slug';
 import { optionalWholeHryvniaSchema, wholeHryvniaSchema } from './money';
 
@@ -74,8 +74,6 @@ const requiredId = z.uuid('invalid_id');
 export const PRODUCT_PRICE_MIN_HRYVNIAS = 1;
 export const PRODUCT_PRICE_MAX_HRYVNIAS = 1_000_000;
 export const POSITION_MAX = 9_999;
-/** Grams. A typo guard like the COD limit's bounds, not what NP will carry. */
-export const WEIGHT_GRAMS_MAX = 100_000;
 
 export const TITLE_MAX = 200;
 export const DESCRIPTION_MAX = 4_000;
@@ -151,6 +149,7 @@ const productSaveSchema = z.object({
   metaDescription: optionalText(META_DESCRIPTION_MAX),
   basePrice: priceSchema,
   categoryId: optionalId,
+  parcelSize: z.enum(parcelSize.enumValues, 'invalid_parcel_size'),
   status: z.enum(productStatus.enumValues),
   isFeatured: checkbox,
   position: wholeNumber(POSITION_MAX, 'invalid_position'),
@@ -163,7 +162,6 @@ const variantFields = {
   colorName: optionalText(COLOR_NAME_MAX),
   colorHex: colorHexSchema,
   priceOverride: optionalPriceSchema,
-  weightGrams: optionalWholeNumber(WEIGHT_GRAMS_MAX, 'invalid_weight'),
   /**
    * A checkbox, so «немає в наявності» is the *absent* key — which is exactly
    * what an unticked box posts, and what a `variant_add` form with no box at
@@ -290,12 +288,12 @@ const CATALOG_FIELDS = [
   'metaDescription',
   'basePrice',
   'categoryId',
+  'parcelSize',
   'position',
   'sku',
   'colorName',
   'colorHex',
   'priceOverride',
-  'weightGrams',
   'alt',
 ] as const;
 

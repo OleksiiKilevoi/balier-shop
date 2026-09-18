@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import {
   COD_LIMIT_MAX_HRYVNIAS,
   COD_LIMIT_MIN_HRYVNIAS,
-  NP_SEAT_CM_MAX,
   PASSWORD_MAX_LENGTH,
   PASSWORD_MIN_LENGTH,
   adminIssueKey,
@@ -114,9 +113,6 @@ const GOOD_PASSWORD = 'correct horse battery';
  */
 const NP_BLANK = {
   phone: '',
-  seatLength: '',
-  seatWidth: '',
-  seatHeight: '',
   cargoDescription: '',
 };
 
@@ -128,11 +124,8 @@ function parseNp(overrides: Record<string, string> = {}) {
 const WAYBILL = {
   intent: 'waybill_create',
   recipientName: 'Тестенко Тест',
-  weightGrams: '1250',
+  parcelSize: 'small',
   seats: '1',
-  seatLength: '30',
-  seatWidth: '20',
-  seatHeight: '10',
   description: 'Аксесуари зі шкіри',
   declaredValue: '1950',
 };
@@ -146,9 +139,8 @@ describe('adminOrderActionSchema — waybill intents', () => {
     const result = parseWaybill();
     expect(result.success).toBe(true);
     if (result.success && result.data.intent === 'waybill_create') {
-      expect(result.data.weightGrams).toBe(1250);
+      expect(result.data.parcelSize).toBe('small');
       expect(result.data.seats).toBe(1);
-      expect(result.data.seatLength).toBe(30);
       // Hryvnias → kopiykas happens here and nowhere else.
       expect(result.data.declaredValue).toBe(195_000);
     }
@@ -163,10 +155,8 @@ describe('adminOrderActionSchema — waybill intents', () => {
   });
 
   it('refuses zeroes and absurdities where a parcel could not exist', () => {
-    expect(parseWaybill({ weightGrams: '0' }).success).toBe(false);
+    expect(parseWaybill({ parcelSize: 'medium' }).success).toBe(false);
     expect(parseWaybill({ seats: '0' }).success).toBe(false);
-    expect(parseWaybill({ seatLength: '0' }).success).toBe(false);
-    expect(parseWaybill({ seatLength: '501' }).success).toBe(false);
     expect(parseWaybill({ description: '' }).success).toBe(false);
     expect(parseWaybill({ declaredValue: '0' }).success).toBe(false);
   });
@@ -182,9 +172,6 @@ describe('adminNpSettingsSchema', () => {
     expect(result.success).toBe(true);
     expect(result.data).toEqual({
       phone: null,
-      seatLength: null,
-      seatWidth: null,
-      seatHeight: null,
       cargoDescription: null,
     });
   });
@@ -198,18 +185,6 @@ describe('adminNpSettingsSchema', () => {
     const bad = parseNp({ phone: '12345' });
     expect(bad.success).toBe(false);
     expect(adminIssueKey(bad.error!)).toBe('invalid_np_phone');
-  });
-
-  it('takes the seat dimensions whole or not at all', () => {
-    const partial = parseNp({ seatLength: '30', seatWidth: '20' });
-    expect(partial.success).toBe(false);
-    expect(adminIssueKey(partial.error!)).toBe('np_dimensions_incomplete');
-
-    expect(parseNp({ seatLength: '0', seatWidth: '20', seatHeight: '10' }).success).toBe(false);
-    expect(
-      parseNp({ seatLength: String(NP_SEAT_CM_MAX + 1), seatWidth: '20', seatHeight: '10' })
-        .success,
-    ).toBe(false);
   });
 
   it('trims the cargo description and keeps blank as null', () => {

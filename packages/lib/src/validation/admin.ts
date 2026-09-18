@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { adminRole, orderStatus } from '../db/schema';
+import { adminRole, orderStatus, parcelSize } from '../db/schema';
 import { splitRecipientName } from '../novaposhta/waybill';
 import { phoneDigitsFromInput } from '../phone';
 import { cartItemsSchema } from './cart';
@@ -68,14 +68,9 @@ export const adminOtpVerifySchema = z.object({
  * catch an extra zero and an empty field, not what Nova Poshta will actually
  * carry; the carrier's own refusal is authoritative and is shown verbatim.
  */
-export const WAYBILL_WEIGHT_MAX_GRAMS = 1_000_000;
 export const WAYBILL_SEATS_MAX = 99;
 export const WAYBILL_DECLARED_MIN_HRYVNIAS = 1;
 export const WAYBILL_DECLARED_MAX_HRYVNIAS = 1_000_000;
-export const NP_SEAT_CM_MIN = 1;
-/* Shared with the «Нова Пошта» settings section below — declared here because
-   this schema is the first in the module to read them. */
-export const NP_SEAT_CM_MAX = 500;
 export const NP_CARGO_DESCRIPTION_MAX = 100;
 
 function waybillWholeNumber(min: number, max: number, error: string) {
@@ -104,11 +99,9 @@ const waybillCreateSchema = z.object({
     .trim()
     .max(MAX_CUSTOMER_NAME, 'invalid_recipient_name')
     .refine((value) => splitRecipientName(value) !== null, 'invalid_recipient_name'),
-  weightGrams: waybillWholeNumber(1, WAYBILL_WEIGHT_MAX_GRAMS, 'invalid_waybill_weight'),
+  /** Which box — its weight and dimensions come from `PARCEL_SIZES`. */
+  parcelSize: z.enum(parcelSize.enumValues, 'invalid_parcel_size'),
   seats: waybillWholeNumber(1, WAYBILL_SEATS_MAX, 'invalid_seats'),
-  seatLength: waybillWholeNumber(NP_SEAT_CM_MIN, NP_SEAT_CM_MAX, 'invalid_waybill_dimensions'),
-  seatWidth: waybillWholeNumber(NP_SEAT_CM_MIN, NP_SEAT_CM_MAX, 'invalid_waybill_dimensions'),
-  seatHeight: waybillWholeNumber(NP_SEAT_CM_MIN, NP_SEAT_CM_MAX, 'invalid_waybill_dimensions'),
   description: z
     .string()
     .trim()
@@ -234,38 +227,14 @@ const optionalNpPhone = z
   .refine((digits) => digits === '' || digits.length === 9, 'invalid_np_phone')
   .transform((digits): string | null => (digits === '' ? null : `+380${digits}`));
 
-/** One side of the default seat, whole centimetres. Bounds are a typo guard. */
-const optionalNpCm = z
-  .string()
-  .transform((raw) => raw.trim())
-  .refine((value) => value === '' || /^\d+$/.test(value), 'invalid_np_dimensions')
-  .transform((value): number | null => (value === '' ? null : Number(value)))
-  .refine((value) => value === null || (value >= 1 && value <= NP_SEAT_CM_MAX), 'invalid_np_dimensions');
-
-export const adminNpSettingsSchema = z
-  .object({
-    phone: optionalNpPhone,
-    seatLength: optionalNpCm,
-    seatWidth: optionalNpCm,
-    seatHeight: optionalNpCm,
-    cargoDescription: z
-      .string()
-      .transform((raw) => raw.trim())
-      .refine((value) => value.length <= NP_CARGO_DESCRIPTION_MAX, 'invalid_np_description')
-      .transform((value): string | null => (value === '' ? null : value)),
-  })
-  /*
-   * Two of three dimensions is not a smaller parcel, it is a mistake — the
-   * triple goes to the carrier whole or not at all. Anchored to the first
-   * blank one, so the border lands where the typing stopped.
-   */
-  .refine(
-    (data) => {
-      const dims = [data.seatLength, data.seatWidth, data.seatHeight];
-      return dims.every((v) => v === null) || dims.every((v) => v !== null);
-    },
-    { message: 'np_dimensions_incomplete', path: ['seatLength'] },
-  );
+export const adminNpSettingsSchema = z.object({
+  phone: optionalNpPhone,
+  cargoDescription: z
+    .string()
+    .transform((raw) => raw.trim())
+    .refine((value) => value.length <= NP_CARGO_DESCRIPTION_MAX, 'invalid_np_description')
+    .transform((value): string | null => (value === '' ? null : value)),
+});
 
 export type AdminNpSettings = z.infer<typeof adminNpSettingsSchema>;
 

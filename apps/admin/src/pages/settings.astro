@@ -249,12 +249,6 @@ if (Astro.request.method === 'POST') {
         const data = parsed.data;
         await updateNpSenderSettings(db, {
           phone: data.phone,
-          /* The all-or-nothing refinement has already run: either every side
-             is a number here, or every side is null. */
-          seatDimensionsCm:
-            data.seatLength !== null && data.seatWidth !== null && data.seatHeight !== null
-              ? { length: data.seatLength, width: data.seatWidth, height: data.seatHeight }
-              : null,
           cargoDescription: data.cargoDescription,
         });
         return Astro.redirect(`${SELF_URL}?m=np_updated`, 303);
@@ -774,60 +768,7 @@ const formFailed = (intent: string) => banner !== null && failedIntent === inten
               </div>
             </div>
 
-            <fieldset class="mt-4">
-              <legend class="text-fg-subtle text-xs">
-                Типові розміри місця, см — форма ТТН підставить їх і надасть можливість змінити.
-              </legend>
-              <div class="mt-1 flex flex-wrap gap-3">
-                <div class="w-28">
-                  <label for="np-seat-length" class="text-fg-subtle text-xs">Довжина</label>
-                  <input
-                    id="np-seat-length"
-                    name="seatLength"
-                    type="text"
-                    inputmode="numeric"
-                    value={npRedraw(
-                      'np_sender',
-                      'seatLength',
-                      np.values.seatDimensionsCm ? String(np.values.seatDimensionsCm.length) : '',
-                    )}
-                    autocomplete="off"
-                    class:list={['admin-field mt-1', npFailed('seatLength') && 'border-danger']}
-                  />
-                </div>
-                <div class="w-28">
-                  <label for="np-seat-width" class="text-fg-subtle text-xs">Ширина</label>
-                  <input
-                    id="np-seat-width"
-                    name="seatWidth"
-                    type="text"
-                    inputmode="numeric"
-                    value={npRedraw(
-                      'np_sender',
-                      'seatWidth',
-                      np.values.seatDimensionsCm ? String(np.values.seatDimensionsCm.width) : '',
-                    )}
-                    autocomplete="off"
-                    class:list={['admin-field mt-1', npFailed('seatWidth') && 'border-danger']}
-                  />
-                </div>
-                <div class="w-28">
-                  <label for="np-seat-height" class="text-fg-subtle text-xs">Висота</label>
-                  <input
-                    id="np-seat-height"
-                    name="seatHeight"
-                    type="text"
-                    inputmode="numeric"
-                    value={npRedraw(
-                      'np_sender',
-                      'seatHeight',
-                      np.values.seatDimensionsCm ? String(np.values.seatDimensionsCm.height) : '',
-                    )}
-                    autocomplete="off"
-                    class:list={['admin-field mt-1', npFailed('seatHeight') && 'border-danger']}
-                  />
-                </div>
-
+            <div class="mt-4 flex flex-wrap gap-3">
                 <div class="w-full sm:w-72">
                   <label for="np-cargo" class="text-fg-subtle text-xs">Опис вантажу</label>
                   <input
@@ -844,8 +785,7 @@ const formFailed = (intent: string) => banner !== null && failedIntent === inten
                     ]}
                   />
                 </div>
-              </div>
-            </fieldset>
+            </div>
 
             <div class="mt-4 flex flex-wrap items-center gap-3">
               <button type="submit" class="admin-btn admin-btn-primary">Зберегти</button>

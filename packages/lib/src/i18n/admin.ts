@@ -1,11 +1,10 @@
-import type { AdminRole, OrderStatus, ProductStatus } from '../db/schema';
+import type { AdminRole, OrderStatus, ParcelSize, ProductStatus } from '../db/schema';
 import { MEDIA_FORMAT_LABELS } from '../media';
 import { MAX_UPLOAD_BYTES } from '../media/upload';
 import type { UploadIssue } from '../media/upload';
 import {
   COD_LIMIT_MAX_HRYVNIAS,
   COD_LIMIT_MIN_HRYVNIAS,
-  NP_SEAT_CM_MAX,
   PASSWORD_MAX_LENGTH,
   PASSWORD_MIN_LENGTH,
 } from '../validation/admin';
@@ -143,9 +142,8 @@ export type AdminOrderMessage = keyof typeof ADMIN_ORDER_MESSAGES;
 export const ADMIN_WAYBILL_ERRORS = {
   invalid_recipient_name:
     'Вкажіть прізвище та ім’я одержувача — два слова, як в паспорті. Замовлення це не змінює.',
-  invalid_waybill_weight: 'Вага — цілі грами, від 1.',
+  invalid_parcel_size: 'Оберіть коробку — до 2 кг або до 10 кг.',
   invalid_seats: 'Місця — ціле число від 1 до 99.',
-  invalid_waybill_dimensions: 'Розміри місця — цілі сантиметри, від 1 до 500.',
   invalid_waybill_description: 'Опис вантажу — до 100 символів, не порожній.',
   invalid_declared_value: 'Оголошена вартість — цілі гривні, від 1.',
 } as const;
@@ -164,10 +162,6 @@ export const ADMIN_WAYBILL_BLOCKERS = {
     'Для відділення замовлення ще немає міста Нової Пошти в довіднику — його заповнює нічна синхронізація (або pnpm np:sync).',
   noApiKey: 'NOVAPOSHTA_API_KEY не налаштовано на цьому Worker — ТТН створити нізвідки.',
 } as const;
-
-/** Prefix for the list of order lines whose variant has no weight. */
-export const ADMIN_WAYBILL_UNWEIGHED =
-  'Немає ваги у варіанта. Зважте й збережіть у редакторі товару, тоді форма підставить суму:';
 
 /** The carrier said no — its own sentence, shown verbatim. */
 export function npErrorText(message: string): string {
@@ -285,8 +279,6 @@ export const ADMIN_SETTINGS_MESSAGES = {
   np_place_no_city:
     'Для цього відділення ще не синхронізовано місто Нової Пошти — дочекайтеся нічної синхронізації або запустіть pnpm np:sync.',
   invalid_np_phone: 'Телефон відправника — український мобільний: дев’ять цифр після +380.',
-  invalid_np_dimensions: `Розміри місця — цілі сантиметри, від 1 до ${NP_SEAT_CM_MAX}.`,
-  np_dimensions_incomplete: 'Вкажіть усі три розміри місця — або залиште всі три порожніми.',
   invalid_np_description: 'Опис вантажу задовгий.',
 
   /* The Telegram sign-in — your own account, whatever the role. */
@@ -311,8 +303,6 @@ export const ADMIN_SETTINGS_FAILURES = new Set<AdminSettingsMessage>([
   'np_place_branch_not_found',
   'np_place_no_city',
   'invalid_np_phone',
-  'invalid_np_dimensions',
-  'np_dimensions_incomplete',
   'invalid_np_description',
 ]);
 
@@ -467,6 +457,12 @@ export function telegramOtpText(code: string): string {
 
 /* ------------------------------------------------------------- the catalog */
 
+/** The two boxes of `PARCEL_SIZES`, as the product editor and the waybill form name them. */
+export const PARCEL_SIZE_LABELS: Record<ParcelSize, string> = {
+  small: 'До 2 кг',
+  large: 'До 10 кг',
+};
+
 export const PRODUCT_STATUS_LABELS: Record<ProductStatus, string> = {
   draft: 'Чернетка',
   active: 'У продажу',
@@ -587,12 +583,12 @@ export const ADMIN_CATALOG_ERRORS: Record<CatalogField, string> = {
   metaDescription: 'Опис для пошукових систем задовгий.',
   basePrice: `Вкажіть ціну цілими гривнями — від ${PRODUCT_PRICE_MIN_HRYVNIAS} до ${new Intl.NumberFormat('uk-UA').format(PRODUCT_PRICE_MAX_HRYVNIAS)} ₴.`,
   categoryId: 'Оберіть категорію зі списку.',
+  parcelSize: 'Оберіть коробку — до 2 кг або до 10 кг.',
   position: 'Порядок — ціле число від 0.',
   sku: 'Тільки великі латинські літери, цифри й дефіси — наприклад, SUMKA-LIUNET-CHORNYI.',
   colorName: 'Назва кольору задовга.',
   colorHex: 'Колір у форматі #1a1a1a.',
   priceOverride: 'Своя ціна варіанта — ціле число гривень або порожнє поле.',
-  weightGrams: 'Вага — ціле число грамів від 1, або порожнє поле, поки не зважено.',
   alt: 'Опис зображення задовгий.',
 };
 
