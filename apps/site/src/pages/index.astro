@@ -160,6 +160,21 @@ const teasers = [
     </div>
   </Container>
 
+  {/* A different reader than the shopper — the person choosing corporate
+      gifts — gets one band, not a fifth teaser card in the shopper's row. */}
+  <Container as="section" class="pb-12 sm:pb-16" aria-labelledby="corporate-heading">
+    <div class="bg-espresso rounded-card flex flex-col gap-5 p-6 text-white sm:flex-row sm:items-center sm:justify-between sm:p-8">
+      <div>
+        <h2 id="corporate-heading" class="text-xl text-white sm:text-2xl">Для бізнесу</h2>
+        <p class="mt-2 max-w-prose text-sm text-white/80 sm:text-base">
+          Корпоративні подарунки та гуртові замовлення з тисненням вашого логотипу: блокноти,
+          картхолдери, брелоки, костери, набори під ваш бренд.
+        </p>
+      </div>
+      <Button href="/corporate" variant="secondary" class="shrink-0">Дізнатися більше</Button>
+    </div>
+  </Container>
+
   {/* Reassurance for a first-time visitor arriving from Instagram — kept last,
       where it answers "how do I actually get this" rather than interrupting the
       products. */}

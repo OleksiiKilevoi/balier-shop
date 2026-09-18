@@ -1,0 +1,202 @@
+---
+import StaticPageLayout from '~/layouts/StaticPageLayout.astro';
+import Button from '~/components/Button.astro';
+
+// Static HTML, built once — see StaticPageLayout.
+export const prerender = true;
+
+// Copy and photos from the owner's «Комерційна пропозиція» PDF, 2026-09-18.
+// Photos live in `public/images/corporate/`.
+const products = [
+  'Блокноти зі шкіряною обкладинкою',
+  'Брелоки',
+  'Картхолдери',
+  'Чохли для пляшки вина',
+  'Гаманці',
+  'Кейси під вироби (прикраси)',
+  'Костери',
+  'Рахівниці',
+  'Меню',
+];
+
+const audiences = [
+  'корпоративних подарунків;',
+  'брендів, що цінують естетику та деталі;',
+  'бізнесів у сегменті middle+ та premium;',
+  'івентів, презентацій, VIP-клієнтів;',
+  'партнерських та PR-наборів.',
+];
+
+const branding = [
+  'тиснення логотипу;',
+  'індивідуальні написи;',
+  'підбір кольору шкіри;',
+  'комплектацію наборів;',
+  'подарункове пакування.',
+];
+
+const reasons = [
+  'Преміальні матеріали',
+  'Акуратна ручна робота',
+  'Гнучкість у співпраці',
+  'Чіткі терміни виробництва',
+  'Індивідуальний підхід до кожного клієнта',
+];
+
+const formats = [
+  { file: 'coasters', title: 'Гуртові замовлення', alt: 'Стос шкіряних костерів із тисненням' },
+  { file: 'green', title: 'Корпоративні подарунки', alt: 'Зелена шкіряна обкладинка з логотипом' },
+  { file: 'slipper', title: 'Індивідуальні брендовані вироби', alt: 'Шкіряні капці з тисненим логотипом' },
+  { file: 'cardholders', title: 'Колаборації з брендами', alt: 'Партія картхолдерів із тисненням' },
+];
+
+const gallery = [
+  { file: 'notebooks', alt: 'Блокноти в шкіряних обкладинках, чорні та руді' },
+  { file: 'wine', alt: 'Шкіряний чохол для пляшки вина' },
+  { file: 'set', alt: 'Подарунковий набір: брелок, картхолдер, костер' },
+];
+---
+
+<StaticPageLayout
+  title="Для бізнесу"
+  lead="Преміальні шкіряні вироби для брендів, компаній та подарункових рішень."
+  description="Корпоративні подарунки та брендовані шкіряні вироби від BÁLIER: блокноти, картхолдери, брелоки, костери з тисненням логотипу. Гуртові замовлення, колаборації, індивідуальні набори."
+>
+  <img
+    src="/images/corporate/hero.jpg"
+    alt="Набір шкіряних аксесуарів BÁLIER: брелок, костер, картхолдер"
+    width="1600"
+    height="1067"
+    class="rounded-card mb-6 w-full"
+  />
+
+  <h2>Хто ми</h2>
+  <div class="sm:flex sm:items-start sm:gap-6">
+    <img
+      src="/images/about-founder.jpg"
+      alt="Засновник BÁLIER у майстерні"
+      width="1204"
+      height="1600"
+      loading="lazy"
+      class="rounded-card mb-4 aspect-square w-full object-cover object-[50%_15%] sm:mb-0 sm:w-56 sm:shrink-0"
+    />
+    <div>
+      <p>
+        З 2018 року створюємо преміальні шкіряні вироби, які виглядають статусно, відчуваються
+        дорого та служать роками.
+      </p>
+      <p>
+        Наші продукти — це поєднання мінімалізму, функціональності та естетики, яка підкреслює
+        імідж бренду.
+      </p>
+    </div>
+  </div>
+
+  <h2>Наші вироби</h2>
+  <ul>
+    {products.map((item) => <li>{item}</li>)}
+  </ul>
+  <p>Або можемо розробити будь-який виріб персонально під вас.</p>
+  <div class="my-6 grid grid-cols-3 gap-3">
+    {
+      gallery.map((image) => (
+        <img
+          src={`/images/corporate/${image.file}.jpg`}
+          alt={image.alt}
+          width="900"
+          height="900"
+          loading="lazy"
+          class="rounded-card aspect-square w-full object-cover"
+        />
+      ))
+    }
+  </div>
+  <p>
+    Кожен виріб виготовлений вручну з якісної натуральної шкіри, має лаконічний, дорогий вигляд.
+    Може бути персоналізований під ваш бренд.
+  </p>
+
+  <h2>Для кого наші вироби</h2>
+  <div class="sm:flex sm:items-start sm:gap-6">
+    <div class="sm:flex-1">
+      <p>Наші рішення ідеально підходять для:</p>
+      <ul>
+        {audiences.map((item) => <li>{item}</li>)}
+      </ul>
+      <p><strong>Це подарунки, які не викидають і не забувають.</strong></p>
+    </div>
+    <div class="grid grid-cols-2 gap-3 sm:w-64 sm:shrink-0 sm:grid-cols-1">
+      <img
+        src="/images/corporate/studs.jpg"
+        alt="Чорна фактурна шкіра з металевими заклепками"
+        width="900"
+        height="900"
+        loading="lazy"
+        class="rounded-card aspect-square w-full object-cover"
+      />
+      <img
+        src="/images/corporate/notebook-hands.jpg"
+        alt="Блокнот у шкіряній обкладинці з тисненням у руках"
+        width="900"
+        height="900"
+        loading="lazy"
+        class="rounded-card aspect-square w-full object-cover"
+      />
+    </div>
+  </div>
+
+  <h2>Персоналізація та брендинг</h2>
+  <div class="sm:flex sm:items-start sm:gap-6">
+    <img
+      src="/images/corporate/slipper.jpg"
+      alt="Шкіряні капці з тисненим логотипом"
+      width="900"
+      height="900"
+      loading="lazy"
+      class="rounded-card mb-4 aspect-square w-full object-cover sm:mb-0 sm:w-56 sm:shrink-0"
+    />
+    <div>
+      <p>Ми пропонуємо:</p>
+      <ul>
+        {branding.map((item) => <li>{item}</li>)}
+      </ul>
+      <p><strong>Ваш бренд виглядатиме стримано, впізнавано та престижно.</strong></p>
+    </div>
+  </div>
+
+  <h2>Чому обирають нас</h2>
+  <ul>
+    {reasons.map((item) => <li>{item}</li>)}
+  </ul>
+  <p>Ми не робимо масмаркет. Ми створюємо речі зі змістом.</p>
+
+  <h2>Формати співпраці</h2>
+  <ul class="grid list-none! grid-cols-2 gap-3 pl-0! sm:grid-cols-4" role="list">
+    {
+      formats.map((format) => (
+        <li class="my-0!">
+          <img
+            src={`/images/corporate/${format.file}.jpg`}
+            alt={format.alt}
+            width="900"
+            height="900"
+            loading="lazy"
+            class="rounded-card aspect-square w-full object-cover"
+          />
+          <p class="text-ink mt-2 text-sm font-medium">{format.title}</p>
+        </li>
+      ))
+    }
+  </ul>
+
+  <h2>Наступний крок</h2>
+  <p>
+    Ми будемо раді обговорити деталі співпраці та створити вироби, які підкреслять стиль і
+    цінності вашого бренду. Зв'яжіться з нами для прорахунку вартості та умов співпраці.
+  </p>
+  <div class="mt-6 flex flex-wrap gap-3">
+    <Button href="tel:+380986026626">+38 (098) 602-66-26</Button>
+    <Button href="mailto:baliershopua@gmail.com" variant="secondary">baliershopua@gmail.com</Button>
+    <Button href="https://t.me/balierua" variant="secondary">Telegram</Button>
+  </div>
+</StaticPageLayout>

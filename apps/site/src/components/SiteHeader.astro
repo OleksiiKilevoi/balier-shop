@@ -7,6 +7,7 @@ const nav = [
   { href: '/care', label: 'Догляд' },
   { href: '/personalization', label: 'Персоналізація' },
   { href: '/palette', label: 'Палітра' },
+  { href: '/corporate', label: 'Для бізнесу' },
 ];
 
 const pathname = Astro.url.pathname;
@@ -18,7 +19,7 @@ const isActive = (href: string) => pathname === href || pathname.startsWith(`${h
     <a href="/" class="font-display text-ink text-[1.75rem] font-semibold tracking-[0.18em]"> BÁLIER </a>
 
     <nav aria-label="Головне меню" class="hidden flex-1 justify-center md:flex">
-      <ul class="flex items-center gap-8 text-sm">
+      <ul class="flex items-center gap-5 text-sm whitespace-nowrap lg:gap-8">
         {
           nav.map((item) => (
             <li>

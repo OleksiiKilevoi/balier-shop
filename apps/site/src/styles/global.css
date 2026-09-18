@@ -204,7 +204,9 @@
     margin-block: 0.375rem;
   }
 
-  & a {
+  /* Not `Button`s: a content page may end in a row of them (`/corporate`),
+     and they keep their own colour and no underline. */
+  & a:not([data-button]) {
     color: var(--color-brand);
     text-decoration: underline;
     text-underline-offset: 0.2em;

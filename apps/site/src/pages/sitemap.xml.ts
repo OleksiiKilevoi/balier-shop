@@ -26,6 +26,7 @@ const STATIC_PATHS = [
   '/contacts',
   '/personalization',
   '/palette',
+  '/corporate',
   '/offer',
   '/privacy',
 ];
