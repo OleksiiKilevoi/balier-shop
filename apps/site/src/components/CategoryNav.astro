@@ -44,10 +44,12 @@ const items = [
           <a
             href={item.href}
             aria-current={item.active ? 'page' : undefined}
-            class="group border-line bg-paper-raised text-ink-soft hover:border-line-strong hover:text-ink aria-[current=page]:border-ink aria-[current=page]:bg-ink lg:hover:bg-tag lg:aria-[current=page]:border-transparent lg:aria-[current=page]:bg-tag lg:aria-[current=page]:text-ink inline-flex min-h-touch items-center gap-2 rounded-full border px-3.5 py-1.5 whitespace-nowrap transition-colors aria-[current=page]:font-medium aria-[current=page]:text-white lg:min-h-0 lg:w-full lg:justify-between lg:rounded-btn lg:border-transparent lg:bg-transparent lg:px-3 lg:py-2"
+            class="group border-line bg-paper-raised text-ink-soft hover:border-line-strong hover:text-ink aria-[current=page]:border-ink aria-[current=page]:bg-ink lg:hover:bg-tag lg:aria-[current=page]:border-transparent lg:aria-[current=page]:bg-tag lg:aria-[current=page]:text-ink inline-flex min-h-touch items-center gap-2 rounded-full border px-3.5 py-1.5 whitespace-nowrap transition-colors lg:whitespace-normal aria-[current=page]:font-medium aria-[current=page]:text-white lg:min-h-0 lg:w-full lg:justify-between lg:rounded-btn lg:border-transparent lg:bg-transparent lg:px-3 lg:py-2"
           >
-            <span>{item.label}</span>
-            <span class="text-ink-muted group-aria-[current=page]:text-white/80 lg:group-aria-[current=page]:text-ink-muted text-xs tabular-nums">
+            {/* The label wraps in the sidebar so a long category name never
+                pushes its count out of the column the others share. */}
+            <span class="min-w-0">{item.label}</span>
+            <span class="text-ink-muted shrink-0 group-aria-[current=page]:text-white/80 lg:group-aria-[current=page]:text-ink-muted text-xs tabular-nums">
               {item.count}
             </span>
           </a>
