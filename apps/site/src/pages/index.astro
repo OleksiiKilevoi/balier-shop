@@ -21,7 +21,7 @@ const db = createDb(env.DATABASE_URL);
 const featured = await listFeaturedProducts(db, FEATURED_COUNT);
 
 /**
- * Teasers for the two content pages, so `/about` and `/care` have an entry point
+ * Teasers for the content pages, so `/about`, `/care` and `/personalization` have an entry point
  * that is not the nav. One sentence each, condensed from the pages themselves.
  */
 const teasers = [
@@ -36,6 +36,12 @@ const teasers = [
     title: 'Догляд за шкірою',
     text: 'Кілька простих правил для шкіри, замші та нубуку, щоб виріб служив роками.',
     cta: 'Як доглядати',
+  },
+  {
+    href: '/personalization',
+    title: 'Персоналізація',
+    text: 'Тиснення або гравірування: ініціали, дата, напис чи ваше зображення — подарунок, який не переплутати з іншим.',
+    cta: 'Детальніше',
   },
 ];
 ---
@@ -88,7 +94,7 @@ const teasers = [
   }
 
   <Container as="section" class="pb-12 sm:pb-16">
-    <div class="grid gap-4 sm:gap-5 md:grid-cols-2">
+    <div class="grid gap-4 sm:gap-5 md:grid-cols-3">
       {
         teasers.map((teaser) => (
           <article class="border-line bg-paper-raised rounded-card flex flex-col p-6 sm:p-8">

@@ -124,6 +124,16 @@ const inStock = defaultVariant.inStock;
           )
         }
 
+        {/* Personalisation is a conversation, not a checkout option (roadmap
+            Phase 6) — one line pointing at the page that explains it. */}
+        <p class="text-ink-muted mt-4 text-sm">
+          Тиснення або гравірування ініціалів, дати чи зображення —{' '}
+          <a href="/personalization" class="text-brand hover:text-brand-hover underline-offset-2 transition-colors hover:underline">
+            персоналізація
+          </a>
+          .
+        </p>
+
         {
           product.dimensions && (
             <div class="border-line mt-6 border-t pt-5">

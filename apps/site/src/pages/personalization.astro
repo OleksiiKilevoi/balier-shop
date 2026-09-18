@@ -1,0 +1,69 @@
+---
+import StaticPageLayout from '~/layouts/StaticPageLayout.astro';
+
+// Static HTML, built once — see StaticPageLayout.
+export const prerender = true;
+
+// Copy and photos from the owner's «BÁLIER × PERSONALIZATION» PDF, 2026-09-18.
+const examples = [
+  { src: '/images/personalization-initials.jpg', alt: 'Тиснення ініціалів VF на шкірі під пітона' },
+  { src: '/images/personalization-slippers.jpg', alt: 'Шкіряні капці з тисненим написом' },
+  { src: '/images/personalization-wallets.jpg', alt: 'Два гаманці з тисненими ініціалами' },
+  { src: '/images/personalization-engraving.jpg', alt: 'Гравірування побажання на шкіряних теках' },
+];
+---
+
+<StaticPageLayout
+  title="Персоналізація"
+  lead="Зробіть виріб BÁLIER особливим — додайте те, що має значення саме для вас."
+>
+  <img
+    src="/images/personalization-stamps.jpg"
+    alt="Набір літер для тиснення у майстерні BÁLIER"
+    width="1600"
+    height="1067"
+    class="rounded-card mb-6 w-full"
+  />
+
+  <h2>Що можна нанести</h2>
+  <ul>
+    <li>ініціали або ім'я;</li>
+    <li>дату чи короткий напис;</li>
+    <li>авторський знак або символ;</li>
+    <li>зображення.</li>
+  </ul>
+
+  <h2>Тиснення та гравірування</h2>
+  <p>
+    Для персоналізації доступні <strong>тиснення</strong> та <strong>гравірування</strong>.
+    Спосіб нанесення підбираємо індивідуально залежно від виробу, матеріалу та вашої ідеї.
+  </p>
+  <p>
+    <strong>Хочете нанести власне зображення?</strong> Надішліть його нам — ми підкажемо, який
+    спосіб нанесення підійде найкраще та в якому форматі підготувати файл.
+  </p>
+  <p>Вартість і можливість персоналізації залежать від виробу та складності нанесення.</p>
+
+  <div class="my-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
+    {
+      examples.map((example) => (
+        <img
+          src={example.src}
+          alt={example.alt}
+          width="900"
+          height="900"
+          loading="lazy"
+          class="rounded-card aspect-square w-full object-cover"
+        />
+      ))
+    }
+  </div>
+
+  <p>Персоналізація перетворює виріб на подарунок, який неможливо випадково переплутати з іншим.</p>
+
+  <h2>Як замовити</h2>
+  <p>
+    Напишіть нам у <a href="https://ig.me/m/balier.ua" rel="noopener">Direct в Instagram</a> або{' '}
+    <a href="/contacts">зв'яжіться з менеджером</a> — узгодимо напис, спосіб нанесення та вартість.
+  </p>
+</StaticPageLayout>
