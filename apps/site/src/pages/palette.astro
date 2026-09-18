@@ -1,0 +1,138 @@
+---
+import StaticPageLayout from '~/layouts/StaticPageLayout.astro';
+
+// Static HTML, built once — see StaticPageLayout.
+export const prerender = true;
+
+// Copy, order and photos from the owner's «BÁLIER × COLOR PALETTE» PDF,
+// 2026-09-18. Photos live in `public/images/palette/<type>-<colour>.jpg`.
+interface Swatch {
+  file: string;
+  name: string;
+}
+
+interface Leather {
+  title: string;
+  swatches: Swatch[];
+  /** A line under the grid — only suede has one. */
+  note?: string;
+}
+
+const leathers: Leather[] = [
+  {
+    title: 'Гладка шкіра',
+    swatches: [
+      { file: 'smooth-black', name: 'Чорна' },
+      { file: 'smooth-red', name: 'Червона' },
+      { file: 'smooth-brown', name: 'Коричнева' },
+      { file: 'smooth-bordeaux', name: 'Бордова' },
+      { file: 'smooth-orange', name: 'Помаранчева' },
+      { file: 'smooth-cappuccino', name: 'Капучіно' },
+      { file: 'smooth-beige', name: 'Бежева' },
+      { file: 'smooth-white', name: 'Біла' },
+    ],
+  },
+  {
+    title: 'Фактурна шкіра',
+    swatches: [
+      { file: 'textured-black', name: 'Чорна' },
+      { file: 'textured-brown', name: 'Коричнева' },
+      { file: 'textured-bordeaux', name: 'Бордо' },
+      { file: 'textured-white', name: 'Біла' },
+      { file: 'textured-beige', name: 'Бежева' },
+    ],
+  },
+  {
+    title: 'Шкіра рептилія',
+    swatches: [
+      { file: 'reptile-black', name: 'Чорна' },
+      { file: 'reptile-beige', name: 'Бежева' },
+      { file: 'reptile-brown', name: 'Коричнева' },
+    ],
+  },
+  {
+    title: 'Замша',
+    swatches: [
+      { file: 'suede-chocolate', name: 'Шоколад' },
+      { file: 'suede-black', name: 'Чорна' },
+      { file: 'suede-bordeaux', name: 'Бордова' },
+    ],
+    note: 'Можливо підібрати колір індивідуально під вас.',
+  },
+  {
+    title: 'Вінтажна шкіра',
+    swatches: [
+      { file: 'vintage-black', name: 'Чорна' },
+      { file: 'vintage-brown', name: 'Коричнева' },
+      { file: 'vintage-blue', name: 'Синя' },
+      { file: 'vintage-bordeaux', name: 'Бордова' },
+      { file: 'vintage-cognac', name: 'Коньяк' },
+      { file: 'vintage-green', name: 'Зелена' },
+    ],
+  },
+];
+---
+
+<StaticPageLayout
+  title="Палітра шкіри"
+  lead="Відтінок задає настрій. Фактура додає характеру. А їх поєднання робить річ саме вашою."
+>
+  <img
+    src="/images/palette/hero.jpg"
+    alt="Чорна та бежева шкіра з тисненням під пітона"
+    width="1600"
+    height="1067"
+    class="rounded-card mb-6 w-full"
+  />
+  <p>
+    У BÁLIER можна обрати шкіру не лише за кольором — а за відчуттям, яке вона створює.
+  </p>
+
+  {
+    leathers.map((leather) => (
+      <section>
+        <h2>{leather.title}</h2>
+        {/* `ul`, not a bare grid: a screen reader announces how many colours the
+            leather comes in before reading them. */}
+        {/* `!`: `.prose-page ul` outranks a bare utility, and this list is a grid,
+            not prose. */}
+        <ul class="grid list-none! grid-cols-2 gap-3 pl-0! sm:grid-cols-4" role="list">
+          {leather.swatches.map((swatch) => (
+            <li class="my-0!">
+              <img
+                src={`/images/palette/${swatch.file}.jpg`}
+                alt={`${leather.title}, ${swatch.name.toLowerCase()}`}
+                width="720"
+                height="720"
+                loading="lazy"
+                class="rounded-card aspect-square w-full object-cover"
+              />
+              <p class="text-ink-muted mt-1.5 text-center text-sm">{swatch.name}</p>
+            </li>
+          ))}
+        </ul>
+        {leather.note && (
+          <>
+            <img
+              src="/images/palette/suede-swatches.jpg"
+              alt="Зразки замші різних кольорів"
+              width="1400"
+              height="788"
+              loading="lazy"
+              class="rounded-card mt-4 w-full"
+            />
+            <p class="text-ink-muted text-sm">* {leather.note}</p>
+          </>
+        )}
+      </section>
+    ))
+  }
+
+  <h2>Як обрати</h2>
+  <p>
+    Обирайте свій колір шкіри. Ми створимо з неї річ, яку захочеться носити роками. Напишіть нам
+    у <a href="https://ig.me/m/balier.ua" rel="noopener">Direct в Instagram</a> або{' '}
+    <a href="/contacts">зв'яжіться з менеджером</a> — підкажемо, яка шкіра підійде для обраної
+    моделі.
+  </p>
+</StaticPageLayout>
