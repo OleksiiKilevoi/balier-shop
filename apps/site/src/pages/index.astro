@@ -33,13 +33,25 @@ const origin = (Astro.site ?? Astro.url).origin;
 const structuredData = [
   {
     '@context': 'https://schema.org',
-    '@type': 'Organization',
+    '@type': ['Organization', 'Store'],
     '@id': `${origin}/#organization`,
     name: 'BÁLIER',
     url: origin,
     logo: `${origin}/images/og-default.jpg`,
+    image: `${origin}/images/og-default.jpg`,
+    telephone: '+380986026626',
+    email: 'baliershopua@gmail.com',
     sameAs: ['https://www.instagram.com/balier.ua/'],
-    address: { '@type': 'PostalAddress', addressLocality: 'Дніпро', addressCountry: 'UA' },
+    // Matches the Google Business Profile («BALIER - шкіряні аксесуари») and the
+    // offer's seller address, so the listing and the site read as one business.
+    address: {
+      '@type': 'PostalAddress',
+      streetAddress: 'Майдан Озерний, 19',
+      addressLocality: 'Дніпро',
+      postalCode: '49245',
+      addressCountry: 'UA',
+    },
+    hasMap: 'https://maps.app.goo.gl/yqgARu2AWK3mDR7z5',
     contactPoint: {
       '@type': 'ContactPoint',
       telephone: '+380986026626',
