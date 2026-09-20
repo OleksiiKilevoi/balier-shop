@@ -257,6 +257,8 @@ export const ADMIN_CARD_LINK_EXPIRED =
  */
 export const ADMIN_SETTINGS_MESSAGES = {
   cod_limit_updated: 'Ліміт післяплати збережено.',
+  promo_updated: 'Налаштування промокоду збережено.',
+  invalid_promo_percent: 'Відсоток знижки — ціле число від 1 до 90.',
   invalid_cod_limit: `Вкажіть суму цілими гривнями — від ${COD_LIMIT_MIN_HRYVNIAS} до ${new Intl.NumberFormat('uk-UA').format(COD_LIMIT_MAX_HRYVNIAS)} ₴.`,
   bad_request: 'Не вдалося зберегти зміни.',
 
@@ -292,6 +294,7 @@ export type AdminSettingsMessage = keyof typeof ADMIN_SETTINGS_MESSAGES;
 /** The message keys the screen shows in red rather than in grey. */
 export const ADMIN_SETTINGS_FAILURES = new Set<AdminSettingsMessage>([
   'invalid_cod_limit',
+  'invalid_promo_percent',
   'bad_request',
   'wrong_password',
   'password_too_short',
@@ -413,6 +416,9 @@ export const ADMIN_ARCHIVE_HINT =
  * screen deliberately cannot do — a manager looking for the off switch should
  * find out here rather than by setting the limit to 1 ₴ and hoping.
  */
+export const ADMIN_PROMO_HINT =
+  'Через хвилину на сайті відвідувачу пропонують знижку за e-mail: код приходить листом, один на адресу, діє на одне замовлення. Скидка рахується від суми товарів, без доставки.';
+
 export const ADMIN_COD_LIMIT_HINT =
   'Замовлення, дорожчі за цю суму, не можна оформити з післяплатою — на сайті залишиться тільки оплата карткою.';
 

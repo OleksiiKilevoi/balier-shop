@@ -46,13 +46,17 @@ export function createMonobankPayment(token: string): PaymentPort {
         merchantPaymInfo: {
           reference: input.orderNumber,
           destination: `Замовлення ${input.orderNumber}`,
-          basketOrder: input.items.map((item) => ({
-            name: item.productTitle,
-            qty: item.quantity,
-            sum: item.unitPrice,
-            unit: 'шт.',
-            code: item.sku,
-          })),
+          ...(input.items.length > 0
+            ? {
+                basketOrder: input.items.map((item) => ({
+                  name: item.productTitle,
+                  qty: item.quantity,
+                  sum: item.unitPrice,
+                  unit: 'шт.',
+                  code: item.sku,
+                })),
+              }
+            : {}),
         },
         redirectUrl: input.redirectUrl,
         webHookUrl: input.webhookUrl,

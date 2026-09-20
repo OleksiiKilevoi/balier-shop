@@ -28,6 +28,9 @@ export function formatOrderMessage(heading: string, notification: OrderNotificat
     '',
     ...itemLines,
     '',
+    ...(order.discountTotal > 0
+      ? [`Знижка (${order.promoCode ?? 'промокод'}): −${formatPrice(order.discountTotal)}`]
+      : []),
     `Разом: ${formatPrice(order.total)}`,
     `Оплата: ${PAYMENT_METHOD_LABELS[order.paymentMethod]}`,
     `Доставка: ${DELIVERY_METHOD_LABELS[order.deliveryMethod]} — ${deliveryDestination(order)}`,

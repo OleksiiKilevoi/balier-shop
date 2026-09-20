@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:workers';
 import type { APIRoute } from 'astro';
 import { createDb, createTxDb } from '@balier/lib/db';
-import { getCodLimitKopiykas, getPaymentTtlMinutes } from '@balier/lib/db/queries/settings';
+import { getCodLimitKopiykas, getPaymentTtlMinutes, getPromoSettings } from '@balier/lib/db/queries/settings';
 import { createMonobankPayment } from '@balier/lib/monobank';
 import { createEmailNotifier } from '@balier/lib/notify/email';
 import { createTelegramNotifier } from '@balier/lib/notify/telegram';
@@ -49,9 +49,10 @@ export const POST: APIRoute = async ({ request, locals }) => {
   // if (!captchaOk) return json({ error: 'captcha_failed' }, 400);
 
   const db = createDb(env.DATABASE_URL);
-  const [codLimitKopiykas, paymentTtlMinutes] = await Promise.all([
+  const [codLimitKopiykas, paymentTtlMinutes, promo] = await Promise.all([
     getCodLimitKopiykas(db),
     getPaymentTtlMinutes(db),
+    getPromoSettings(db),
   ]);
 
   const { db: txDb, close } = createTxDb(env.DATABASE_URL);
@@ -67,6 +68,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
         paymentMethod: parsed.data.paymentMethod,
         comment: parsed.data.comment,
         items: parsed.data.items,
+        promoCode: parsed.data.promoCode,
       },
       {
         payment: createMonobankPayment(env.MONOBANK_TOKEN),
@@ -76,6 +78,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
         webhookUrl: new URL('/api/webhooks/monobank', new URL(request.url).origin).toString(),
         paymentTtlMinutes,
         codLimitKopiykas,
+        promoEnabled: promo.enabled,
       },
     );
 
@@ -88,6 +91,9 @@ export const POST: APIRoute = async ({ request, locals }) => {
         return json({ error: 'cart_changed', notices: result.notices }, 409);
       case 'cod_over_limit':
         return json({ error: 'cod_over_limit', codLimitKopiykas }, 400);
+      case 'promo_invalid':
+      case 'promo_used':
+        return json({ error: result.reason }, 400);
       case 'payment_failed':
         return json({ error: 'payment_failed' }, 502);
     }

@@ -1,0 +1,195 @@
+---
+import Button from './Button.astro';
+
+/**
+ * The e-mail-for-a-discount popup, mounted once in `BaseLayout` (not on
+ * `/checkout`, where the field is). Shows once per browser, after a minute
+ * on the site counted across pages, and only while the promo is switched on
+ * in the panel — the static pages cannot read the setting at build time, so
+ * the script asks `/api/checkout/limits` at the moment it would show.
+ *
+ * The code never appears here: it goes to the address, which is the whole
+ * point of asking for one. The browser only remembers that it asked
+ * (`promo_done`), so the popup does not come back.
+ */
+---
+
+<div class="fixed inset-0 z-50" hidden data-promo-popup>
+  <div class="bg-ink/40 absolute inset-0 opacity-0 transition-opacity duration-200" data-promo-backdrop>
+  </div>
+
+  <div
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="promo-heading"
+    class="border-line bg-paper rounded-card absolute inset-x-4 top-1/2 -translate-y-1/2 scale-95 border p-6 opacity-0 shadow-xl transition-all duration-200 ease-out sm:inset-x-auto sm:left-1/2 sm:w-[26rem] sm:-translate-x-1/2 sm:p-8"
+    data-promo-panel
+  >
+    <button
+      type="button"
+      aria-label="Закрити"
+      class="text-ink-muted hover:text-brand absolute top-3 right-3 flex size-touch items-center justify-center transition-colors md:size-8"
+      data-promo-close
+    >
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+        <path d="M2 2l10 10M12 2L2 12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></path>
+      </svg>
+    </button>
+
+    <form data-promo-form novalidate>
+      <p class="text-brand text-xs font-medium tracking-[0.18em] uppercase">BÁLIER</p>
+      <h2 id="promo-heading" class="mt-2 text-2xl sm:text-3xl">
+        −<span data-promo-percent>10</span> % на перше замовлення
+      </h2>
+      <p class="text-ink-muted mt-3 text-sm">
+        Залиште e-mail — надішлемо промокод на знижку. Один код на адресу, діє на одне замовлення.
+      </p>
+
+      <label for="promo-email" class="sr-only">E-mail</label>
+      <input
+        id="promo-email"
+        name="email"
+        type="email"
+        required
+        autocomplete="email"
+        placeholder="ваш@email.com"
+        class="border-line-strong bg-paper-raised text-ink placeholder:text-ink-muted focus-visible:border-ring rounded-btn mt-5 w-full border px-4 py-3 text-base outline-none sm:text-sm"
+        data-promo-email
+      />
+      <p class="text-ink mt-2 hidden text-xs" data-promo-status role="status"></p>
+
+      <Button type="submit" block class="mt-4" data-promo-submit>Отримати промокод</Button>
+
+      <p class="text-ink-muted mt-3 text-xs">
+        Натискаючи кнопку, ви погоджуєтесь із <a href="/privacy" class="underline underline-offset-2">політикою конфіденційності</a>.
+      </p>
+    </form>
+
+    <div class="hidden" data-promo-done>
+      <p class="text-brand text-xs font-medium tracking-[0.18em] uppercase">BÁLIER</p>
+      <h2 class="mt-2 text-2xl sm:text-3xl">Код уже летить</h2>
+      <p class="text-ink-muted mt-3 text-sm">
+        Перевірте пошту <span class="text-ink" data-promo-sent-to></span> — промокод у листі.
+        Введіть його в полі «Промокод» під час оформлення.
+      </p>
+      <Button href="/products" block class="mt-5">До каталогу</Button>
+    </div>
+  </div>
+</div>
+
+<script>
+  const SHOW_AFTER_MS = 60_000;
+  const FIRST_SEEN_KEY = 'promo_first_seen';
+  const DONE_KEY = 'promo_done';
+
+  const root = document.querySelector<HTMLElement>('[data-promo-popup]');
+  const onCheckout = location.pathname.startsWith('/checkout');
+
+  const storage = {
+    get(key: string): string | null {
+      try {
+        return localStorage.getItem(key);
+      } catch {
+        return null;
+      }
+    },
+    set(key: string, value: string): void {
+      try {
+        localStorage.setItem(key, value);
+      } catch {
+        /* private mode — the popup just shows again next visit */
+      }
+    },
+  };
+
+  if (root && !onCheckout && storage.get(DONE_KEY) !== '1') {
+    const backdrop = root.querySelector<HTMLElement>('[data-promo-backdrop]');
+    const panel = root.querySelector<HTMLElement>('[data-promo-panel]');
+    const form = root.querySelector<HTMLFormElement>('[data-promo-form]');
+    const email = root.querySelector<HTMLInputElement>('[data-promo-email]');
+    const status = root.querySelector<HTMLElement>('[data-promo-status]');
+    const submit = root.querySelector<HTMLButtonElement>('[data-promo-submit]');
+    const done = root.querySelector<HTMLElement>('[data-promo-done]');
+    const sentTo = root.querySelector<HTMLElement>('[data-promo-sent-to]');
+    const percentOut = root.querySelector<HTMLElement>('[data-promo-percent]');
+
+    let previousFocus: HTMLElement | null = null;
+
+    const close = () => {
+      storage.set(DONE_KEY, '1');
+      backdrop?.classList.remove('opacity-100');
+      panel?.classList.remove('opacity-100', 'scale-100');
+      window.setTimeout(() => {
+        root.hidden = true;
+      }, 200);
+      document.removeEventListener('keydown', onKey);
+      previousFocus?.focus();
+    };
+
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') close();
+    };
+
+    const open = (percent: number) => {
+      if (percentOut) percentOut.textContent = String(percent);
+      previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      root.hidden = false;
+      // Two frames so the transition runs from the hidden state.
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => {
+          backdrop?.classList.add('opacity-100');
+          panel?.classList.add('opacity-100', 'scale-100');
+        }),
+      );
+      document.addEventListener('keydown', onKey);
+      email?.focus({ preventScroll: true });
+    };
+
+    root.querySelector('[data-promo-close]')?.addEventListener('click', close);
+    backdrop?.addEventListener('click', close);
+
+    form?.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      if (!email || !form.reportValidity()) return;
+      if (submit) submit.disabled = true;
+      if (status) status.hidden = true;
+      try {
+        const response = await fetch('/api/promo/subscribe', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ email: email.value }),
+        });
+        if (!response.ok) throw new Error(String(response.status));
+        storage.set(DONE_KEY, '1');
+        if (sentTo) sentTo.textContent = email.value.trim();
+        form.hidden = true;
+        done?.classList.remove('hidden');
+      } catch {
+        if (status) {
+          status.textContent = 'Не вдалося надіслати лист. Перевірте адресу і спробуйте ще раз.';
+          status.hidden = false;
+        }
+      } finally {
+        if (submit) submit.disabled = false;
+      }
+    });
+
+    // Time on the site accumulates across pages: the first visit stamps the
+    // clock, every later page schedules the remainder.
+    const firstSeen = Number(storage.get(FIRST_SEEN_KEY)) || 0;
+    const now = Date.now();
+    if (!firstSeen) storage.set(FIRST_SEEN_KEY, String(now));
+    const delay = Math.max(0, SHOW_AFTER_MS - (now - (firstSeen || now)));
+
+    window.setTimeout(async () => {
+      if (storage.get(DONE_KEY) === '1') return;
+      try {
+        const response = await fetch('/api/checkout/limits');
+        const { promo } = (await response.json()) as { promo: { percent: number } | null };
+        if (promo) open(promo.percent);
+      } catch {
+        /* offline or the API is down — no popup is the right outcome */
+      }
+    }, delay);
+  }
+</script>

@@ -72,6 +72,8 @@ const adminRedirect = defineMiddleware(async ({ url }, next) => {
  */
 const RULES: readonly { pathname: string; limit: number; windowSeconds: number }[] = [
   { pathname: '/api/checkout', limit: 5, windowSeconds: 300 },
+  // Sends an e-mail per call — a budget that stops address spraying, not people.
+  { pathname: '/api/promo/subscribe', limit: 5, windowSeconds: 600 },
   { pathname: '/api/cart', limit: 30, windowSeconds: 60 },
   { pathname: '/api/checkout/limits', limit: 30, windowSeconds: 60 },
   { pathname: '/api/checkout/np-settlements', limit: 60, windowSeconds: 60 },

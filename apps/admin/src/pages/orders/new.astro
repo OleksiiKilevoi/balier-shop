@@ -313,6 +313,8 @@ function createOrderFromPanel(txDb: TxDb, input: AdminNewOrder, origin: string) 
       webhookUrl: new URL('/api/webhooks/monobank', origin).toString(),
       paymentTtlMinutes,
       codLimitKopiykas,
+      // A manager-made order never carries a code; the flag is irrelevant.
+      promoEnabled: false,
     },
   );
 }

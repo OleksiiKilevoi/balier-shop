@@ -982,6 +982,12 @@ const carrierDriven =
               <dt class="text-fg-muted">Товари</dt>
               <dd class="text-fg tabular-nums whitespace-nowrap">{formatPrice(order.itemsTotal)}</dd>
             </div>
+            {order.discountTotal > 0 && (
+              <div class="flex justify-between gap-x-4">
+                <dt class="text-fg-muted">Промокод {order.promoCode}</dt>
+                <dd class="text-fg tabular-nums whitespace-nowrap">−{formatPrice(order.discountTotal)}</dd>
+              </div>
+            )}
             <div class="flex justify-between gap-x-4">
               <dt class="text-fg-muted shrink-0">Доставка</dt>
               <dd class="text-fg-subtle text-right">за тарифами перевізника</dd>

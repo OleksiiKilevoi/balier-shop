@@ -54,6 +54,9 @@ export function formatOrderEmail(notification: OrderNotification): OrderEmail {
     `Замовлення ${order.orderNumber}:`,
     ...itemLines.map((line) => `• ${line}`),
     '',
+    ...(order.discountTotal > 0
+      ? [`Знижка (${order.promoCode ?? 'промокод'}): −${formatPrice(order.discountTotal)}`]
+      : []),
     `Разом: ${formatPrice(order.total)}`,
     `Оплата: ${PAYMENT_METHOD_LABELS[order.paymentMethod]}`,
     `Доставка: ${DELIVERY_METHOD_LABELS[order.deliveryMethod]} — ${deliveryDestination(order)}`,
@@ -67,6 +70,9 @@ export function formatOrderEmail(notification: OrderNotification): OrderEmail {
     `<p>Дякуємо за замовлення, ${escapeHtml(order.customerName)}!</p>`,
     `<p>Замовлення <strong>${escapeHtml(order.orderNumber)}</strong>:</p>`,
     `<ul>${itemLines.map((line) => `<li>${escapeHtml(line)}</li>`).join('')}</ul>`,
+    order.discountTotal > 0
+      ? `<p>Знижка (${escapeHtml(order.promoCode ?? 'промокод')}): −${escapeHtml(formatPrice(order.discountTotal))}</p>`
+      : '',
     `<p>Разом: <strong>${escapeHtml(formatPrice(order.total))}</strong><br>`,
     `Оплата: ${escapeHtml(PAYMENT_METHOD_LABELS[order.paymentMethod])}<br>`,
     `Доставка: ${escapeHtml(DELIVERY_METHOD_LABELS[order.deliveryMethod])} — ${escapeHtml(deliveryDestination(order))}</p>`,
@@ -109,4 +115,59 @@ export function createEmailNotifier(email: SendEmail, fromAddress: string): Noti
     // refund conversation happens by phone — the number every order has.
     paymentAfterCancellation: () => Promise.resolve(),
   };
+}
+
+/* ------------------------------------------------------------ promo code */
+
+export interface PromoCodeEmailInput {
+  to: string;
+  code: string;
+  percent: number;
+  /** Absolute origin, for the catalog link. */
+  siteUrl: string;
+}
+
+export function formatPromoCodeEmail(input: PromoCodeEmailInput): OrderEmail {
+  const catalogUrl = new URL('/products', input.siteUrl).href;
+  const subject = `Ваш промокод BÁLIER: −${input.percent} % на перше замовлення`;
+  const text = [
+    `Дякуємо за інтерес до BÁLIER.`,
+    '',
+    `Ваш промокод: ${input.code}`,
+    `Знижка ${input.percent} % на суму товарів. Введіть код у полі «Промокод» під час оформлення замовлення.`,
+    `Код діє один раз, на одне замовлення.`,
+    '',
+    `Обрати виріб: ${catalogUrl}`,
+    '',
+    'BÁLIER — шкіряні вироби ручної роботи, Дніпро.',
+  ].join('\n');
+  const html = [
+    `<p>Дякуємо за інтерес до BÁLIER.</p>`,
+    `<p>Ваш промокод: <strong style="font-size:1.25em;letter-spacing:0.08em">${escapeHtml(input.code)}</strong></p>`,
+    `<p>Знижка ${input.percent} % на суму товарів. Введіть код у полі «Промокод» під час оформлення замовлення.<br>`,
+    `Код діє один раз, на одне замовлення.</p>`,
+    `<p><a href="${escapeHtml(catalogUrl)}">Обрати виріб</a></p>`,
+    `<p>BÁLIER — шкіряні вироби ручної роботи, Дніпро.</p>`,
+  ].join('\n');
+  return { subject, text, html };
+}
+
+/**
+ * The one e-mail the storefront sends outside an order. Throws on failure —
+ * unlike the order confirmations, the caller has a customer waiting on the
+ * popup and must tell them to try again rather than pretend it went out.
+ */
+export async function sendPromoCodeEmail(
+  email: SendEmail,
+  fromAddress: string,
+  input: PromoCodeEmailInput,
+): Promise<void> {
+  const { subject, text, html } = formatPromoCodeEmail(input);
+  await email.send({
+    to: input.to,
+    from: { name: 'Balier', email: fromAddress },
+    subject,
+    text,
+    html,
+  });
 }

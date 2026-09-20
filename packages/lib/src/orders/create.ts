@@ -2,6 +2,7 @@ import * as Sentry from '@sentry/cloudflare';
 import { eq, sql } from 'drizzle-orm';
 import type { TxDb } from '../db';
 import { findCheckoutVariants } from '../db/queries/cart';
+import { bindPromoCode, findUsablePromoCode, promoCodeExists } from '../db/queries/promo';
 import type { Order, OrderItem } from '../db/schema';
 import { orderItems, orders, payments } from '../db/schema';
 import type { Kopiykas } from '../money';
@@ -10,6 +11,7 @@ import type { CartItemInput } from '../validation/cart';
 import type { DeliveryInput } from '../validation/checkout';
 import { type CheckoutLine, type CheckoutNotice, resolveCheckoutCart } from './checkoutCart';
 import { generateOrderNumber } from './orderNumber';
+import { discountFor } from './promo';
 
 /**
  * Places an order: reprice the cart against the database and (for card) create
@@ -35,6 +37,8 @@ export interface CreateOrderInput {
   paymentMethod: 'card' | 'cod';
   comment?: string;
   items: CartItemInput[];
+  /** Normalised by `promoCodeSchema`; absent = no discount asked for. */
+  promoCode?: string;
 }
 
 export interface CreateOrderDeps {
@@ -76,12 +80,21 @@ export interface CreateOrderDeps {
    */
   paymentTtlMinutes: number;
   codLimitKopiykas: Kopiykas;
+  /**
+   * Whether the e-mail promo is switched on in `/settings`. Off, and a code
+   * the customer still holds is refused as `promo_invalid` — the panel is the
+   * one place that decides, and the storefront's popup only ever shows codes
+   * that were issued while it was on.
+   */
+  promoEnabled: boolean;
 }
 
 export type CreateOrderResult =
   | { ok: true; orderNumber: string; redirectUrl: string }
   | { ok: false; reason: 'cart_changed'; notices: CheckoutNotice[] }
   | { ok: false; reason: 'cod_over_limit' }
+  | { ok: false; reason: 'promo_invalid' }
+  | { ok: false; reason: 'promo_used' }
   | { ok: false; reason: 'payment_failed' };
 
 const ORDER_NUMBER_ATTEMPTS = 5;
@@ -135,7 +148,32 @@ export async function createOrder(
           throw new Error('unreachable: tx.rollback() throws');
         }
 
-        if (input.paymentMethod === 'cod' && resolved.itemsTotal > deps.codLimitKopiykas) {
+        /*
+         * The promo, inside the same transaction as the order: the row is
+         * locked, so two checkouts holding the same code cannot both spend it,
+         * and the discount is computed from the repriced total — never from
+         * anything the client sent (hard rule 1). The percentage is the one
+         * frozen on the code when it was issued, not today's setting.
+         */
+        let promo: { id: string; code: string; discount: Kopiykas } | null = null;
+        if (input.promoCode) {
+          const usable = deps.promoEnabled ? await findUsablePromoCode(tx, input.promoCode) : null;
+          if (!usable) {
+            const exists = deps.promoEnabled && (await promoCodeExists(tx, input.promoCode));
+            failure = { ok: false, reason: exists ? 'promo_used' : 'promo_invalid' };
+            tx.rollback();
+            throw new Error('unreachable: tx.rollback() throws');
+          }
+          promo = {
+            id: usable.id,
+            code: usable.code,
+            discount: discountFor(resolved.itemsTotal, usable.percent),
+          };
+        }
+        const discountTotal = promo?.discount ?? 0;
+        const total = resolved.itemsTotal - discountTotal;
+
+        if (input.paymentMethod === 'cod' && total > deps.codLimitKopiykas) {
           failure = { ok: false, reason: 'cod_over_limit' };
           tx.rollback();
           throw new Error('unreachable: tx.rollback() throws');
@@ -164,13 +202,16 @@ export async function createOrder(
             ...deliveryFields,
             paymentMethod: input.paymentMethod,
             itemsTotal: resolved.itemsTotal,
+            promoCode: promo?.code ?? null,
+            discountTotal,
             deliveryTotal: 0,
-            total: resolved.itemsTotal,
+            total,
             comment: input.comment ?? null,
           })
           .returning();
 
         if (!order) throw new Error('order insert returned no row');
+        if (promo) await bindPromoCode(tx, promo.id, order.id);
 
         const items = await tx
           .insert(orderItems)
@@ -206,7 +247,7 @@ export async function createOrder(
         return {
           orderId: order.id,
           orderNumber,
-          total: resolved.itemsTotal,
+          total,
           lines: resolved.lines,
           order: finalOrder,
           items,
@@ -243,12 +284,17 @@ export async function createOrder(
     const invoice: Invoice = await deps.payment.createInvoice({
       orderNumber: created.orderNumber,
       amount: created.total,
-      items: created.lines.map((line) => ({
-        productTitle: line.productTitle,
-        unitPrice: line.unitPrice,
-        quantity: line.quantity,
-        sku: line.sku,
-      })),
+      // With a discount the line prices no longer add up to `amount`; the
+      // basket is informational, so it is left out rather than sent wrong.
+      items:
+        created.order.discountTotal > 0
+          ? []
+          : created.lines.map((line) => ({
+              productTitle: line.productTitle,
+              unitPrice: line.unitPrice,
+              quantity: line.quantity,
+              sku: line.sku,
+            })),
       redirectUrl: successUrl(deps.redirectBaseUrl, created.orderNumber),
       webhookUrl: deps.webhookUrl,
       validitySeconds: deps.paymentTtlMinutes * 60,

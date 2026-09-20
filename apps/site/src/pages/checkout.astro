@@ -132,6 +132,26 @@ const phoneInputClass = inputClass.replace('px-4', 'pl-16 pr-4');
                   class={inputClass}
                 />
               </div>
+
+              {/* Typed from the letter the popup sent. The summary previews the
+                  percentage, the server is the judge at submit. */}
+              <div>
+                <label for="promoCode" class="text-ink-soft mb-1.5 block text-sm">
+                  Промокод <span class="text-ink-muted">(необов’язково)</span>
+                </label>
+                <input
+                  id="promoCode"
+                  name="promoCode"
+                  type="text"
+                  autocomplete="off"
+                  autocapitalize="characters"
+                  spellcheck="false"
+                  placeholder="BALIER-XXXXX"
+                  class={`${inputClass} uppercase tracking-[0.08em]`}
+                  data-promo-input
+                />
+                <p class="text-ink mt-1.5 hidden text-xs" data-promo-error role="alert"></p>
+              </div>
             </fieldset>
 
             <fieldset class="space-y-4">
@@ -287,6 +307,11 @@ const phoneInputClass = inputClass.replace('px-4', 'pl-16 pr-4');
 
             <ul data-summary-lines class="border-line mt-4 divide-y divide-(--color-line) border-t text-sm"></ul>
 
+            <div class="border-line mt-4 flex items-baseline justify-between gap-4 border-t pt-4 text-sm" data-discount-row hidden>
+              <span class="text-ink-muted" data-discount-label>Знижка</span>
+              <span class="price" data-discount></span>
+            </div>
+
             <div class="border-line mt-4 flex items-baseline justify-between gap-4 border-t pt-4">
               <span class="text-ink font-medium">Разом</span>
               <span class="price text-xl sm:text-2xl" data-total></span>
@@ -307,7 +332,8 @@ const phoneInputClass = inputClass.replace('px-4', 'pl-16 pr-4');
 <script>
   import type { CartLine, CartSummary } from '@balier/lib/cart';
   import { fetchCartSummary } from '@balier/lib/cart/client';
-  import { checkoutNoticeText, codOverLimitText, settlementLabel } from '@balier/lib/i18n/checkout';
+  import { PROMO_ERROR_TEXT, checkoutNoticeText, codOverLimitText, settlementLabel } from '@balier/lib/i18n/checkout';
+  import { discountFor, normalizePromoCode } from '@balier/lib/orders/promo';
   import { formatPrice } from '@balier/lib/money';
   import { applyPhoneMask, isCompletePhoneDigits, phoneDigitsFromInput } from '@balier/lib/phone';
   import { cartItems, clearCart } from '@balier/lib/cart/store';
@@ -362,10 +388,17 @@ const phoneInputClass = inputClass.replace('px-4', 'pl-16 pr-4');
     const warehouseQuery = form.querySelector<HTMLInputElement>('[data-warehouse-query]');
     const warehouseResultsList = form.querySelector<HTMLUListElement>('[data-warehouse-results]');
     const codLabel = form.querySelector<HTMLElement>('[data-cod-label]');
+    const promoInput = form.querySelector<HTMLInputElement>('[data-promo-input]');
+    const promoError = form.querySelector<HTMLElement>('[data-promo-error]');
+    const discountRow = root.querySelector<HTMLElement>('[data-discount-row]');
+    const discountLabel = root.querySelector<HTMLElement>('[data-discount-label]');
+    const discountOutput = root.querySelector<HTMLElement>('[data-discount]');
     const codOverLimitNote = form.querySelector<HTMLElement>('[data-cod-over-limit]');
 
     let cart: CartSummary | null = null;
     let codLimitKopiykas = 0;
+    /** Percent the promo is running at, or null when it is off. */
+    let promoPercent: number | null = null;
     let selectedSettlement: SettlementResult | null = null;
     let selectedWarehouse: WarehouseResult | null = null;
     let settlementSearchDebounce: number | undefined;
@@ -465,8 +498,31 @@ const phoneInputClass = inputClass.replace('px-4', 'pl-16 pr-4');
         }),
       );
 
-      totalOutput.textContent = formatPrice(summary.total);
+      paintTotal(summary);
     };
+
+    /**
+     * A preview, not a verdict: any code-shaped entry shows the running
+     * percentage off so the customer sees what they will pay; whether the
+     * code is real and unspent is the server's call at submit.
+     */
+    const paintTotal = (summary: CartSummary) => {
+      if (!totalOutput) return;
+      const code = normalizePromoCode(promoInput?.value ?? '');
+      const discount =
+        promoPercent !== null && code !== '' ? discountFor(summary.total, promoPercent) : 0;
+      if (discountRow && discountOutput && discountLabel) {
+        discountRow.hidden = discount === 0;
+        discountLabel.textContent = `Знижка ${promoPercent ?? 0} %`;
+        discountOutput.textContent = `−${formatPrice(discount)}`;
+      }
+      totalOutput.textContent = formatPrice(summary.total - discount);
+    };
+
+    promoInput?.addEventListener('input', () => {
+      if (promoError) promoError.hidden = true;
+      if (cart) paintTotal(cart);
+    });
 
     const paintCodAvailability = () => {
       if (!cart || !codLabel || !codOverLimitNote) return;
@@ -659,9 +715,11 @@ const phoneInputClass = inputClass.replace('px-4', 'pl-16 pr-4');
           fetchCartSummary(),
           fetch('/api/checkout/limits'),
         ]);
-        const { codLimitKopiykas: limit } = (await limitsResponse.json()) as {
+        const { codLimitKopiykas: limit, promo } = (await limitsResponse.json()) as {
           codLimitKopiykas: number;
+          promo: { percent: number } | null;
         };
+        promoPercent = promo?.percent ?? null;
 
         if (summary.lines.length === 0) {
           showState('empty');
@@ -734,6 +792,7 @@ const phoneInputClass = inputClass.replace('px-4', 'pl-16 pr-4');
         delivery,
         paymentMethod: String(data.get('paymentMethod') ?? 'card'),
         comment: String(data.get('comment') ?? ''),
+        promoCode: String(data.get('promoCode') ?? ''),
         items: cartItems.get(),
         // Turnstile: turnstileToken,
       };
@@ -775,6 +834,15 @@ const phoneInputClass = inputClass.replace('px-4', 'pl-16 pr-4');
             submitError.textContent = codOverLimitText(codLimitKopiykas);
             submitError.hidden = false;
           }
+          return;
+        }
+
+        if (body.error === 'promo_invalid' || body.error === 'promo_used') {
+          if (promoError) {
+            promoError.textContent = PROMO_ERROR_TEXT[body.error];
+            promoError.hidden = false;
+          }
+          promoInput?.focus();
           return;
         }
 

@@ -197,6 +197,23 @@ export const codLimitSchema = wholeHryvniaSchema({
 
 export const adminSettingsSchema = z.object({ codLimit: codLimitSchema });
 
+/** The e-mail promo section of `/settings`: on/off and the percentage. */
+export const PROMO_PERCENT_MIN = 1;
+export const PROMO_PERCENT_MAX = 90;
+
+export const adminPromoSchema = z.object({
+  enabled: z
+    .string()
+    .optional()
+    .transform((value) => value === 'on'),
+  percent: z
+    .string()
+    .transform((raw) => raw.trim())
+    .refine((value) => /^\d+$/.test(value), 'invalid_promo_percent')
+    .transform(Number)
+    .refine((value) => value >= PROMO_PERCENT_MIN && value <= PROMO_PERCENT_MAX, 'invalid_promo_percent'),
+});
+
 export type AdminSettings = z.infer<typeof adminSettingsSchema>;
 
 /* --------------------------------------------------- nova poshta sender ----- */

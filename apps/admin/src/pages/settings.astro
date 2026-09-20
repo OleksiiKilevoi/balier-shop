@@ -11,6 +11,7 @@ import {
   verifyPassword,
 } from '@balier/lib/auth';
 import { createDb } from '@balier/lib/db';
+import { countPromoCodes } from '@balier/lib/db/queries/promo';
 import { setTelegramLinkCode, unlinkTelegram } from '@balier/lib/db/queries/adminTelegram';
 import {
   revokeAdminSessions,
@@ -30,9 +31,12 @@ import {
   getNpSenderSettings,
   setCodLimitKopiykas,
   updateNpSenderSettings,
+  getPromoSettings,
+  setPromoSettings,
 } from '@balier/lib/db/queries/settings';
 import {
   ADMIN_COD_LIMIT_HINT,
+  ADMIN_PROMO_HINT,
   ADMIN_NP_SENDER_HINT,
   ADMIN_PASSWORD_HINT,
   ADMIN_SETTINGS_FAILURES,
@@ -58,7 +62,10 @@ import {
   adminIssueKey,
   adminNpSettingsSchema,
   adminPasswordChangeSchema,
+  adminPromoSchema,
   adminSettingsSchema,
+  PROMO_PERCENT_MAX,
+  PROMO_PERCENT_MIN,
 } from '@balier/lib/validation/admin';
 
 /**
@@ -146,6 +153,20 @@ if (Astro.request.method === 'POST') {
     } else {
       await setCodLimitKopiykas(db, parsed.data.codLimit);
       return Astro.redirect(`${SELF_URL}?m=cod_limit_updated`, 303);
+    }
+  } else if (intent === 'promo') {
+    if (me.role !== 'admin') {
+      banner = 'bad_request';
+    } else {
+      const parsed = adminPromoSchema.safeParse(Object.fromEntries(form));
+      if (!parsed.success) {
+        banner = parsed.error.issues.some((issue) => issue.message === 'invalid_promo_percent')
+          ? 'invalid_promo_percent'
+          : 'bad_request';
+      } else {
+        await setPromoSettings(db, parsed.data);
+        return Astro.redirect(`${SELF_URL}?m=promo_updated`, 303);
+      }
     }
   } else if (intent === 'np_fetch') {
     /*
@@ -334,6 +355,7 @@ if (Astro.request.method === 'POST') {
 }
 
 const codLimit = await getCodLimitSetting(db);
+const [promo, promoCounts] = await Promise.all([getPromoSettings(db), countPromoCodes(db)]);
 
 /* The NP sender section renders for admins only, so its rows are not even read
    for a manager — the page must not leak what it will not show. */
@@ -533,6 +555,49 @@ const formFailed = (intent: string) => banner !== null && failedIntent === inten
               ? `Востаннє змінено ${formatAdminDateTime(codLimit.updatedAt)}.`
               : 'Значення ще не збережено — діє типове. Збережіть, щоб зафіксувати його.'
           }
+        </p>
+      </form>
+    </section>
+
+    <section class="admin-card mt-6 p-5">
+      <h2 class="text-fg text-base font-semibold">Промокод за e-mail</h2>
+      <p class="text-fg-muted mt-1 text-sm">{ADMIN_PROMO_HINT}</p>
+
+      <form method="post" action={SELF_URL} data-form="promo" class="mt-4">
+        <input type="hidden" name="intent" value="promo" />
+
+        <label class="min-h-touch flex items-center gap-2.5 text-sm md:min-h-10">
+          <input type="checkbox" name="enabled" checked={promo.enabled} class="size-4" />
+          Пропонувати знижку на сайті
+        </label>
+
+        <div class="mt-3 flex flex-wrap items-center gap-3">
+          <div class="relative w-full sm:w-40">
+            <label for="promo-percent" class="sr-only">Відсоток знижки</label>
+            <input
+              id="promo-percent"
+              name="percent"
+              type="text"
+              inputmode="numeric"
+              value={String(promo.percent)}
+              autocomplete="off"
+              aria-describedby="promo-range"
+              class:list={['admin-field pr-10', formFailed('promo') && 'border-danger']}
+            />
+            <span
+              class="text-fg-subtle pointer-events-none absolute inset-y-0 right-4.5 flex items-center text-base sm:text-sm"
+              aria-hidden="true"
+            >
+              %
+            </span>
+          </div>
+
+          <button type="submit" class="admin-btn admin-btn-primary">Зберегти</button>
+        </div>
+
+        <p id="promo-range" class="text-fg-subtle mt-2 text-xs">
+          Від {PROMO_PERCENT_MIN} до {PROMO_PERCENT_MAX} %. Видано кодів: {promoCounts.issued}, використано в
+          замовленнях: {promoCounts.used}.
         </p>
       </form>
     </section>

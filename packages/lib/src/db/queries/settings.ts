@@ -88,6 +88,36 @@ export async function getPaymentTtlMinutes(db: Db): Promise<number> {
   return typeof value === 'number' ? value : DEFAULT_PAYMENT_TTL_MINUTES;
 }
 
+/* ------------------------------------------------------------------ promo */
+
+export interface PromoSettings {
+  /** Off = the popup never shows and no code can be redeemed. */
+  enabled: boolean;
+  /** Whole percent off the items total, 1–90. */
+  percent: number;
+}
+
+const DEFAULT_PROMO_PERCENT = 10;
+
+/** The e-mail promo: off until the owner switches it on in `/settings`. */
+export async function getPromoSettings(db: Db): Promise<PromoSettings> {
+  const rows = await db
+    .select({ key: settings.key, value: settings.value })
+    .from(settings)
+    .where(inArray(settings.key, ['promo_enabled', 'promo_percent']));
+  const byKey = new Map(rows.map((row) => [row.key, row.value]));
+  const percent = byKey.get('promo_percent');
+  return {
+    enabled: byKey.get('promo_enabled') === true,
+    percent: typeof percent === 'number' ? percent : DEFAULT_PROMO_PERCENT,
+  };
+}
+
+export async function setPromoSettings(db: Db, values: PromoSettings): Promise<void> {
+  await writeSetting(db, 'promo_enabled', values.enabled);
+  await writeSetting(db, 'promo_percent', values.percent);
+}
+
 /* ------------------------------------------------------------- nova poshta */
 
 /**

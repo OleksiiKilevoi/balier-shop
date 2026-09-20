@@ -246,8 +246,14 @@ export const orders = pgTable(
 
     paymentMethod: paymentMethod('payment_method').notNull(),
 
-    /** All kopiykas. `total` is what the customer pays and what Monobank is charged. */
+    /**
+     * All kopiykas. `total = items_total − discount_total + delivery_total` is
+     * what the customer pays and what Monobank is charged.
+     */
     itemsTotal: integer('items_total').notNull(),
+    /** The promo code redeemed on this order, verbatim, or NULL. */
+    promoCode: text('promo_code'),
+    discountTotal: integer('discount_total').notNull().default(0),
     deliveryTotal: integer('delivery_total').notNull().default(0),
     total: integer('total').notNull(),
 
@@ -640,6 +646,28 @@ export const ordersRelations = relations(orders, ({ many }) => ({
   items: many(orderItems),
   payments: many(payments),
 }));
+
+/**
+ * One row per person who asked the storefront's popup for a discount: the
+ * e-mail the code went to, the code itself, and the order that redeemed it.
+ * A code is spent by a live order; a cancelled order hands it back
+ * (`~/lib/db/queries/promo.ts`). E-mails are unique on purpose — asking twice
+ * returns the same code, so «one per person» is one per address.
+ */
+export const promoCodes = pgTable(
+  'promo_codes',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    /** Lower-cased. */
+    email: text('email').notNull().unique(),
+    code: text('code').notNull().unique(),
+    /** The percentage promised in the e-mail — frozen, so a later settings change keeps old promises. */
+    percent: integer('percent').notNull(),
+    orderId: uuid('order_id').references(() => orders.id, { onDelete: 'set null' }),
+    createdAt,
+  },
+);
+export type PromoCode = typeof promoCodes.$inferSelect;
 
 export const orderItemsRelations = relations(orderItems, ({ one }) => ({
   order: one(orders, { fields: [orderItems.orderId], references: [orders.id] }),

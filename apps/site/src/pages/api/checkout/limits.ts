@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:workers';
 import type { APIRoute } from 'astro';
 import { createDb } from '@balier/lib/db';
-import { getCodLimitKopiykas } from '@balier/lib/db/queries/settings';
+import { getCodLimitKopiykas, getPromoSettings } from '@balier/lib/db/queries/settings';
 
 export const prerender = false;
 
@@ -14,9 +14,15 @@ export const prerender = false;
  */
 export const GET: APIRoute = async () => {
   const db = createDb(env.DATABASE_URL);
-  const codLimitKopiykas = await getCodLimitKopiykas(db);
+  const [codLimitKopiykas, promoSettings] = await Promise.all([
+    getCodLimitKopiykas(db),
+    getPromoSettings(db),
+  ]);
+  // `promo` doubles as the popup's switch (`PromoPopup.astro`) and the
+  // checkout summary's preview percentage; the server still decides at submit.
+  const promo = promoSettings.enabled ? { percent: promoSettings.percent } : null;
 
-  return new Response(JSON.stringify({ codLimitKopiykas }), {
+  return new Response(JSON.stringify({ codLimitKopiykas, promo }), {
     status: 200,
     headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
   });
