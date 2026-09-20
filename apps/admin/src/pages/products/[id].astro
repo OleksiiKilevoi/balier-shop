@@ -99,6 +99,7 @@ function refuse(reason: CatalogFailure, intent: string) {
   failedIntent = intent;
   if (reason === 'slug_taken') invalid.add('slug');
   if (reason === 'sku_taken') invalid.add('sku');
+  if (reason === 'colour_name_required') invalid.add('colorName');
 }
 
 if (Astro.request.method === 'POST') {
@@ -272,6 +273,7 @@ const FAILURES = new Set<AdminProductMessage>([
   'slug_taken',
   'sku_taken',
   'last_active_variant',
+  'colour_name_required',
   'not_found',
   'conflict',
   'bad_request',

@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, ne, sql } from 'drizzle-orm';
 import type { SQL } from 'drizzle-orm';
 import type { Db, Tx, TxDb } from '../index';
 import type { Category, Product, ProductImage, ParcelSize, ProductStatus, ProductVariant } from '../schema';
@@ -45,6 +45,7 @@ export type CatalogFailure =
   | 'sku_taken'
   | 'not_found'
   | 'last_active_variant'
+  | 'colour_name_required'
   | 'conflict';
 
 export type CatalogResult = { ok: true } | { ok: false; reason: CatalogFailure };
@@ -463,11 +464,41 @@ export interface VariantFields {
   position: number;
 }
 
+/**
+ * A nameless variant is fine while it is the only one — the storefront hides
+ * the picker. Next to a sibling it becomes a swatch with no label, and an
+ * order placed on it carries no colour anywhere (2026-09-20, the belt). So a
+ * second active variant must be named, and naming is refused only where the
+ * problem actually arises, never on the one-variant product.
+ */
+async function siblingsNeedName(
+  db: TxDb,
+  productId: string,
+  fields: VariantFields,
+  exceptVariantId?: string,
+): Promise<boolean> {
+  if (fields.colorName !== null) return false;
+  const [row] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(productVariants)
+    .where(
+      and(
+        eq(productVariants.productId, productId),
+        eq(productVariants.isActive, true),
+        ...(exceptVariantId ? [ne(productVariants.id, exceptVariantId)] : []),
+      ),
+    );
+  return (row?.count ?? 0) > 0;
+}
+
 export async function addVariant(
   db: TxDb,
   productId: string,
   fields: VariantFields,
 ): Promise<CatalogResult> {
+  if (await siblingsNeedName(db, productId, fields)) {
+    return { ok: false, reason: 'colour_name_required' };
+  }
   return guarded(async () => {
     await db.insert(productVariants).values({ productId, ...fields });
   });
@@ -479,6 +510,9 @@ export async function updateVariant(
   variantId: string,
   fields: VariantFields,
 ): Promise<CatalogResult> {
+  if (await siblingsNeedName(db, productId, fields, variantId)) {
+    return { ok: false, reason: 'colour_name_required' };
+  }
   return guarded(async () => {
     await db
       .update(productVariants)
