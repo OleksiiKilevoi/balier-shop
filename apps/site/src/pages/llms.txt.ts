@@ -75,6 +75,7 @@ export const GET: APIRoute = async ({ site, url }) => {
 - Телефон: +38 (098) 602-66-26 (будь-який месенджер)
 - E-mail: baliershopua@gmail.com
 - Instagram: https://www.instagram.com/balier.ua/
+- Facebook: https://www.facebook.com/balier.ua/
 - Адреса: Майдан Озерний, 19, Дніпро, 49245 — https://maps.app.goo.gl/yqgARu2AWK3mDR7z5
 - Продавець: ФОП Баланюк Владислав Вікторович
 
