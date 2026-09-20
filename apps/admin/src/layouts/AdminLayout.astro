@@ -67,6 +67,7 @@ const PANEL_NAME = 'Balier';
  */
 const NAV = [
   { href: '/orders', label: 'Замовлення' },
+  { href: '/customers', label: 'Клієнти' },
   { href: '/products', label: 'Товари' },
   ...(Astro.locals.adminUser?.role === 'admin'
     ? [{ href: '/users', label: 'Користувачі' }]

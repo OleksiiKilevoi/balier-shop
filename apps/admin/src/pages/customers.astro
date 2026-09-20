@@ -1,0 +1,205 @@
+---
+import { env } from 'cloudflare:workers';
+import AdminLayout from '~/layouts/AdminLayout.astro';
+import { createDb } from '@balier/lib/db';
+import { listCustomers, listPromoSubscribers } from '@balier/lib/db/queries/customers';
+import { formatAdminDateTime } from '@balier/lib/i18n/admin';
+import { pluralUk } from '@balier/lib/i18n/plural';
+import { formatPrice } from '@balier/lib/money';
+
+/**
+ * «Клієнти»: every phone number that has placed an order, folded into one row
+ * with what it bought, plus the addresses the storefront popup collected.
+ * Read-only by design — there is nothing to edit about a customer that is not
+ * already an order's field (`/orders/[orderNumber]/edit`) — so the page is a
+ * GET form and two lists, no script, same as the order list.
+ */
+export const prerender = false;
+
+const PAGE_SIZE = 25;
+const MAX_QUERY = 100;
+const SUBSCRIBERS_SHOWN = 50;
+
+const params = Astro.url.searchParams;
+const query = (params.get('q') ?? '').trim().slice(0, MAX_QUERY);
+const page = Math.max(1, Number.parseInt(params.get('page') ?? '1', 10) || 1);
+
+const db = createDb(env.DATABASE_URL);
+const [{ rows, total }, subscribers] = await Promise.all([
+  listCustomers(db, { query: query || undefined, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE }),
+  listPromoSubscribers(db, { limit: SUBSCRIBERS_SHOWN }),
+]);
+
+const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+function pageHref(next: number): string {
+  const url = new URL(Astro.url);
+  url.searchParams.set('page', String(next));
+  return `${url.pathname}${url.search}`;
+}
+
+const countLabel = `${total} ${pluralUk(total, { one: 'клієнт', few: 'клієнти', many: 'клієнтів' })}`;
+
+/** The order list already searches by phone — one click shows this person's orders. */
+const ordersHref = (phone: string) => `/orders?q=${encodeURIComponent(phone)}`;
+---
+
+<AdminLayout title="Клієнти">
+  <header class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+    <h1 class="text-fg text-2xl font-semibold sm:text-3xl">Клієнти</h1>
+    <p class="text-fg-muted text-sm">{countLabel}</p>
+  </header>
+
+  <form method="get" action="/customers" class="mt-5 flex max-w-3xl flex-col gap-2 sm:flex-row">
+    <label for="customers-q" class="sr-only">Ім’я, телефон або e-mail</label>
+    <input
+      id="customers-q"
+      name="q"
+      type="search"
+      value={query}
+      placeholder="Ім’я, телефон або e-mail"
+      maxlength={MAX_QUERY}
+      autocomplete="off"
+      class="admin-field sm:flex-1"
+    />
+    <button type="submit" class="admin-btn admin-btn-primary shrink-0">Знайти</button>
+  </form>
+
+  {
+    rows.length === 0 ? (
+      <p class="text-fg-muted mt-8">
+        {query ? 'За цим запитом клієнтів немає.' : 'Клієнтів поки немає — вони з’являються з першим замовленням.'}
+      </p>
+    ) : (
+      <>
+        {/* Phone: one card per customer. */}
+        <ul class="mt-6 space-y-3 md:hidden">
+          {rows.map((row) => (
+            <li class="admin-card hover:border-border-strong transition-colors">
+              <a href={ordersHref(row.phone)} class="block p-4">
+                <p class="text-fg font-medium">{row.name}</p>
+                <p class="text-fg-muted mt-1 text-sm">
+                  {row.phone}
+                  {row.email && <span> · {row.email}</span>}
+                </p>
+                <p class="text-fg-subtle mt-1 text-sm">
+                  {row.orderCount}{' '}
+                  {pluralUk(row.orderCount, { one: 'замовлення', few: 'замовлення', many: 'замовлень' })} ·
+                  останнє {formatAdminDateTime(row.lastOrderAt)}
+                </p>
+                <p class="text-fg mt-2 font-medium tabular-nums">{formatPrice(row.revenue)}</p>
+              </a>
+            </li>
+          ))}
+        </ul>
+
+        <div class="admin-card mt-6 hidden overflow-x-auto md:block">
+          <table class="w-full border-collapse text-sm">
+            <thead class="text-fg-subtle border-border border-b text-left text-xs">
+              <tr>
+                <th scope="col" class="px-4 py-3 font-medium">Клієнт</th>
+                <th scope="col" class="px-4 py-3 font-medium">Телефон</th>
+                <th scope="col" class="px-4 py-3 font-medium">E-mail</th>
+                <th scope="col" class="px-4 py-3 text-right font-medium">Замовлень</th>
+                <th scope="col" class="px-4 py-3 text-right font-medium">Сума</th>
+                <th scope="col" class="px-4 py-3 font-medium">Останнє</th>
+                <th scope="col" class="px-4 py-3 font-medium">Промокод</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr class="border-border hover:bg-surface-hover border-b transition-colors last:border-b-0">
+                  <td class="text-fg px-4 py-3">
+                    <a href={ordersHref(row.phone)} class="hover:underline">
+                      {row.name}
+                    </a>
+                  </td>
+                  <td class="text-fg-muted px-4 py-3 whitespace-nowrap">{row.phone}</td>
+                  <td class="text-fg-muted px-4 py-3">{row.email ?? '—'}</td>
+                  <td class="text-fg px-4 py-3 text-right tabular-nums">{row.orderCount}</td>
+                  <td class="text-fg px-4 py-3 text-right font-medium tabular-nums whitespace-nowrap">
+                    {formatPrice(row.revenue)}
+                  </td>
+                  <td class="text-fg-muted px-4 py-3 whitespace-nowrap">
+                    <a href={`/orders/${row.lastOrderNumber}`} class="font-mono hover:underline">
+                      {row.lastOrderNumber}
+                    </a>
+                    <span class="text-fg-subtle"> · {formatAdminDateTime(row.lastOrderAt)}</span>
+                  </td>
+                  <td class="text-fg-muted px-4 py-3 font-mono whitespace-nowrap">{row.promoCode ?? '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </>
+    )
+  }
+
+  {
+    pageCount > 1 && (
+      <nav class="mt-6 flex items-center justify-between gap-3" aria-label="Сторінки">
+        <a
+          href={pageHref(page - 1)}
+          aria-disabled={page === 1}
+          class:list={['admin-btn admin-btn-secondary', page === 1 && 'pointer-events-none opacity-40']}
+        >
+          Назад
+        </a>
+        <span class="text-fg-muted text-sm tabular-nums">
+          {page} / {pageCount}
+        </span>
+        <a
+          href={pageHref(page + 1)}
+          aria-disabled={page === pageCount}
+          class:list={['admin-btn admin-btn-secondary', page === pageCount && 'pointer-events-none opacity-40']}
+        >
+          Далі
+        </a>
+      </nav>
+    )
+  }
+
+  {/* The popup's harvest: who asked for a code, and whether it bought anything. */}
+  <section class="mt-10">
+    <h2 class="text-fg text-lg font-semibold">Промокоди за e-mail</h2>
+    <p class="text-fg-muted mt-1 text-sm">
+      Адреси, залишені у вікні знижки на сайті — останні {SUBSCRIBERS_SHOWN}. «Використано» означає
+      живе замовлення з цим кодом.
+    </p>
+    {
+      subscribers.length === 0 ? (
+        <p class="text-fg-muted mt-4 text-sm">Поки ніхто не залишив адресу.</p>
+      ) : (
+        <div class="admin-card mt-4 overflow-x-auto">
+          <table class="w-full border-collapse text-sm">
+            <thead class="text-fg-subtle border-border border-b text-left text-xs">
+              <tr>
+                <th scope="col" class="px-4 py-3 font-medium">E-mail</th>
+                <th scope="col" class="px-4 py-3 font-medium">Код</th>
+                <th scope="col" class="px-4 py-3 text-right font-medium">Знижка</th>
+                <th scope="col" class="px-4 py-3 font-medium">Коли</th>
+                <th scope="col" class="px-4 py-3 font-medium">Статус</th>
+              </tr>
+            </thead>
+            <tbody>
+              {subscribers.map((row) => (
+                <tr class="border-border border-b last:border-b-0">
+                  <td class="text-fg px-4 py-3">{row.email}</td>
+                  <td class="text-fg-muted px-4 py-3 font-mono whitespace-nowrap">{row.code}</td>
+                  <td class="text-fg-muted px-4 py-3 text-right tabular-nums">{row.percent} %</td>
+                  <td class="text-fg-muted px-4 py-3 whitespace-nowrap">{formatAdminDateTime(row.createdAt)}</td>
+                  <td class="px-4 py-3">
+                    <span class:list={['admin-badge', row.used ? 'admin-tone-positive' : 'text-fg-muted']}>
+                      {row.used ? 'Використано' : 'Не використано'}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )
+    }
+  </section>
+</AdminLayout>
