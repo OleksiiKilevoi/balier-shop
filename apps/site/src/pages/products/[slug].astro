@@ -161,48 +161,12 @@ const structuredData = [
           </span>
         </p>
 
-        {product.description && <p class="text-ink-muted mt-5">{product.description}</p>}
-
-        {
-          detailLines.length > 0 && (
-            <ul class="text-ink-muted mt-4 space-y-1.5 text-sm">
-              {detailLines.map((line) => (
-                <li class="flex gap-2">
-                  <span class="text-brand" aria-hidden="true">
-                    •
-                  </span>
-                  <span>{line}</span>
-                </li>
-              ))}
-            </ul>
-          )
-        }
-
-        {/* Both are a conversation, not a checkout option (roadmap Phase 6):
-            two lines pointing at the pages that explain them. */}
-        <p class="text-ink-muted mt-4 text-sm">
-          Інші кольори — під замовлення, дивіться{' '}
-          <a href="/palette" class="text-brand hover:text-brand-hover underline-offset-2 transition-colors hover:underline">
-            палітру шкіри
-          </a>
-          . Тиснення або гравірування ініціалів, дати чи зображення —{' '}
-          <a href="/personalization" class="text-brand hover:text-brand-hover underline-offset-2 transition-colors hover:underline">
-            персоналізація
-          </a>
-          .
-        </p>
-
-        {
-          product.dimensions && (
-            <div class="border-line mt-6 border-t pt-5">
-              <h2 class="text-sm">Розміри</h2>
-              <p class="text-ink-muted mt-1 text-sm">{product.dimensions}</p>
-            </div>
-          )
-        }
-
-        {/* Always rendered so the script has one place to read the current
-            variant from; `hidden` when there is nothing to choose between. */}
+        {/* The purchase block sits under the price, before the copy: on a phone
+            the colour picker, the quantity and the buttons must be one screen
+            with the price, not a scroll away below the details (owner,
+            2026-09-20). Always rendered so the script has one place to read
+            the current variant from; `hidden` when there is nothing to choose
+            between. */}
         <div
           role="group"
           aria-label="Колір"
@@ -295,6 +259,49 @@ const structuredData = [
             )
           }
         </div>
+
+        {product.description && (
+          <p class="text-ink-muted border-line mt-8 border-t pt-6">{product.description}</p>
+        )}
+
+        {
+          detailLines.length > 0 && (
+            <ul class="text-ink-muted mt-4 space-y-1.5 text-sm">
+              {detailLines.map((line) => (
+                <li class="flex gap-2">
+                  <span class="text-brand" aria-hidden="true">
+                    •
+                  </span>
+                  <span>{line}</span>
+                </li>
+              ))}
+            </ul>
+          )
+        }
+
+        {/* Both are a conversation, not a checkout option (roadmap Phase 6):
+            two lines pointing at the pages that explain them. */}
+        <p class="text-ink-muted mt-4 text-sm">
+          Інші кольори — під замовлення, дивіться{' '}
+          <a href="/palette" class="text-brand hover:text-brand-hover underline-offset-2 transition-colors hover:underline">
+            палітру шкіри
+          </a>
+          . Тиснення або гравірування ініціалів, дати чи зображення —{' '}
+          <a href="/personalization" class="text-brand hover:text-brand-hover underline-offset-2 transition-colors hover:underline">
+            персоналізація
+          </a>
+          .
+        </p>
+
+        {
+          product.dimensions && (
+            <div class="border-line mt-6 border-t pt-5">
+              <h2 class="text-sm">Розміри</h2>
+              <p class="text-ink-muted mt-1 text-sm">{product.dimensions}</p>
+            </div>
+          )
+        }
+
       </div>
     </div>
   </Container>
