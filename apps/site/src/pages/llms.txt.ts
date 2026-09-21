@@ -72,7 +72,7 @@ export const GET: APIRoute = async ({ site, url }) => {
 
 ## Контакти
 
-- Телефон: +38 (098) 602-66-26 (будь-який месенджер)
+- Телефон: +38 (098) 602-66-26 (Viber, Telegram @balierua, будь-який месенджер)
 - E-mail: baliershopua@gmail.com
 - Instagram: https://www.instagram.com/balier.ua/
 - Facebook: https://www.facebook.com/balier.ua/
