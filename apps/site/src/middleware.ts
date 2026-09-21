@@ -1,6 +1,7 @@
 import { defineMiddleware, sequence } from 'astro:middleware';
 import { env } from 'cloudflare:workers';
 import * as Sentry from '@sentry/cloudflare';
+import { legacyRedirect } from '@balier/lib/legacyRedirects';
 import { checkRateLimit } from '@balier/lib/rateLimit';
 
 /* ------------------------------------------------------------------ sentry */
@@ -50,6 +51,38 @@ const adminRedirect = defineMiddleware(async ({ url }, next) => {
     status: 301,
     headers: { location: `${ADMIN_HOST}${rest}${url.search}`, 'cache-control': 'no-store' },
   });
+});
+
+/* ------------------------------------------------------------- old site URLs */
+
+/**
+ * The previous site on this domain (2019–2025) left Google a few hundred URLs
+ * that all 404 here — `~/lib/legacyRedirects` says where each one now goes.
+ * 301, GET/HEAD only; a path it does not know falls through to the honest 404.
+ */
+const legacy = defineMiddleware(({ request, url }, next) => {
+  if (request.method !== 'GET' && request.method !== 'HEAD') return next();
+  const target = legacyRedirect(url.pathname);
+  if (!target) return next();
+  return new Response(null, {
+    status: 301,
+    headers: { location: target, 'cache-control': 'public, max-age=86400' },
+  });
+});
+
+/* ------------------------------------------------------------- api noindex */
+
+/**
+ * The API answers crawlers too, and a blocked-in-robots URL can still be
+ * indexed «blind» from a link (the 2026-09-21 coverage report had four).
+ * So `/api/*` is crawlable and says `noindex` itself — the same «allow the
+ * crawl, refuse the index» the pages use, only as a header, since JSON has
+ * no `<head>`.
+ */
+const apiNoindex = defineMiddleware(async ({ url }, next) => {
+  const response = await next();
+  if (url.pathname.startsWith('/api/')) response.headers.set('x-robots-tag', 'noindex');
+  return response;
 });
 
 /* ------------------------------------------------------------- rate limiting */
@@ -107,4 +140,4 @@ const rateLimit = defineMiddleware(async ({ request }, next) => {
   return next();
 });
 
-export const onRequest = sequence(sentry, adminRedirect, rateLimit);
+export const onRequest = sequence(sentry, legacy, adminRedirect, apiNoindex, rateLimit);

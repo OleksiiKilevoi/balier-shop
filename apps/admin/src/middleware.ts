@@ -113,7 +113,18 @@ const gate = defineMiddleware(async ({ url, cookies, locals }, next) => {
   return next();
 });
 
-export const onRequest = sequence(sentry, gate);
+/**
+ * The panel is a subdomain of the shop's Search Console property; the layout
+ * already carries a robots meta tag, this header covers what has no
+ * `<head>` — PDFs, redirects, the login page's 303s.
+ */
+const noindex = defineMiddleware(async (_context, next) => {
+  const response = await next();
+  response.headers.set('x-robots-tag', 'noindex, nofollow');
+  return response;
+});
+
+export const onRequest = sequence(sentry, noindex, gate);
 
 /**
  * Land on the form, with the address the operator was trying to reach carried
