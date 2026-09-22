@@ -1,6 +1,7 @@
 import * as Sentry from '@sentry/cloudflare';
 import { and, eq, sql, type SQL } from 'drizzle-orm';
 import { createDb, createTxDb } from '@balier/lib/db';
+import { pruneAuthAttempts } from '@balier/lib/db/queries/authAttempts';
 import { listWaybillOrdersToTrack } from '@balier/lib/db/queries/orders';
 import { getPaymentTtlMinutes } from '@balier/lib/db/queries/settings';
 import { orders, payments } from '@balier/lib/db/schema';
@@ -47,9 +48,14 @@ const handler = {
         break;
       }
 
-      // 04:00 UTC daily — refresh the Nova Poshta settlement/warehouse cache.
+      // 04:00 UTC daily — refresh the Nova Poshta settlement/warehouse cache,
+      // and drop login-attempt rows whose window ran out a day ago.
       case '0 4 * * *':
         await syncNovaPoshta(env);
+        await pruneAuthAttempts(createDb(env.DATABASE_URL)).catch((err) => {
+          // Housekeeping: a failure here must not lose the sync above.
+          console.error('Pruning auth attempts failed', err);
+        });
         break;
 
       default:

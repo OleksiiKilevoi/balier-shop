@@ -12,13 +12,13 @@ import {
   verifySession,
 } from '@balier/lib/auth';
 import { createDb } from '@balier/lib/db';
+import { peekAuthAttempts, spendAuthAttempt } from '@balier/lib/db/queries/authAttempts';
 import {
   findActiveAdminByEmail,
   recordAdminLogin,
   updateAdminPasswordHash,
 } from '@balier/lib/db/queries/adminUsers';
 import { ADMIN_AUTH_MESSAGES, type AdminAuthMessage } from '@balier/lib/i18n/admin';
-import { peekRateLimit, recordRateLimitHit } from '@balier/lib/rateLimit';
 import { adminLoginSchema, PASSWORD_MAX_LENGTH } from '@balier/lib/validation/admin';
 import { safeNext } from '~/lib/safeNext';
 
@@ -79,12 +79,21 @@ let retryAfterMinutes = 0;
 if (Astro.request.method === 'POST') {
   message = null;
 
+  /*
+   * Counted in Postgres, not KV (audit, 2026-09-22): this budget is the only
+   * thing between a guesser and unlimited attempts, so it has to be atomic and
+   * the same number in every colo. `~/lib/db/queries/authAttempts` is the KV
+   * limiter's two halves with an `INSERT … ON CONFLICT … RETURNING` in the
+   * middle; every other budget in the app stays on KV, where approximate is
+   * the right trade.
+   */
+  const db = createDb(env.DATABASE_URL);
   const budgetKey = `admin-login:${Astro.request.headers.get('cf-connecting-ip') ?? 'unknown'}`;
-  const limit = await peekRateLimit(env.RATE_LIMIT, budgetKey, LOGIN_LIMIT, LOGIN_WINDOW_SECONDS);
+  const limit = await peekAuthAttempts(db, budgetKey, LOGIN_LIMIT, LOGIN_WINDOW_SECONDS);
 
   /** A wrong answer, and the only thing that costs budget. */
   const reject = async (reason: AdminAuthMessage) => {
-    await recordRateLimitHit(env.RATE_LIMIT, budgetKey, LOGIN_WINDOW_SECONDS);
+    await spendAuthAttempt(db, budgetKey, LOGIN_LIMIT, LOGIN_WINDOW_SECONDS);
     message = reason;
   };
 
@@ -103,7 +112,6 @@ if (Astro.request.method === 'POST') {
     } else {
       email = parsed.data.email;
 
-      const db = createDb(env.DATABASE_URL);
       const user = await findActiveAdminByEmail(db, parsed.data.email);
 
       if (!user) {

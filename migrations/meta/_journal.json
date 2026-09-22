@@ -148,6 +148,13 @@
       "when": 1789887837671,
       "tag": "0020_parallel_thena",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1790076532112,
+      "tag": "0021_left_supernaut",
+      "breakpoints": true
     }
   ]
 }

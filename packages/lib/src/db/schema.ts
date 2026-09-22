@@ -542,6 +542,28 @@ export const settings = pgTable('settings', {
  * from that tab can a row be dropped for good, which is the one thing that
  * frees the address for re-use.
  */
+/**
+ * Fixed-window attempt counters that have to be *true*, not approximate.
+ *
+ * The KV limiter (`~/lib/rateLimit`) is a read-modify-write with no increment
+ * primitive, so parallel requests share one unit and a cross-colo guesser sees
+ * a stale count for up to a minute. That is fine where a budget only deters
+ * abuse, and not fine on the admin password form, where the budget *is* the
+ * gate (audit, 2026-09-22). Postgres has an atomic upsert, and the login form
+ * already talks to this database on the same request.
+ *
+ * `key` is the whole identity of a budget, e.g. `admin-login:<ip>`; a window
+ * that has run out is reset by the upsert itself rather than by a sweeper, and
+ * `workers/cron` drops long-dead rows nightly so a spraying attacker cannot
+ * grow the table forever.
+ */
+export const authAttempts = pgTable('auth_attempts', {
+  key: text('key').primaryKey(),
+  count: integer('count').notNull(),
+  windowStart: timestamp('window_start', { withTimezone: true }).notNull().defaultNow(),
+});
+export type AuthAttempt = typeof authAttempts.$inferSelect;
+
 export const adminUsers = pgTable('admin_users', {
   id: uuid('id').primaryKey().defaultRandom(),
   email: text('email').notNull().unique(),
