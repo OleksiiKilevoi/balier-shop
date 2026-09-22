@@ -9,3 +9,17 @@ allowBuilds:
   '@sentry/cli': false
   esbuild: true
   workerd: true
+
+# Transitive build-time dependencies pinned to their patched releases after the
+# 2026-09-22 security audit: undici/sharp come in through wrangler's miniflare,
+# nanoid/svgo/js-yaml/devalue through Astro's build pipeline. None of them ship
+# into the Worker, but they are in the production tree and `pnpm audit` is right
+# to flag them. All six are patch or minor bumps inside the major their parent
+# already asks for.
+overrides:
+  undici: '>=7.29.0'
+  nanoid: '>=3.3.18'
+  sharp: '>=0.35.4'
+  js-yaml: '>=4.3.2'
+  svgo: '>=4.1.0'
+  devalue: '>=5.9.1'
