@@ -4,72 +4,55 @@
 
 ## 📍 CURRENT STATE (overwrite this block; keep tight)
 
-- **Last done (2026-09-16, late):** **Design pass on the storefront, three commits + this one, none
-  deployed yet** (`pnpm deploy:site` is the owner's): static pages centred (`f9f0b10`); shadcn/ui
-  neutral theme by swapping the token values, shadcn-style Button, hero CTA as outline (`1240e5d`);
-  type = **Cormorant Garamond** for display + wordmark «BÁLIER» (the Instagram identity is a
-  Garamond serif) and **Source Sans 3** for copy (Assistant, the owner's first pick from
-  optimusgang.com, has no Cyrillic). All verified in Chrome against `pnpm dev`. **Brand read from
-  Instagram → `docs/plans/brand.md`**: real model names (AVELINE, Lunet, FORMA, DUAL, Hidden,
-  BASIC, Baguette, Slimbag), sizes and prices from 20 captions — the catalog's prices are off
-  (travel bag 15 500 not 9 900; most bags 4 200–5 500), the backpack is one model in sizes M/L,
-  and five lines are missing. Production data untouched — pricing and naming are the owner's
-  call. `docs/CONVENTIONS.md`'s design section still describes the cream/rust palette — not
-  touched (docs change on request). Before that: **Catalog loaded into production** — `scripts/launch-catalog.ts`
-  + `scripts/load-catalog.ts` (one-off, idempotent per slug): 4 categories, 17 active products,
-  22 variants, 130 photos in `balier-media`, all verified 200 through the edge; `/`, `/products`,
-  product pages, `/products/category/*` and `/search` render them. Nothing on the storefront links
-  to the category pages (pre-existing, noted for L5). Weights/dimensions blank — owner's, in the
-  panel. Before that: **`DATABASE_URL` on all three Workers and
-  `ADMIN_SESSION_SECRET` on admin** (`wrangler secret bulk` from filtered `.dev.vars`; the
-  classifier allows `secret bulk`); the storefront's DB pages and the admin gate answer. Before
-  that: **All three Workers deployed and reachable on
-  `balier.com.ua` / `admin.balier.com.ua`** after the owner deleted the imported A/AAAA/wildcard
-  records; static pages, images and the 404 verified through the edge, DB pages 500 until secrets,
-  cron schedules registered (launch.md L4.3 has the details and the macOS resolver-cache trap).
-  Before that: **first `pnpm deploy:site` by the owner: Worker `balier`
-  uploaded, custom domain refused** (`100117`, the imported zone has the old hosting's proxied
-  A/AAAA on the apex and a wildcard `*`; admin and cron not deployed yet). Owner deletes the
-  A/AAAA/CNAME records, keeps MX/SPF and the `mail.` records, redeploys all three. Side effects
-  recorded in launch.md L4.3: auto-provisioned `balier-session` KV (unused Astro `SESSION`
-  binding) and wrangler's whitespace rewrite of `wrangler.jsonc` (reverted). Before that: **Zone
-  Active, Workers Paid on, Email Sending onboarded on
-  `mail.balier.com.ua`** (dashboard: Compute & AI → Email Service; the CLI returns `2036` to every
-  Email Sending call until the account has onboarded its first domain there — after that it works).
-  All sender records verified on the authoritative NS; a CLI test send to the owner was «Queued».
-  Deploys are the owner's to run (`pnpm deploy:site` / `deploy:admin` / `cron:deploy` — the
-  agent's permission classifier blocks them); no admin account yet; no credentials beyond
-  `DATABASE_URL` and `ADMIN_SESSION_SECRET`. Before that: **L1 content written** from the owner's PDF (`про
-  нас_merged.pdf`, 7 pages): all seven static pages, two photos extracted with `pdfimages` and
-  resized with `sips` into `apps/site/public/images/` (`about-founder.jpg` 1204×1600 shown as a
-  3:2 crop, `about-workshop.jpg` 903×1200), homepage teasers rewritten, `ContentPlaceholder`
-  deleted (nothing imports it; `docs/OVERVIEW.md`'s component table still lists it — not
-  touched). Gate + site build green, prerendered as `about.html` etc. **Open in the copy:**
-  `/offer` carries the seller's identity in square brackets (ФОП name, РНОКПП, address — section
-  2 and the signature block) and Monobank will not accept that; `/contacts` has phone, email,
-  Instagram but no address/hours (the owner's own note asks whether to publish them); the
-  returns page speaks «ти» while every other page says «ви» — the owner's voice, left as is;
-  the delivery page promises Meest / Nova Post abroad, which `/checkout` cannot do (contact
-  path only). Earlier the same day: **the domain is `balier.com.ua`** (zone pending, NS already
-  on Cloudflare; every production hostname renamed, `3d5ae8e`), R2 + KV created by hand and the
-  KV id committed (`8552fd8`), `ADMIN_SESSION_SECRET` generated, Sentry confirmed non-blocking,
-  the 26-step plan approved (`~/.claude/plans/squishy-finding-hennessy.md`).
-- **In progress:** waiting on the client (list below). Catalog review (`docs/plans/catalog.md`)
-  still open.
-- **Next step:** owner creates the admin account; the remaining credentials into the four
-  `.dev.vars` → `secret bulk` again → `pnpm np:sync` → Telegram webhook (`docs/plans/launch.md` L4; the
-  approved plan's block C). Then the offer's seller details, then Monobank. L4.2 can go first
-  at any time: `pnpm admin:user create <email> --role=admin` (password is prompted — run by hand).
-- **Blockers (waiting on me / the client):**
-  - The admin account (`pnpm admin:user create`, password prompted) — the owner's hands.
-  - Seller identity for `/offer` (ФОП name, РНОКПП, address).
-  - L1 texts for the seven static pages; `/offer` + `/privacy` gate the Monobank merchant.
-  - Nova Poshta API key; new Telegram bot token, notification chat id, manager handle.
-  - Catalog table (dimensions, weight, leather); Neon plan upgrade to Launch in the console.
+- **Last done (2026-09-22): a security audit of the live shop, and every fix from it deployed.**
+  Two passes — production probed from outside, the auth / upload / injection / webhook code read
+  from inside. Nothing of the «sign in without a password» class: sessions, PBKDF2, the gate, the
+  Monobank signature, parameterised SQL and the escaped `set:html` all hold. Fixed and verified
+  live: **astro 7.1.6 → 7.3.3** (critical advisory, RCE through AVIF optimisation; adapter 14.3.2
+  forced wrangler ≥ 4.135.0 in all three packages, six transitive build packages pinned in
+  `pnpm-workspace.yaml`, `pnpm audit --prod` now clean); **the admin login budget is an atomic
+  Postgres counter** (`auth_attempts`, migration 0021) — KV's read-modify-write let N parallel
+  guesses cost one unit and it was the only gate on password guessing, twelve parallel spends now
+  cost twelve; **security headers** on both apps from the middleware *and* `public/_headers`,
+  because prerendered pages are served off the asset binding and never reach the Worker, with
+  `frame-ancestors 'none'` on the panel the one with teeth (inside a frame its own Origin
+  satisfies Astro's CSRF check); **OTP sends capped per account** at 15/day surviving re-issue and
+  verification bound to the step cookie; **promo mail capped per address** at 2/day. Plus a
+  paid-amount assertion in `confirmPayment`, a `content-length` guard before the upload buffers,
+  the promo settings section made admin-only, a budget on `/checkout/success`, and the admin
+  config's retired `site` hostname. Owner enabled HSTS (12 months, subdomains); both hosts
+  verified. Deliberately left: the Monobank pubkey is still fetched per webhook — caching it
+  would add a key-rotation window to the one path where being wrong costs money.
+- **The shop is open and has taken a real order.** `balier.com.ua` indexable since 2026-09-18,
+  Search Console verified with the sitemap submitted; 23 active products / 57 variants, one paid
+  order through the production Monobank merchant (card, with a promo code applied). Live since
+  the last entry: `/palette`, `/personalization`, `/corporate` from the owner's PDFs; category
+  nav on the catalog; the cream background; **parcel size «до 2 кг» / «до 10 кг» replacing the
+  per-variant weight** (migration 0020 — the old scheme blocked a waybill on 26 of 28 variants);
+  the **e-mail promo** (popup after a minute, one code per address, one order per code, switched
+  on at 10 %); **«Клієнти»** in the panel; SEO and AI basics (canonical fix, `robots.txt`,
+  `/sitemap.xml`, `/llms.txt`, Product + Organization JSON-LD, 301s off the 2019–2025 site).
+  Nova Poshta sender now matches the live API key, so waybills work.
+- **In progress:** nothing running. Offered and not started: a product feed for Google Merchant
+  and Meta, the Meta pixel, UTM attribution on orders, campaign promo codes (one code for
+  everyone with a use limit) — `~/.claude/plans/` holds the sketch for the first three.
+- **Next step:** owner's call on the open items below; otherwise the shop is complete and selling.
+- **Blockers / owner's decisions:**
+  - Prices and model names from `docs/plans/brand.md` (Instagram says the travel bag is 15 500,
+    most bags 4 200–5 500, and five lines are missing) — production untouched, the owner's call.
+  - Turnstile stays commented out on `/api/checkout`; a 5-per-300 s per-IP budget is the only bot
+    defence on the endpoint that creates orders and calls Monobank.
+  - Cloudflare → Security: confirm WAF and bot protection are on (the only audit item not checked).
+  - Search Console: press «Перевірити виправлення» on the 404 / 5xx / robots groups now the 301s
+    are live, and resubmit the sitemap.
+  - Neon still on the Free plan; no point-in-time recovery window.
+  - Russian-language version: the site is Ukrainian only. Decide with the Search Console query
+    report in ~4 weeks, not by default — a `/ru` tree is 3–5 days plus translation.
 - **Loose ends carried:** the neon CLI's link files (`neon.ts`, `@neon/config` + `@neon/env` in
-  the root `package.json`, `.claude/skills`, `skills-lock.json`) are **uncommitted on purpose** —
-  developer tooling, decide at teardown. The `qa-live@balier.test` mystery (2026-08-06) is
-  dev-only now.
+  the root `package.json`, `.claude/`, `skills-lock.json`) are **uncommitted on purpose** —
+  developer tooling, decide at teardown. `settings.np_seat_dimensions` is a dead row since the
+  parcel-size change; nothing reads it. `docs/CONVENTIONS.md`'s design section still describes
+  the cream/rust palette the shadcn pass replaced (docs change on request).
 - **Rules that bind any future panel screen** (written up in `docs/CONVENTIONS.md` → «Admin
   panel»):
   - A schema is only verified against the body the form actually sends — `curl -F` can supply a
@@ -80,44 +63,47 @@
     the deployed Workers runtime refuses PBKDF2 above it, and no local gate can catch a breach.
   - Sessions are revocable per account (`sessions_valid_from`); rotating `ADMIN_SESSION_SECRET`
     ends everyone's at once.
+  - The admin login budget is the one counter that must stay atomic — `auth_attempts`, not KV.
+    Every other budget is KV on purpose, where approximate is the right trade.
   - `pnpm admin:user` cannot reach the archive — archiving and purging are panel actions on
     purpose.
-  - Turnstile is commented out, not deleted (`grep -rn "Turnstile:" src wrangler.jsonc`); the KV
-    limiter (10/min per IP) is the only bot defence on `/api/checkout`.
   - No customer-facing notification on an admin status change — deliberately not built.
   - **After a `wrangler login` switch, each package's `node_modules/.cache/wrangler/wrangler-account.json`
-    still pins the previous account** (found 2026-09-10: `apps/site`, `apps/admin`, `workers/cron`
-    all held a `qio.finance` account id and every API call 401'd with «Authentication error
-    [code: 10000]»). Delete the three files; the root one is rewritten by the next command.
-    Upgrade path if it bites again: `account_id` in the three `wrangler.jsonc`.
-  - The dev environment (`*.mlosko.dev`, dev Neon, `balier-dev` / `balier-admin-dev` /
-    `balier-cron`) is unreachable since 2026-09-07. Its last recorded state — QA rows, media,
-    secrets, cleanup items — is this block as of `17e0a5e`. BALIER-5 (the dev cron sweeping a
-    dropped table) is the previous developer's to fix.
+    still pins the previous account** (2026-09-10: all three held a `qio.finance` account id and
+    every API call 401'd). Delete the three files; the root one is rewritten by the next command.
+  - Prerendered pages and static assets never reach the Worker — anything that must apply to them
+    (headers, caching) belongs in `public/_headers` as well as the middleware.
+  - The dev environment (`*.mlosko.dev`, dev Neon, `balier-dev` / `balier-admin-dev`) is
+    unreachable since 2026-09-07. Its last recorded state is this file at `17e0a5e`.
 
 ## ✅ Phase tracker (high-level; detail in docs/plans/roadmap.md)
 
-- [~] Phase 0 — Preparation (Neon + R2 done; Monobank, Nova Poshta, Telegram outstanding)
+- [x] Phase 0 — Preparation (Neon, R2, KV, the production Monobank merchant, the Nova Poshta
+      key and the Telegram bot all on the owner's own accounts)
 - [x] Phase 1 — Foundation (schema, migrations, seed, design components, deploy verified)
-- [~] Phase 2 — Catalog / storefront (every page built; static-page copy outstanding)
-- [~] Phase 3 — Cart and payment (code-complete: cart, `/checkout`, both payment methods, Turnstile
+- [x] Phase 2 — Catalog / storefront (every page built and filled; `/palette`,
+      `/personalization` and `/corporate` added from the owner's PDFs 2026-09-18)
+- [x] Phase 3 — Cart and payment (code-complete: cart, `/checkout`, both payment methods, Turnstile
       (built, then commented out on request — the code stays), the webhook, both Telegram
       notifications, rate limiting, the confirmation email, `balier-cron` deployed, and as of
-      2026-08-06 the Email Sending DNS records exist and deliver. Only a live browser `/checkout`
-      pass remains)
+      2026-08-06 the Email Sending DNS records exist and deliver. Driven live end to end on
+      2026-09-18/20, card and cash on delivery both; an e-mail promo code joined the path)
 - [x] Phase 4 — Admin panel (its own login form — PBKDF2 + signed session cookie, fail-closed,
       verified on the deployed Worker; orders list, detail, transitions, TTN and manual order
       creation; `/settings` for the COD limit; and the catalog — `/products`, its editor,
       `/categories` and image upload. Deployed; since the split the whole phase lives on
-      `admin.balier.mlosko.dev`)
+      `admin.balier.com.ua`, plus «Клієнти» 2026-09-20)
 - [~] **Nova Poshta operations** — outside the phase numbering, its own file
       `docs/plans/novaposhta.md`: waybills, the register of shipments, and carrier-driven order
-      statuses. NP-1..NP-4 deployed and client-verified live; NP-5 built and driven live
-      2026-08-07, awaiting commit+push. Phase 5's account migration has to carry the sender
-      settings and API key across
-- [~] Phase 5 — Launch (plan in `docs/plans/launch.md`; L3 committed 2026-09-10, waiting on the
-      client's Cloudflare account)
-- [ ] Phase 6 — Improvements
+      statuses. NP-1..NP-5 deployed and driven live. On the owner's own account since
+      2026-09-18; the per-variant weight became `products.parcel_size` («до 2 кг» / «до 10 кг»)
+      on 2026-09-20, since a missing weight was blocking almost every waybill
+- [x] Phase 5 — Launch (`docs/plans/launch.md`). Live on `balier.com.ua` since 2026-09-18:
+      production Monobank merchant, Nova Poshta key, Telegram bot, indexing on, one real paid
+      order. `/checkout` and the COD waybill path driven live; Turnstile stays off by decision
+- [~] Phase 6 — Improvements (taken as asked rather than as a phase: the e-mail promo, the
+      customers screen, the SEO/AI basics, the security pass. Open: product feed, Meta pixel, UTM
+      attribution on orders, campaign codes, a Russian version)
 
 ---
 
@@ -126,6 +112,35 @@
 > Empty by design. Everything through the end of Phase 4 was moved to **`docs/history.md`** on
 > 2026-08-05, not rewritten — this file is read in full at every session start and had reached
 > 852 lines. New session entries go here; move a phase's entries across once the phase is done.
+
+**2026-09-22 (security).** «проверь сайт на секюрити». Two passes — a subagent over the
+auth / upload / injection / webhook code, live probing from outside. The auth layer held; the
+residue was real: a critical Astro advisory, a login budget that lost count under concurrency, no
+security headers at all (the panel could be framed), an OTP budget that renewed with every code,
+promo mail aimed at any address. Five commits, deployed by the owner and verified from outside;
+`pnpm audit --prod` clean; migration 0021. HSTS on at Cloudflare, 12 months with subdomains.
+Left alone on purpose: the per-webhook Monobank pubkey fetch.
+
+**2026-09-21 (old URLs).** The first Search Console coverage export was mostly the 2019–2025 site
+that used to live on this domain: 21 × 404 on its `/shop/…/*.html`, robots blocks it carried, four
+URLs indexed blind. `legacyRedirect` maps its content pages to their successors and its shop paths
+to the nearest category; `/api/*` stopped being disallowed and started saying `noindex` in a
+header instead, the panel too. Viber added to the footer, contacts and `llms.txt`.
+
+**2026-09-20 (promo, customers).** The e-mail promo end to end: popup after a minute on the site
+counted across pages, address in, a unique code out by mail, redeemed once inside the order
+transaction and handed back if the order is cancelled. The same day `parcel_size` replaced the
+per-variant weight, which had been blocking 26 of 28 waybills (migration 0020). Panel got
+«Клієнти» — customers folded out of orders, plus the promo mailing list — and a guard that a
+second variant must name its colour, after a real order arrived on an unlabelled black swatch.
+Product page reordered so price and colour share one phone screen.
+
+**2026-09-18 (launch day).** Indexing switched on and the SEO basics with it: the prerendered
+pages' canonical had been carrying `.html`, `robots.txt` and `/sitemap.xml` did not exist, there
+was no structured data. Added `/llms.txt` and content signals for AI crawlers. Three pages built
+from the owner's PDFs (`/palette`, `/personalization`, `/corporate`), category nav on the catalog,
+the cream background `#f6f4e8`, One Dollar Stats, the Telegram manager handle. The owner brought
+the production Monobank token, a new Nova Poshta key and the bot; the first real order followed.
 
 **2026-09-16 (next steps).** «какие дальше шаги», in plan mode. Read-only checks against the
 account and the tree: nothing from the 2026-09-10 hand-off had been done (no zone, bucket, KV,
