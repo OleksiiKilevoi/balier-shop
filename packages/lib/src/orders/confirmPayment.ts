@@ -38,6 +38,16 @@ export type ConfirmPaymentResult =
    * marks the alert as already raised.
    */
   | { ok: true; transitioned: 'paid_after_cancellation'; order: Order; items: readonly OrderItem[] }
+  /**
+   * Monobank reports `success`, but for a different amount than the order
+   * says it is worth. Monobank fixes the sum when the invoice is created, so
+   * this should be unreachable — which is exactly why it is worth asserting
+   * (audit, 2026-09-22): the one way to reach it is our own arithmetic
+   * disagreeing with itself, and the discount path is new. The order is left
+   * unpaid and a person is alerted rather than the difference being accepted
+   * silently in either direction.
+   */
+  | { ok: true; transitioned: 'amount_mismatch'; order: Order; items: readonly OrderItem[] }
   | { ok: true; transitioned: 'cancelled' | 'unchanged' }
   | { ok: false; reason: 'invoice_not_found' };
 
@@ -75,6 +85,17 @@ export async function confirmPayment(
     }
 
     if (statusResult.status === 'success') {
+      if (statusResult.amount !== order.total) {
+        // The money is real, so it is recorded; what is refused is the
+        // conclusion that this order is settled.
+        await tx
+          .update(payments)
+          .set({ amount: statusResult.amount, lastPayload: rawPayload, updatedAt: sql`now()` })
+          .where(eq(payments.id, payment.id));
+
+        return { ok: true, transitioned: 'amount_mismatch', order, items: order.items };
+      }
+
       await tx
         .update(payments)
         .set({ status: 'success', amount: statusResult.amount, lastPayload: rawPayload, updatedAt: sql`now()` })

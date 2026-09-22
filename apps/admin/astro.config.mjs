@@ -22,7 +22,7 @@ const sentryUpload = process.env.SENTRY_AUTH_TOKEN
 
 // https://astro.build/config
 export default defineConfig({
-  site: 'https://admin.balier.mlosko.dev',
+  site: 'https://admin.balier.com.ua',
   output: 'server',
   // `cloudflare-binding` because the product editor's upload pipeline reads
   // image dimensions through the IMAGES binding (`@balier/lib/media`).

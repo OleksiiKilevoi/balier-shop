@@ -172,6 +172,12 @@ async function reconcileAwaitingPayment(
         await email.orderPaid({ order: result.order, items: result.items });
       } else if (result.transitioned === 'cancelled') {
         console.log(`Reconciliation: order ${row.orderNumber} cancelled (${status.status})`);
+      } else if (result.transitioned === 'amount_mismatch') {
+        console.error(`Reconciliation: paid amount does not match order ${row.orderNumber}`);
+        Sentry.captureMessage(
+          `Paid amount does not match order ${row.orderNumber} — left unpaid for review`,
+          'error',
+        );
       } else if (result.transitioned === 'paid_after_cancellation') {
         // The order was cancelled between our select and this call (a racing
         // webhook or operator) and the money landed anyway — same alert the

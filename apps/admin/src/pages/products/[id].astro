@@ -33,7 +33,7 @@ import {
 } from '@balier/lib/i18n/admin';
 import type { AdminProductMessage } from '@balier/lib/i18n/admin';
 import { mediaKeyFromUrl, storeImage } from '@balier/lib/media';
-import { checkUploadedImage } from '@balier/lib/media/upload';
+import { MAX_REQUEST_BYTES, checkUploadedImage } from '@balier/lib/media/upload';
 import type { UploadIssue } from '@balier/lib/media/upload';
 import { formatPrice } from '@balier/lib/money';
 import { suggestSku } from '@balier/lib/products/slug';
@@ -103,6 +103,13 @@ function refuse(reason: CatalogFailure, intent: string) {
 }
 
 if (Astro.request.method === 'POST') {
+  // Before `formData()`, which buffers the whole body: the per-file cap can
+  // only be checked once the bytes are already in memory.
+  const declaredLength = Number(Astro.request.headers.get('content-length') ?? 0);
+  if (declaredLength > MAX_REQUEST_BYTES) {
+    return new Response('Забагато даних у запиті', { status: 413 });
+  }
+
   const form = await Astro.request.formData();
 
   /*

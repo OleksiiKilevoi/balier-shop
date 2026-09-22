@@ -18,7 +18,9 @@ const BROWSER_TTL_SECONDS = 60;
  * `np_warehouses`, never the live Nova Poshta API.
  */
 export const GET: APIRoute = async ({ url, locals }) => {
-  const settlementRef = url.searchParams.get('settlementRef');
+  // Capped like `q`: both end up in a cache key, and an uncapped one is an
+  // unbounded number of distinct entries.
+  const settlementRef = normalizeCacheParam(url.searchParams.get('settlementRef'));
   const kind = url.searchParams.get('kind');
   const query = normalizeCacheParam(url.searchParams.get('q'));
 

@@ -120,6 +120,9 @@ const RULES: readonly { pathname: string; limit: number; windowSeconds: number }
   // Sends an e-mail per call — a budget that stops address spraying, not people.
   { pathname: '/api/promo/subscribe', limit: 5, windowSeconds: 600 },
   { pathname: '/api/cart', limit: 30, windowSeconds: 60 },
+  // Unauthenticated order lookup: one DB round trip per call, and its 200/404
+  // split is an oracle on order numbers however impractical to enumerate.
+  { pathname: '/checkout/success', limit: 30, windowSeconds: 60 },
   { pathname: '/api/checkout/limits', limit: 30, windowSeconds: 60 },
   { pathname: '/api/checkout/np-settlements', limit: 60, windowSeconds: 60 },
   { pathname: '/api/checkout/np-warehouses', limit: 60, windowSeconds: 60 },

@@ -559,6 +559,9 @@ const formFailed = (intent: string) => banner !== null && failedIntent === inten
       </form>
     </section>
 
+    {/* Admin-only to post (`intent === 'promo'`), so admin-only to see —
+        a form that always answers «не вдалося» is worse than no form. */}
+    {isAdmin && (
     <section class="admin-card mt-6 p-5">
       <h2 class="text-fg text-base font-semibold">Промокод за e-mail</h2>
       <p class="text-fg-muted mt-1 text-sm">{ADMIN_PROMO_HINT}</p>
@@ -601,6 +604,7 @@ const formFailed = (intent: string) => banner !== null && failedIntent === inten
         </p>
       </form>
     </section>
+    )}
 
     {/* The Nova Poshta sender — admins only. Three forms, because the three
         facts have three sources: who ships is the API key's own account

@@ -61,6 +61,17 @@ export const POST: APIRoute = async ({ request, locals }) => {
       const email = createEmailNotifier(env.EMAIL, env.ORDER_EMAIL_FROM);
       locals.cfContext.waitUntil(notifier.orderPaid({ order: result.order, items: result.items }));
       locals.cfContext.waitUntil(email.orderPaid({ order: result.order, items: result.items }));
+    } else if (result.transitioned === 'amount_mismatch') {
+      // Should be unreachable — Monobank charges the sum we set. Reaching it
+      // means our own total and the invoice disagree, so the order stays
+      // unpaid and a person decides.
+      console.error(
+        `Monobank webhook: paid amount does not match order ${result.order.orderNumber}`,
+      );
+      Sentry.captureMessage(
+        `Paid amount does not match order ${result.order.orderNumber} — left unpaid for review`,
+        'error',
+      );
     } else if (result.transitioned === 'paid_after_cancellation') {
       // The customer paid an order that was already cancelled (late webhook
       // after the TTL sweep, or a link that outlived an admin cancel). The

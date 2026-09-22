@@ -35,6 +35,15 @@ import type { MediaExtension } from './index';
  * the interim substitute for real resizing. The largest seeded catalog file
  * (713 KB) still clears it.
  */
+/**
+ * The whole multipart body, not just the image: `formData()` buffers
+ * everything before `MAX_UPLOAD_BYTES` can be applied to the file, so a
+ * hundred-megabyte POST would be held in the Worker's memory first (audit,
+ * 2026-09-22). Generous envelope — the image plus every text field of the
+ * editor.
+ */
+export const MAX_REQUEST_BYTES = 2 * 1024 * 1024;
+
 export const MAX_UPLOAD_BYTES = 1 * 1024 * 1024;
 
 /**
