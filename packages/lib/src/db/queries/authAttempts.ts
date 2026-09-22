@@ -14,7 +14,10 @@ import { authAttempts } from '../schema';
  * flight at once, not by KV's propagation delay.
  */
 export interface AttemptBudget {
+  /** Is there room left *before* spending? `peek`'s question. */
   allowed: boolean;
+  /** Units spent in the current window. `spend` returns the value it wrote. */
+  count: number;
   /** Seconds until the window resets — only meaningful when `!allowed`. */
   retryAfterSeconds: number;
 }
@@ -24,12 +27,13 @@ function budget(
   limit: number,
   windowSeconds: number,
 ): AttemptBudget {
-  if (!row) return { allowed: true, retryAfterSeconds: 0 };
+  if (!row) return { allowed: true, count: 0, retryAfterSeconds: 0 };
   const elapsedSeconds = (Date.now() - row.windowStart.getTime()) / 1000;
   // An expired window is an empty one; `spend` resets it on the next write.
-  if (elapsedSeconds >= windowSeconds) return { allowed: true, retryAfterSeconds: 0 };
+  if (elapsedSeconds >= windowSeconds) return { allowed: true, count: 0, retryAfterSeconds: 0 };
   return {
     allowed: row.count < limit,
+    count: row.count,
     retryAfterSeconds: Math.max(1, Math.ceil(windowSeconds - elapsedSeconds)),
   };
 }

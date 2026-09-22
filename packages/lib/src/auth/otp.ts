@@ -24,6 +24,16 @@ export const OTP_MAX_ATTEMPTS = 5;
  * somebody's free notification cannon as much as it protects the account.
  */
 export const OTP_RESEND_INTERVAL_SECONDS = 60;
+/**
+ * Codes one account may be *sent* in a day, counted in `auth_attempts` and
+ * surviving re-issue. A fresh code resets `otpAttempts`, so without this the
+ * five guesses a code allows renew every minute — 7 200 guesses a day, and the
+ * victim's chat buried under 1 440 messages (audit, 2026-09-22). Fifteen is
+ * more codes than a person asks for in a day and leaves 75 guesses against a
+ * million, which is nothing.
+ */
+export const OTP_SENDS_PER_DAY = 15;
+export const OTP_SEND_WINDOW_SECONDS = 24 * 60 * 60;
 
 /**
  * A pending deep link is an invitation to bind a chat to an account, so it

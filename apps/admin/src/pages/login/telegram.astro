@@ -4,6 +4,8 @@ import * as Sentry from '@sentry/cloudflare';
 import AdminLayout from '~/layouts/AdminLayout.astro';
 import {
   OTP_RESEND_INTERVAL_SECONDS,
+  OTP_SENDS_PER_DAY,
+  OTP_SEND_WINDOW_SECONDS,
   OTP_TTL_SECONDS,
   SESSION_COOKIE,
   generateOtpCode,
@@ -14,6 +16,7 @@ import {
   verifySession,
 } from '@balier/lib/auth';
 import { createDb } from '@balier/lib/db';
+import { spendAuthAttempt } from '@balier/lib/db/queries/authAttempts';
 import {
   claimOtpAttempt,
   clearOtp,
@@ -154,7 +157,21 @@ if (Astro.request.method === 'POST') {
         ? account.otpExpiresAt.getTime() - OTP_TTL_SECONDS * 1000
         : 0;
 
-      if (Date.now() - sentAt >= OTP_RESEND_INTERVAL_SECONDS * 1000) {
+      /*
+       * Per account, and surviving re-issue: `issueOtp` resets `otpAttempts`,
+       * so a code's five guesses would otherwise renew every minute
+       * (audit, 2026-09-22). Counted atomically in `auth_attempts`; the
+       * answer above this stays «надіслано» either way, since saying
+       * «too many» here would tell a stranger the address is real.
+       */
+      const sends = await spendAuthAttempt(
+        db,
+        `admin-otp-send:${account.id}`,
+        OTP_SENDS_PER_DAY,
+        OTP_SEND_WINDOW_SECONDS,
+      );
+
+      if (sends.count <= OTP_SENDS_PER_DAY && Date.now() - sentAt >= OTP_RESEND_INTERVAL_SECONDS * 1000) {
         const code = generateOtpCode();
         const otpHash = await hashOtp(env.ADMIN_SESSION_SECRET, account.id, code);
         const chatId = account.telegramChatId;
@@ -193,8 +210,18 @@ if (Astro.request.method === 'POST') {
     const parsed = adminOtpVerifySchema.safeParse(Object.fromEntries(form));
     if (!parsed.success) return reject();
 
+    /*
+     * Whose code is being guessed comes from the step cookie this browser was
+     * given when it asked, never from the form body — otherwise anyone could
+     * spend a stranger's five attempts the moment a real code was issued to
+     * them (audit, 2026-09-22). The hidden field stays for the no-JS form to
+     * round-trip; it is no longer what decides.
+     */
+    const stepEmail = Astro.cookies.get(EMAIL_COOKIE)?.value ?? '';
+    if (stepEmail === '') return reject();
+
     const db = createDb(env.DATABASE_URL);
-    const account = await findOtpAccountByEmail(db, parsed.data.email);
+    const account = await findOtpAccountByEmail(db, stepEmail);
     // One claimed attempt per guess, counted in SQL — `claimOtpAttempt`
     // is what makes five mean five even for parallel guesses.
     const storedHash = account ? await claimOtpAttempt(db, account.id) : null;
