@@ -2,6 +2,7 @@ import { defineMiddleware, sequence } from 'astro:middleware';
 import { env } from 'cloudflare:workers';
 import * as Sentry from '@sentry/cloudflare';
 import { legacyRedirect } from '@balier/lib/legacyRedirects';
+import { applySecurityHeaders } from '@balier/lib/securityHeaders';
 import { checkRateLimit } from '@balier/lib/rateLimit';
 
 /* ------------------------------------------------------------------ sentry */
@@ -52,6 +53,17 @@ const adminRedirect = defineMiddleware(async ({ url }, next) => {
     headers: { location: `${ADMIN_HOST}${rest}${url.search}`, 'cache-control': 'no-store' },
   });
 });
+
+/* --------------------------------------------------------- security headers */
+
+/**
+ * On every response the Worker makes. Prerendered pages and assets bypass the
+ * Worker entirely, so `public/_headers` carries the same set for those —
+ * both are generated from one place (`~/lib/securityHeaders`).
+ */
+const securityHeaders = defineMiddleware(async (_context, next) =>
+  applySecurityHeaders(await next(), 'self'),
+);
 
 /* ------------------------------------------------------------- old site URLs */
 
@@ -140,4 +152,4 @@ const rateLimit = defineMiddleware(async ({ request }, next) => {
   return next();
 });
 
-export const onRequest = sequence(sentry, legacy, adminRedirect, apiNoindex, rateLimit);
+export const onRequest = sequence(sentry, securityHeaders, legacy, adminRedirect, apiNoindex, rateLimit);

@@ -1,0 +1,10 @@
+# Prerendered pages and static assets are served by Cloudflare's asset
+# binding and never reach the Worker, so the middleware's headers would miss
+# exactly the pages a visitor reads. Same set, one source:
+# packages/lib/src/securityHeaders.ts.
+/*
+  x-content-type-options: nosniff
+  referrer-policy: strict-origin-when-cross-origin
+  permissions-policy: geolocation=(), camera=(), microphone=(), payment=()
+  strict-transport-security: max-age=31536000; includeSubDomains
+  content-security-policy: frame-ancestors 'self'

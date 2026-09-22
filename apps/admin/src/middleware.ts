@@ -1,4 +1,5 @@
 import { defineMiddleware, sequence } from 'astro:middleware';
+import { applySecurityHeaders } from '@balier/lib/securityHeaders';
 import type { AstroCookies } from 'astro';
 import { env } from 'cloudflare:workers';
 import * as Sentry from '@sentry/cloudflare';
@@ -124,7 +125,16 @@ const noindex = defineMiddleware(async (_context, next) => {
   return response;
 });
 
-export const onRequest = sequence(sentry, noindex, gate);
+/**
+ * `frame-ancestors 'none'` above all: inside a third-party iframe the panel's
+ * own Origin satisfies Astro's CSRF check, so framing was a real way to have
+ * an operator click something they could not see (audit, 2026-09-22).
+ */
+const securityHeaders = defineMiddleware(async (_context, next) =>
+  applySecurityHeaders(await next(), 'none'),
+);
+
+export const onRequest = sequence(sentry, securityHeaders, noindex, gate);
 
 /**
  * Land on the form, with the address the operator was trying to reach carried
