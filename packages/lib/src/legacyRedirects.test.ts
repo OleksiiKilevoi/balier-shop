@@ -17,6 +17,19 @@ describe('legacyRedirect', () => {
     expect(legacyRedirect('/shop/cart/done.html')).toBe('/products');
   });
 
+  it('follows the old language prefix to the same places', () => {
+    // Exactly what Google still holds — checked against the index 2026-09-23.
+    expect(legacyRedirect('/ru/shop/sumki/zhenskie/zhenskaya-bolshaya-sumka-less-chyornaya.html')).toBe(
+      '/products/category/womens-bags',
+    );
+    expect(legacyRedirect('/ru/o-nas.html')).toBe('/about');
+    expect(legacyRedirect('/ru/shop/aksessuary/klyuchnitsy.html')).toBe('/products');
+    expect(legacyRedirect('/ru/')).toBe('/');
+    expect(legacyRedirect('/ru')).toBe('/');
+    // The bare root is the live home page, not a redirect to itself.
+    expect(legacyRedirect('/')).toBeNull();
+  });
+
   it('knows nothing about the new site or random paths', () => {
     expect(legacyRedirect('/products/sumka-lunet')).toBeNull();
     expect(legacyRedirect('/about')).toBeNull();

@@ -11,6 +11,16 @@
  * when it answers. Anything it does not know stays an honest 404.
  */
 
+/**
+ * The old CMS served the same tree under a language prefix — Google still
+ * holds `/ru/shop/sumki/zhenskie/...` alongside the bare `/shop/...` (found in
+ * the index 2026-09-23, where the prefixed ones were 404ing while the bare
+ * ones already redirected). The prefix is stripped before anything is matched,
+ * so one rule covers both; the new site has no such prefix, so nothing of ours
+ * can collide with it.
+ */
+const LANGUAGE_PREFIX = /^\/(ru|ua|uk|en)(?=\/|$)/;
+
 const EXACT: Record<string, string> = {
   '/o-nas.html': '/about',
   '/dostavka.html': '/delivery',
@@ -37,12 +47,16 @@ const SHOP_CATEGORIES: readonly [RegExp, string][] = [
 ];
 
 export function legacyRedirect(pathname: string): string | null {
-  const exact = EXACT[pathname];
+  const bare = pathname.replace(LANGUAGE_PREFIX, '') || '/';
+  // `/ru` and `/ru/` were the Russian front page.
+  if (bare === '/') return bare === pathname ? null : '/';
+
+  const exact = EXACT[bare];
   if (exact) return exact;
-  if (pathname.startsWith('/news/')) return '/';
-  if (pathname.startsWith('/shop/cart/')) return '/products';
-  if (pathname.startsWith('/shop/')) {
-    const match = SHOP_CATEGORIES.find(([pattern]) => pattern.test(pathname));
+  if (bare.startsWith('/news/')) return '/';
+  if (bare.startsWith('/shop/cart/')) return '/products';
+  if (bare.startsWith('/shop/')) {
+    const match = SHOP_CATEGORIES.find(([pattern]) => pattern.test(bare));
     return match ? match[1] : '/products';
   }
   return null;
