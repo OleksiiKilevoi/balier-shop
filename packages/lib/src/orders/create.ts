@@ -2,7 +2,7 @@ import * as Sentry from '@sentry/cloudflare';
 import { eq, sql } from 'drizzle-orm';
 import type { TxDb } from '../db';
 import { findCheckoutVariants } from '../db/queries/cart';
-import { bindPromoCode, findUsablePromoCode, promoCodeExists } from '../db/queries/promo';
+import { bindPromoCode, findUsablePromoCode, hasPriorOrder, promoCodeExists } from '../db/queries/promo';
 import type { Order, OrderItem } from '../db/schema';
 import { orderItems, orders, payments } from '../db/schema';
 import type { Kopiykas } from '../money';
@@ -11,7 +11,7 @@ import type { CartItemInput } from '../validation/cart';
 import type { DeliveryInput } from '../validation/checkout';
 import { type CheckoutLine, type CheckoutNotice, resolveCheckoutCart } from './checkoutCart';
 import { generateOrderNumber } from './orderNumber';
-import { discountFor } from './promo';
+import { campaignCode, discountFor } from './promo';
 
 /**
  * Places an order: reprice the cart against the database and (for card) create
@@ -95,6 +95,7 @@ export type CreateOrderResult =
   | { ok: false; reason: 'cod_over_limit' }
   | { ok: false; reason: 'promo_invalid' }
   | { ok: false; reason: 'promo_used' }
+  | { ok: false; reason: 'promo_not_first' }
   | { ok: false; reason: 'payment_failed' };
 
 const ORDER_NUMBER_ATTEMPTS = 5;
@@ -155,8 +156,24 @@ export async function createOrder(
          * anything the client sent (hard rule 1). The percentage is the one
          * frozen on the code when it was issued, not today's setting.
          */
-        let promo: { id: string; code: string; discount: Kopiykas } | null = null;
-        if (input.promoCode) {
+        let promo: { id: string | null; code: string; discount: Kopiykas } | null = null;
+        const campaign = input.promoCode ? campaignCode(input.promoCode) : null;
+        if (input.promoCode && campaign) {
+          // A shared code: no row to lock or spend.
+          if (
+            campaign.firstOrderOnly &&
+            (await hasPriorOrder(tx, input.customerPhone, input.customerEmail))
+          ) {
+            failure = { ok: false, reason: 'promo_not_first' };
+            tx.rollback();
+            throw new Error('unreachable: tx.rollback() throws');
+          }
+          promo = {
+            id: null,
+            code: input.promoCode,
+            discount: discountFor(resolved.itemsTotal, campaign.percent),
+          };
+        } else if (input.promoCode) {
           const usable = deps.promoEnabled ? await findUsablePromoCode(tx, input.promoCode) : null;
           if (!usable) {
             const exists = deps.promoEnabled && (await promoCodeExists(tx, input.promoCode));
@@ -211,7 +228,7 @@ export async function createOrder(
           .returning();
 
         if (!order) throw new Error('order insert returned no row');
-        if (promo) await bindPromoCode(tx, promo.id, order.id);
+        if (promo?.id) await bindPromoCode(tx, promo.id, order.id);
 
         const items = await tx
           .insert(orderItems)

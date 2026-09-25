@@ -629,6 +629,21 @@ export const ADMIN_CATEGORY_MESSAGES = {
 
 export type AdminCategoryMessage = keyof typeof ADMIN_CATEGORY_MESSAGES;
 
+export const ADMIN_REVIEW_MESSAGES = {
+  published: 'Відгук опубліковано.',
+  rejected: 'Відгук приховано.',
+  not_found: 'Відгук не знайдено.',
+  bad_request: 'Не вдалося виконати дію.',
+} as const;
+
+export type AdminReviewMessage = keyof typeof ADMIN_REVIEW_MESSAGES;
+
+export const REVIEW_STATUS_LABELS = {
+  pending: 'Нові',
+  published: 'Опубліковані',
+  rejected: 'Приховані',
+} as const;
+
 /**
  * Deactivating a category is as close to deleting as the panel goes, and what
  * it does is not obvious: the products stay put and keep the category's name on

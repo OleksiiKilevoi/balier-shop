@@ -28,6 +28,23 @@ export function generatePromoCode(): string {
   return `BALIER-${tail}`;
 }
 
+/**
+ * Shared codes the owner hands out publicly: anyone who knows one gets the
+ * discount, no row per person. `firstOrderOnly` codes are refused when the
+ * phone or e-mail already has a non-cancelled order (`./create.ts`); the rest
+ * work on every order. Independent of the e-mail promo's on/off switch.
+ * ponytail: hard-coded; a panel screen when the owner starts changing them often.
+ */
+export type CampaignCode = { percent: number; firstOrderOnly: boolean };
+export const CAMPAIGN_CODES: Readonly<Record<string, CampaignCode>> = {
+  BLR5: { percent: 5, firstOrderOnly: false },
+  '1BLR': { percent: 10, firstOrderOnly: true },
+};
+
+export function campaignCode(code: string): CampaignCode | null {
+  return Object.hasOwn(CAMPAIGN_CODES, code) ? CAMPAIGN_CODES[code]! : null;
+}
+
 /** What the checkout field holds, as the code was printed: trimmed, upper-cased. */
 export function normalizePromoCode(raw: string): string {
   return raw.trim().toUpperCase().replace(/\s+/g, '');

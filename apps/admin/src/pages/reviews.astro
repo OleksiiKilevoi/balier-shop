@@ -1,0 +1,159 @@
+---
+import { env } from 'cloudflare:workers';
+import AdminLayout from '~/layouts/AdminLayout.astro';
+import { createDb } from '@balier/lib/db';
+import { listAdminReviews, setReviewStatus } from '@balier/lib/db/queries/reviews';
+import { reviewStatus } from '@balier/lib/db/schema';
+import type { ReviewStatus } from '@balier/lib/db/schema';
+import {
+  ADMIN_REVIEW_MESSAGES,
+  REVIEW_STATUS_LABELS,
+  formatAdminDateTime,
+} from '@balier/lib/i18n/admin';
+import type { AdminReviewMessage } from '@balier/lib/i18n/admin';
+import { adminReviewActionSchema } from '@balier/lib/validation/admin';
+
+/**
+ * Review moderation. Buyers write through the order's review link
+ * (storefront `/review/<token>`); nothing shows on the site until it is
+ * published here. «Приховати» takes a published one down again, and a hidden
+ * one can be published later — nothing is deleted.
+ *
+ * Reached from «Товари» rather than the header nav, which already holds as
+ * many rows as a manager's header fits. Same plain-form + 303 contract as
+ * `/categories`, with `enhanceAdminForms` taking the reload out.
+ */
+export const prerender = false;
+
+const db = createDb(env.DATABASE_URL);
+
+const status: ReviewStatus =
+  reviewStatus.enumValues.find((value) => value === Astro.url.searchParams.get('status')) ??
+  'pending';
+const self = `/reviews?status=${status}`;
+
+if (Astro.request.method === 'POST') {
+  const parsed = adminReviewActionSchema.safeParse(
+    Object.fromEntries(await Astro.request.formData()),
+  );
+  let message: AdminReviewMessage = 'bad_request';
+  if (parsed.success) {
+    const next = parsed.data.intent === 'publish' ? 'published' : 'rejected';
+    message = (await setReviewStatus(db, parsed.data.reviewId, next)) ? next : 'not_found';
+  }
+  return Astro.redirect(`${self}&m=${message}`, 303);
+}
+
+const rows = await listAdminReviews(db, status);
+
+const messageParam = Astro.url.searchParams.get('m');
+const message =
+  messageParam && messageParam in ADMIN_REVIEW_MESSAGES ? (messageParam as AdminReviewMessage) : null;
+const failed = message === 'not_found' || message === 'bad_request';
+
+const stars = (rating: number) => '★'.repeat(rating) + '☆'.repeat(5 - rating);
+---
+
+<AdminLayout title="Відгуки">
+  <nav class="text-fg-subtle text-sm">
+    <a href="/products" class="underline-offset-2 hover:underline">← Товари</a>
+  </nav>
+
+  <div id="reviews-editor" class="aria-busy:pointer-events-none aria-busy:opacity-60 transition-opacity">
+    <header class="mt-3">
+      <h1 class="text-fg text-2xl font-semibold sm:text-3xl">Відгуки</h1>
+    </header>
+
+    <nav class="mt-4 flex flex-wrap gap-2" aria-label="Статус відгуків">
+      {
+        reviewStatus.enumValues.map((value) => (
+          <a
+            href={`/reviews?status=${value}`}
+            aria-current={value === status ? 'page' : undefined}
+            class:list={['admin-btn', value === status ? 'admin-btn-primary' : 'admin-btn-secondary']}
+          >
+            {REVIEW_STATUS_LABELS[value]}
+          </a>
+        ))
+      }
+    </nav>
+
+    {
+      message && (
+        <p
+          id="review-message"
+          data-tone={failed ? 'bad' : 'ok'}
+          role={failed ? 'alert' : 'status'}
+          class:list={[
+            'rounded-card mt-5 p-3 text-sm',
+            failed ? 'admin-tone-negative' : 'admin-card text-fg-muted',
+          ]}
+        >
+          {ADMIN_REVIEW_MESSAGES[message]}
+        </p>
+      )
+    }
+
+    {
+      rows.length === 0 ? (
+        <p class="text-fg-muted mt-6 text-sm">Тут поки порожньо.</p>
+      ) : (
+        <ul class="mt-6 max-w-3xl space-y-3">
+          {rows.map((review) => (
+            <li class="admin-card p-5">
+              <div class="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+                <p class="text-fg font-medium">
+                  <a
+                    href={`${env.SITE_ORIGIN}/products/${review.productSlug}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    class="underline-offset-2 hover:underline"
+                  >
+                    {review.productTitle}
+                  </a>
+                </p>
+                <p class="text-fg-subtle text-xs">
+                  <a href={`/orders/${review.orderNumber}`} class="underline-offset-2 hover:underline">
+                    {review.orderNumber}
+                  </a>{' '}
+                  · {formatAdminDateTime(review.createdAt)}
+                </p>
+              </div>
+              <p class="text-fg mt-2" aria-label={`Оцінка ${review.rating} з 5`}>
+                {stars(review.rating)}
+              </p>
+              {review.body && <p class="text-fg mt-2 text-sm whitespace-pre-line">{review.body}</p>}
+              <p class="text-fg-muted mt-2 text-sm">{review.authorName}</p>
+
+              <form method="post" action={self} data-form={`review:${review.id}`} class="mt-4 flex flex-wrap gap-2">
+                <input type="hidden" name="reviewId" value={review.id} />
+                {review.status !== 'published' && (
+                  <button type="submit" name="intent" value="publish" class="admin-btn admin-btn-primary">
+                    Опублікувати
+                  </button>
+                )}
+                {review.status !== 'rejected' && (
+                  <button type="submit" name="intent" value="reject" class="admin-btn admin-btn-secondary">
+                    {review.status === 'published' ? 'Приховати' : 'Відхилити'}
+                  </button>
+                )}
+              </form>
+            </li>
+          ))}
+        </ul>
+      )
+    }
+  </div>
+
+  <div id="review-toast" class="admin-toast-host" aria-live="polite" aria-atomic="true"></div>
+
+  <script>
+    import { enhanceAdminForms } from '@balier/lib/admin/forms';
+
+    const editor = document.getElementById('reviews-editor');
+    const toastHost = document.getElementById('review-toast');
+    if (editor && toastHost) {
+      enhanceAdminForms({ root: editor, toastHost, messageId: 'review-message' });
+    }
+  </script>
+</AdminLayout>

@@ -3,10 +3,11 @@ import { and, eq, sql, type SQL } from 'drizzle-orm';
 import { createDb, createTxDb } from '@balier/lib/db';
 import { pruneAuthAttempts } from '@balier/lib/db/queries/authAttempts';
 import { listWaybillOrdersToTrack } from '@balier/lib/db/queries/orders';
+import { claimReviewRequest } from '@balier/lib/db/queries/reviews';
 import { getPaymentTtlMinutes } from '@balier/lib/db/queries/settings';
 import { orders, payments } from '@balier/lib/db/schema';
 import { createMonobankPayment } from '@balier/lib/monobank';
-import { createEmailNotifier } from '@balier/lib/notify/email';
+import { createEmailNotifier, sendReviewRequestEmail } from '@balier/lib/notify/email';
 import { createTelegramNotifier } from '@balier/lib/notify/telegram';
 import { createNovaPoshtaClient } from '@balier/lib/novaposhta/client';
 import { createNovaPoshtaShipping } from '@balier/lib/novaposhta/shipping';
@@ -200,6 +201,27 @@ async function reconcileAwaitingPayment(
   }
 }
 
+/**
+ * The parcel was received: ask for a review, once per order. The claim is
+ * stamped before the send, so a failed send is not retried — a missed «як вам
+ * покупка?» costs nothing, a repeated one annoys. No e-mail on the order, no
+ * letter; the manager can still copy the link from the order page.
+ */
+async function requestReview(env: Env, db: ReturnType<typeof createDb>, orderId: string) {
+  const claim = await claimReviewRequest(db, orderId);
+  if (!claim?.customerEmail) return;
+  try {
+    await sendReviewRequestEmail(env.EMAIL, env.ORDER_EMAIL_FROM, {
+      to: claim.customerEmail,
+      customerName: claim.customerName,
+      reviewUrl: new URL(`/review/${claim.reviewToken}`, env.PUBLIC_SITE_URL).href,
+    });
+  } catch (err) {
+    console.error(`Review request e-mail failed for order ${orderId}`, err);
+    Sentry.captureException(err);
+  }
+}
+
 async function syncNovaPoshta(env: Env): Promise<void> {
   const db = createDb(env.DATABASE_URL);
   const client = createNovaPoshtaClient(env.NOVAPOSHTA_API_KEY);
@@ -259,6 +281,7 @@ async function trackWaybillStatuses(env: Env): Promise<void> {
         if (decision.move) {
           console.log(`Order ${row.orderNumber} → ${decision.move} (NP code ${status.statusCode})`);
         }
+        if (decision.move === 'delivered') await requestReview(env, db, result.order.id);
         if (decision.detach) {
           console.warn(`Order ${row.orderNumber}: waybill ${row.npTtn} deleted at NP, detached`);
         }

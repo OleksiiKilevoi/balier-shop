@@ -455,3 +455,59 @@ export async function getProductBySlug(db: Db, slug: string): Promise<ProductDet
     images,
   };
 }
+
+/** One row per active variant of an active product — what the Google feed lists. */
+export interface FeedVariantData {
+  sku: string;
+  productId: string;
+  slug: string;
+  title: string;
+  description: string | null;
+  colorName: string | null;
+  price: Kopiykas;
+  inStock: boolean;
+  /** The variant's own photo when it has one, else the product's lead photo. Relative. */
+  imageUrl: string | null;
+}
+
+export async function listFeedVariants(db: Db): Promise<FeedVariantData[]> {
+  const rows = await db
+    .select({
+      sku: productVariants.sku,
+      variantId: productVariants.id,
+      productId: products.id,
+      slug: products.slug,
+      title: productTranslations.title,
+      description: productTranslations.description,
+      colorName: productVariants.colorName,
+      price: sql<number>`coalesce(${productVariants.priceOverride}, ${products.basePrice})`,
+      inStock: productVariants.inStock,
+    })
+    .from(productVariants)
+    .innerJoin(products, eq(products.id, productVariants.productId))
+    .innerJoin(
+      productTranslations,
+      and(eq(productTranslations.productId, products.id), eq(productTranslations.locale, LOCALE)),
+    )
+    .where(and(eq(products.status, 'active'), eq(productVariants.isActive, true)))
+    .orderBy(asc(products.position), asc(productVariants.position));
+  if (rows.length === 0) return [];
+
+  // Whole galleries, lowest position first: tens of products, one round trip.
+  const images = await db
+    .select({ productId: productImages.productId, variantId: productImages.variantId, url: productImages.url })
+    .from(productImages)
+    .where(inArray(productImages.productId, [...new Set(rows.map((row) => row.productId))]))
+    .orderBy(asc(productImages.position), asc(productImages.id));
+
+  const lead = new Map<string, string>();
+  for (const image of images) {
+    const key = image.variantId ?? `product:${image.productId}`;
+    if (!lead.has(key)) lead.set(key, image.url);
+  }
+
+  return rows.map(({ variantId, ...row }) => ({
+    ...row,
+    imageUrl: lead.get(variantId) ?? lead.get(`product:${row.productId}`) ?? null,
+  }));
+}

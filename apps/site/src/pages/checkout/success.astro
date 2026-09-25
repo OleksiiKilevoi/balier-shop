@@ -7,6 +7,7 @@ import { createDb } from '@balier/lib/db';
 import { findOrderByNumber } from '@balier/lib/db/queries/orders';
 import { orderStatusCopy } from '@balier/lib/i18n/checkout';
 import { formatPrice } from '@balier/lib/money';
+import { GOOGLE_ADS_ID, GOOGLE_ADS_PURCHASE_LABEL } from '~/lib/googleAds';
 
 export const prerender = false;
 
@@ -25,9 +26,26 @@ const order = await findOrderByNumber(db, orderNumber);
 if (!order) return Astro.rewrite('/404');
 
 const copy = orderStatusCopy(order.status, order.paymentMethod);
+
+// Reporting only — `paid` is still the webhook's word (hard rule 2). COD orders
+// count: they are real orders. `transaction_id` makes a reload one conversion.
+const conversion =
+  import.meta.env.PROD && GOOGLE_ADS_ID && GOOGLE_ADS_PURCHASE_LABEL && order.status !== 'cancelled'
+    ? {
+        send_to: `${GOOGLE_ADS_ID}/${GOOGLE_ADS_PURCHASE_LABEL}`,
+        value: order.total / 100,
+        currency: 'UAH',
+        transaction_id: order.orderNumber,
+      }
+    : null;
 ---
 
 <BaseLayout title="Замовлення оформлено" noindex>
+  {conversion && (
+    <script is:inline slot="head" define:vars={{ conversion }}>
+      window.gtag?.('event', 'conversion', conversion);
+    </script>
+  )}
   <Container class="py-8 sm:py-12">
     <div class="mx-auto max-w-lg text-center">
       <h1 class="text-3xl sm:text-4xl">{copy.heading}</h1>

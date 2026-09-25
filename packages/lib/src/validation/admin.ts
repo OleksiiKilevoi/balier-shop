@@ -495,3 +495,11 @@ export function adminOrderFieldErrors(error: z.ZodError): Set<AdminOrderField> {
 
   return fields;
 }
+
+/* ---------------------------------------------------------------- reviews --- */
+
+/** «Опублікувати» / «Відхилити» on `/reviews`. */
+export const adminReviewActionSchema = z.object({
+  intent: z.enum(['publish', 'reject']),
+  reviewId: z.uuid(),
+});

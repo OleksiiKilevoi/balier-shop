@@ -41,6 +41,7 @@ const path = Astro.url.pathname.replace(/\.html$/, '').replace(/(.)\/$/, '$1');
 const canonical = new URL(path, Astro.site ?? Astro.url).href;
 // Every page gets a share image: the page's own, or the brand's python leather.
 const ogImageUrl = new URL(ogImage ?? '/images/og-default.jpg', Astro.site ?? Astro.url).href;
+import { GOOGLE_ADS_ID } from '~/lib/googleAds';
 ---
 
 <html lang="uk">
@@ -74,6 +75,22 @@ const ogImageUrl = new URL(ogImage ?? '/images/og-default.jpg', Astro.site ?? As
         visits. `is:inline` keeps Astro from bundling it. */}
     {import.meta.env.PROD && (
       <script is:inline defer src="https://assets.onedollarstats.com/stonks.js"></script>
+    )}
+
+    {/* Google Ads tag: production only, and only once an ID is set in
+        `~/lib/googleAds.ts`. The purchase event fires from /checkout/success. */}
+    {import.meta.env.PROD && GOOGLE_ADS_ID && (
+      <>
+        <script is:inline async src={`https://www.googletagmanager.com/gtag/js?id=${GOOGLE_ADS_ID}`}></script>
+        <script is:inline define:vars={{ id: GOOGLE_ADS_ID }}>
+          window.dataLayer = window.dataLayer || [];
+          window.gtag = function () {
+            window.dataLayer.push(arguments);
+          };
+          window.gtag('js', new Date());
+          window.gtag('config', id);
+        </script>
+      </>
     )}
 
     <slot name="head" />

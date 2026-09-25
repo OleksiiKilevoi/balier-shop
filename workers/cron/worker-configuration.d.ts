@@ -4,6 +4,7 @@
 interface __BaseEnv_Env {
 	EMAIL: SendEmail;
 	ORDER_EMAIL_FROM: "noreply@mail.balier.com.ua";
+	PUBLIC_SITE_URL: "https://balier.com.ua";
 	SENTRY_DSN: "https://10cc802695139cc28dd32cf305de6f34@o4504565189378049.ingest.us.sentry.io/4511881341370368";
 	SENTRY_ENVIRONMENT: "production";
 	DATABASE_URL: string;
@@ -23,7 +24,7 @@ type StringifyValues<EnvType extends Record<string, unknown>> = {
 	[Binding in keyof EnvType]: EnvType[Binding] extends string ? EnvType[Binding] : string;
 };
 declare namespace NodeJS {
-	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "ORDER_EMAIL_FROM" | "SENTRY_DSN" | "SENTRY_ENVIRONMENT" | "DATABASE_URL" | "NOVAPOSHTA_API_KEY" | "MONOBANK_TOKEN" | "TELEGRAM_BOT_TOKEN" | "TELEGRAM_CHAT_ID">> {}
+	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "ORDER_EMAIL_FROM" | "PUBLIC_SITE_URL" | "SENTRY_DSN" | "SENTRY_ENVIRONMENT" | "DATABASE_URL" | "NOVAPOSHTA_API_KEY" | "MONOBANK_TOKEN" | "TELEGRAM_BOT_TOKEN" | "TELEGRAM_CHAT_ID">> {}
 }
 
 // Begin runtime types

@@ -4,6 +4,7 @@ import ProductStatusBadge from '~/components/ProductStatusBadge.astro';
 import AdminLayout from '~/layouts/AdminLayout.astro';
 import { createDb } from '@balier/lib/db';
 import { listAdminProducts, listCategoryOptions } from '@balier/lib/db/queries/adminProducts';
+import { countPendingReviews } from '@balier/lib/db/queries/reviews';
 import { productStatus } from '@balier/lib/db/schema';
 import type { ProductStatus } from '@balier/lib/db/schema';
 import { PRODUCT_STATUS_LABELS, formatAdminDateTime } from '@balier/lib/i18n/admin';
@@ -47,6 +48,8 @@ const categoryId = categoryOptions.find(
   (option) => option.id === params.get('category'),
 )?.id;
 
+const pendingReviews = await countPendingReviews(db);
+
 const { rows, total } = await listAdminProducts(db, {
   status,
   categoryId,
@@ -80,6 +83,9 @@ const countLabel = `${total} ${pluralUk(total, {
       {/* Categories live one click away rather than in the header nav: they are
           edited once in a while, and a fourth nav row starts wrapping at 320px. */}
       <a href="/categories" class="admin-btn admin-btn-secondary">Категорії</a>
+      <a href="/reviews" class="admin-btn admin-btn-secondary">
+        Відгуки{pendingReviews > 0 && <span class="admin-tone-attention ml-1.5 rounded-full px-2 text-xs">{pendingReviews}</span>}
+      </a>
       <a href="/products/new" class="admin-btn admin-btn-primary">Створити товар</a>
     </div>
   </header>

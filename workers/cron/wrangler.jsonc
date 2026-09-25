@@ -28,6 +28,9 @@
   "send_email": [{ "name": "EMAIL" }],
   "vars": {
     "ORDER_EMAIL_FROM": "noreply@mail.balier.com.ua",
+    // Storefront origin, for the review link in the «залиште відгук» e-mail
+    // sent when a parcel is received.
+    "PUBLIC_SITE_URL": "https://balier.com.ua",
     // Sentry (`docs/plans/sentry.md`) — a DSN is a public project identifier,
     // not a secret. Same single project as the site and admin Workers; the
     // `withSentry` wrapper in `index.ts` tags events `worker:cron`.

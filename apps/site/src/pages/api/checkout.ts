@@ -93,6 +93,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
         return json({ error: 'cod_over_limit', codLimitKopiykas }, 400);
       case 'promo_invalid':
       case 'promo_used':
+      case 'promo_not_first':
         return json({ error: result.reason }, 400);
       case 'payment_failed':
         return json({ error: 'payment_failed' }, 502);

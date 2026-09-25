@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Order, OrderItem } from '../db/schema';
-import { createEmailNotifier, formatOrderEmail } from './email';
+import { createEmailNotifier, formatOrderEmail, formatReviewRequestEmail } from './email';
 
 function order(overrides: Partial<Order> = {}): Order {
   return {
@@ -36,6 +36,8 @@ function order(overrides: Partial<Order> = {}): Order {
     paidAt: null,
     cancelledAt: null,
     statusBeforeExit: null,
+    reviewToken: '00000000-0000-4000-8000-000000000000',
+    reviewRequestedAt: null,
     ...overrides,
   };
 }
@@ -178,5 +180,18 @@ describe('createEmailNotifier', () => {
     await expect(
       notifier.orderCreated({ order: order({ paymentMethod: 'cod' }), items: [item()] }),
     ).resolves.toBeUndefined();
+  });
+});
+
+describe('formatReviewRequestEmail', () => {
+  it('links the review page and escapes the name', () => {
+    const mail = formatReviewRequestEmail({
+      to: 'a@b.ua',
+      customerName: 'Олена <b>',
+      reviewUrl: 'https://balier.com.ua/review/abc',
+    });
+    expect(mail.text).toContain('https://balier.com.ua/review/abc');
+    expect(mail.html).toContain('href="https://balier.com.ua/review/abc"');
+    expect(mail.html).toContain('Олена &lt;b&gt;');
   });
 });

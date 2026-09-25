@@ -7,6 +7,8 @@ import ProductGallery from '~/components/ProductGallery.astro';
 import QuantityStepper from '~/components/QuantityStepper.astro';
 import { createDb } from '@balier/lib/db';
 import { getProductBySlug } from '@balier/lib/db/queries/products';
+import { getProductReviews } from '@balier/lib/db/queries/reviews';
+import { pluralUk } from '@balier/lib/i18n/plural';
 import { formatPrice } from '@balier/lib/money';
 import { orderDeepLink } from '@balier/lib/telegram';
 import { MAX_ITEM_QUANTITY } from '@balier/lib/validation/cart';
@@ -14,8 +16,14 @@ import { MAX_ITEM_QUANTITY } from '@balier/lib/validation/cart';
 export const prerender = false;
 
 const db = createDb(env.DATABASE_URL);
-const product = await getProductBySlug(db, Astro.params.slug ?? '');
+const [product, reviews] = await Promise.all([
+  getProductBySlug(db, Astro.params.slug ?? ''),
+  getProductReviews(db, Astro.params.slug ?? ''),
+]);
 if (!product) return Astro.rewrite('/404');
+
+const reviewDate = new Intl.DateTimeFormat('uk-UA', { day: 'numeric', month: 'long', year: 'numeric' });
+const stars = (rating: number) => '★'.repeat(rating) + '☆'.repeat(5 - rating);
 
 // Guaranteed by the query — every product has at least one active variant — but
 // `noUncheckedIndexedAccess` is right to make us say so.
@@ -75,6 +83,26 @@ const structuredData = [
       availability: inStock ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock',
       itemCondition: 'https://schema.org/NewCondition',
     },
+    // Only published reviews, and only when there is at least one — an empty
+    // aggregateRating is invalid structured data.
+    ...(reviews.count > 0
+      ? {
+          aggregateRating: {
+            '@type': 'AggregateRating',
+            ratingValue: reviews.average,
+            reviewCount: reviews.count,
+            bestRating: 5,
+            worstRating: 1,
+          },
+          review: reviews.reviews.slice(0, 10).map((review) => ({
+            '@type': 'Review',
+            author: { '@type': 'Person', name: review.authorName },
+            datePublished: review.publishedAt.toISOString().slice(0, 10),
+            reviewRating: { '@type': 'Rating', ratingValue: review.rating, bestRating: 5 },
+            ...(review.body ? { reviewBody: review.body } : {}),
+          })),
+        }
+      : {}),
   },
   {
     '@context': 'https://schema.org',
@@ -128,6 +156,17 @@ const structuredData = [
           whole column rather than being allowed to shrink or wrap. */}
       <div class="min-w-0">
         <h1 class="text-2xl sm:text-3xl lg:text-4xl">{product.title}</h1>
+        {
+          reviews.count > 0 && (
+            <a href="#reviews" class="text-ink-muted mt-2 inline-flex items-center gap-2 text-sm underline-offset-2 hover:underline">
+              <span class="text-brand" aria-hidden="true">{stars(Math.round(reviews.average))}</span>
+              <span>
+                {reviews.average.toFixed(1)} · {reviews.count}{' '}
+                {pluralUk(reviews.count, { one: 'відгук', few: 'відгуки', many: 'відгуків' })}
+              </span>
+            </a>
+          )
+        }
 
         {/* The pill links to the category listing when one exists; the visual
             stays on the inner span so the phone-sized hit area (min-h-touch,
@@ -304,6 +343,27 @@ const structuredData = [
 
       </div>
     </div>
+
+    {
+      reviews.count > 0 && (
+        <section id="reviews" class="border-line mt-12 max-w-3xl border-t pt-8">
+          <h2 class="text-2xl">Відгуки</h2>
+          <ul class="mt-6 space-y-6">
+            {reviews.reviews.map((review) => (
+              <li class="border-line border-b pb-6 last:border-b-0">
+                <p class="text-brand" aria-label={`Оцінка ${review.rating} з 5`}>
+                  {stars(review.rating)}
+                </p>
+                {review.body && <p class="text-ink mt-2 whitespace-pre-line">{review.body}</p>}
+                <p class="text-ink-muted mt-2 text-sm">
+                  {review.authorName} · {reviewDate.format(review.publishedAt)} · Перевірена покупка
+                </p>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )
+    }
   </Container>
 </BaseLayout>
 

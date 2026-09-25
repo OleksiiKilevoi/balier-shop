@@ -290,6 +290,8 @@ if (!order) Astro.response.status = 404;
  * unreachable, and now the link is simply here. `pageUrl` is NULL for anything
  * created before the column existed, and the block hides itself.
  */
+const reviewUrl = order ? `${env.SITE_ORIGIN}/review/${order.reviewToken}` : '';
+
 const unpaidCard =
   order?.paymentMethod === 'card' &&
   (order.status === 'pending' || order.status === 'awaiting_payment');
@@ -621,6 +623,34 @@ const carrierDriven =
                 with this is copy it into a chat — which is also why the copy
                 button below exists. The link stays selectable so that with
                 script off (or the clipboard refused) nothing is lost. */}
+            {/* The same review link the delivery e-mail carries — here for the
+                customers who left no e-mail, to be pasted into Viber or
+                Telegram. Offered once the parcel is received, which is also
+                the only time the storefront page opens. */}
+            {order.status === 'delivered' && (
+              <div class="border-border mt-4 border-t pt-4">
+                <p class="text-fg-subtle text-xs">Посилання на відгук</p>
+                <a
+                  href={reviewUrl}
+                  rel="noreferrer"
+                  target="_blank"
+                  class="text-fg mt-1 block text-sm break-all underline underline-offset-2 select-all"
+                >
+                  {reviewUrl}
+                </a>
+                <button
+                  type="button"
+                  data-copy-url={reviewUrl}
+                  hidden
+                  aria-live="polite"
+                  class="admin-btn admin-btn-secondary mt-3 w-full sm:w-auto"
+                >
+                  <span data-copy="idle">Копіювати посилання</span>
+                  <span data-copy="done" hidden>Скопійовано</span>
+                </button>
+              </div>
+            )}
+
             {cardPayment?.pageUrl && (
               <div class="border-border mt-4 border-t pt-4">
                 <p class="text-fg-subtle text-xs">Посилання на оплату</p>
@@ -1020,8 +1050,15 @@ const carrierDriven =
      * than top-level statements because every swap by the enhancement layer
      * replaces the button node, listener and all.
      */
-    function wireCopyButton() {
-      const copyButton = document.getElementById('copy-pay-link');
+    function wireCopyButtons() {
+      const payLink = document.getElementById('copy-pay-link');
+      if (payLink) wireCopyButton(payLink, payLink.dataset.url ?? '');
+      for (const button of document.querySelectorAll<HTMLElement>('[data-copy-url]')) {
+        wireCopyButton(button, button.dataset.copyUrl ?? '');
+      }
+    }
+
+    function wireCopyButton(copyButton: HTMLElement, url: string) {
       if (!(copyButton instanceof HTMLButtonElement) || !navigator.clipboard) return;
 
       copyButton.hidden = false;
@@ -1032,7 +1069,7 @@ const carrierDriven =
 
       copyButton.addEventListener('click', async () => {
         try {
-          await navigator.clipboard.writeText(copyButton.dataset.url ?? '');
+          await navigator.clipboard.writeText(url);
         } catch {
           /* Clipboard permission refused — the select-all link still works. */
           return;
@@ -1049,7 +1086,7 @@ const carrierDriven =
       });
     }
 
-    wireCopyButton();
+    wireCopyButtons();
 
     const editor = document.getElementById('order-editor');
     const toastHost = document.getElementById('order-toast');
@@ -1059,7 +1096,7 @@ const carrierDriven =
         root: editor,
         toastHost,
         messageId: 'order-message',
-        onRender: wireCopyButton,
+        onRender: wireCopyButtons,
       });
     }
   </script>

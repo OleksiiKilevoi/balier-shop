@@ -40,6 +40,8 @@ function order(overrides: Partial<Order> = {}): Order {
     paidAt: null,
     cancelledAt: null,
     statusBeforeExit: null,
+    reviewToken: '00000000-0000-4000-8000-000000000000',
+    reviewRequestedAt: null,
     ...overrides,
   };
 }

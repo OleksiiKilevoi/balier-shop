@@ -1,0 +1,207 @@
+---
+import { env } from 'cloudflare:workers';
+import BaseLayout from '~/layouts/BaseLayout.astro';
+import Container from '~/components/Container.astro';
+import Button from '~/components/Button.astro';
+import { createDb } from '@balier/lib/db';
+import { createReviews, findReviewInvite } from '@balier/lib/db/queries/reviews';
+import { sendTelegramMessage } from '@balier/lib/notify/telegram';
+import { REVIEW_BODY_MAX, REVIEW_NAME_MAX, parseReviewForm } from '@balier/lib/validation/review';
+import type { ReviewFormError } from '@balier/lib/validation/review';
+
+/**
+ * The buyer's review form, reached from the «залиште відгук» e-mail or a link
+ * the manager sent. The token is the order's own random `review_token`; the
+ * page opens only once the order is `delivered`. One review per product per
+ * order, saved `pending` — the panel publishes it.
+ *
+ * A plain form answered with a 303, no script needed. The stars are radio
+ * buttons styled in CSS, so they work from the keyboard as well.
+ */
+export const prerender = false;
+
+const db = createDb(env.DATABASE_URL);
+const token = Astro.params.token ?? '';
+const invite = await findReviewInvite(db, token);
+if (!invite) return Astro.rewrite('/404');
+
+const ERRORS: Record<ReviewFormError, string> = {
+  invalid_name: 'Вкажіть ім’я — від 2 до 60 символів.',
+  invalid_review: 'Поставте оцінку кожному виробу, про який пишете.',
+  nothing_rated: 'Оцініть хоча б один виріб.',
+};
+
+const open = invite.products.filter((product) => !product.reviewed);
+let error: ReviewFormError | null = null;
+let body: Record<string, string> = {};
+
+if (Astro.request.method === 'POST') {
+  body = Object.fromEntries(await Astro.request.formData()) as Record<string, string>;
+  const parsed = parseReviewForm(
+    body,
+    open.map((product) => product.productId),
+  );
+  if (!parsed.ok) {
+    error = parsed.error;
+    Astro.response.status = 400;
+  } else {
+    const created = await createReviews(db, invite.orderId, parsed.authorName, parsed.entries);
+    if (created > 0) {
+      const titles = new Map(open.map((product) => [product.productId, product.title]));
+      const lines = parsed.entries.map(
+        (entry) =>
+          `${'★'.repeat(entry.rating)}${'☆'.repeat(5 - entry.rating)} ${titles.get(entry.productId)}` +
+          (entry.body ? `\n${entry.body}` : ''),
+      );
+      Astro.locals.cfContext.waitUntil(
+        sendTelegramMessage(
+          env.TELEGRAM_BOT_TOKEN,
+          env.TELEGRAM_CHAT_ID,
+          [
+            `Новий відгук — замовлення ${invite.orderNumber}, ${parsed.authorName}`,
+            '',
+            ...lines,
+            '',
+            'Опублікувати: адмінка → Товари → Відгуки',
+          ].join('\n'),
+        ),
+      );
+    }
+    return Astro.redirect(`${Astro.url.pathname}?sent=1`, 303);
+  }
+}
+
+const sent = Astro.url.searchParams.get('sent') === '1';
+const firstName = invite.customerName.trim().split(/\s+/)[0] ?? '';
+
+const inputClass =
+  'border-line-strong bg-paper-raised text-ink placeholder:text-ink-muted rounded-btn h-touch w-full min-w-0 appearance-none border px-4 text-base sm:h-11 sm:text-sm';
+---
+
+<BaseLayout title="Відгук про покупку" noindex>
+  <Container class="py-8 sm:py-12">
+    <div class="mx-auto max-w-xl">
+      <h1 class="text-3xl sm:text-4xl">Як вам покупка?</h1>
+
+      {
+        sent || open.length === 0 ? (
+          <>
+            <p class="text-ink-muted mt-3">
+              Дякуємо за відгук! Ми опублікуємо його на сторінці товару після перевірки.
+            </p>
+            <Button href="/products" class="mt-8 w-full sm:w-auto">
+              До каталогу
+            </Button>
+          </>
+        ) : (
+          <>
+            <p class="text-ink-muted mt-3">
+              Замовлення {invite.orderNumber}. Кілька слів і оцінка допоможуть іншим покупцям
+              зробити вибір.
+            </p>
+
+            {error && (
+              <p class="text-ink border-line-strong rounded-btn mt-6 border px-4 py-3 text-sm" role="alert">
+                {ERRORS[error]}
+              </p>
+            )}
+
+            <form method="post" class="mt-6 space-y-8">
+              <div>
+                <label for="authorName" class="text-ink-soft mb-1.5 block text-sm">
+                  Ваше ім’я
+                </label>
+                <input
+                  id="authorName"
+                  name="authorName"
+                  type="text"
+                  required
+                  minlength={2}
+                  maxlength={REVIEW_NAME_MAX}
+                  autocomplete="given-name"
+                  value={body.authorName ?? firstName}
+                  class={inputClass}
+                />
+                <p class="text-ink-muted mt-1.5 text-xs">Так підпишемо відгук на сайті.</p>
+              </div>
+
+              {open.map((product) => (
+                <div class="border-line border-t pt-6">
+                <fieldset>
+                  <legend class="text-ink font-medium">
+                    <a
+                      href={`/products/${product.slug}`}
+                      class="underline-offset-2 hover:underline"
+                      target="_blank"
+                    >
+                      {product.title}
+                    </a>
+                  </legend>
+
+                  <div class="stars mt-3 flex flex-row-reverse justify-end gap-1" role="radiogroup" aria-label="Оцінка">
+                    {[5, 4, 3, 2, 1].map((value) => (
+                      <>
+                        <input
+                          type="radio"
+                          id={`rating-${product.productId}-${value}`}
+                          name={`rating:${product.productId}`}
+                          value={value}
+                          checked={body[`rating:${product.productId}`] === String(value)}
+                          class="sr-only"
+                        />
+                        <label
+                          for={`rating-${product.productId}-${value}`}
+                          class="cursor-pointer text-3xl leading-none"
+                          title={`${value} з 5`}
+                        >
+                          <span aria-hidden="true">★</span>
+                          <span class="sr-only">{value} з 5</span>
+                        </label>
+                      </>
+                    ))}
+                  </div>
+
+                  <label for={`body-${product.productId}`} class="text-ink-soft mt-4 mb-1.5 block text-sm">
+                    Відгук <span class="text-ink-muted">(необов’язково)</span>
+                  </label>
+                  <textarea
+                    id={`body-${product.productId}`}
+                    name={`body:${product.productId}`}
+                    rows="4"
+                    maxlength={REVIEW_BODY_MAX}
+                    class={inputClass.replace('h-touch', '').replace('sm:h-11', '') + ' py-3'}
+                    set:text={body[`body:${product.productId}`] ?? ''}
+                  />
+                </fieldset>
+                </div>
+              ))}
+
+              <Button type="submit" block>
+                Надіслати відгук
+              </Button>
+            </form>
+          </>
+        )
+      }
+    </div>
+  </Container>
+</BaseLayout>
+
+<style>
+  /* Row-reversed, so the stars *after* a checked or hovered one in the DOM are
+     the ones to its left on screen — the lower ratings that light up with it. */
+  .stars label {
+    color: var(--color-line-strong);
+    transition: color 120ms;
+  }
+  .stars input:checked ~ label,
+  .stars label:hover,
+  .stars label:hover ~ label {
+    color: var(--color-brand);
+  }
+  .stars input:focus-visible + label {
+    outline: 2px solid var(--color-brand);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+</style>

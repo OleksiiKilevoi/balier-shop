@@ -171,3 +171,48 @@ export async function sendPromoCodeEmail(
     html,
   });
 }
+
+/* ---------------------------------------------------------- review request */
+
+export interface ReviewRequestEmailInput {
+  to: string;
+  customerName: string;
+  /** Absolute `/review/<token>` URL. */
+  reviewUrl: string;
+}
+
+export function formatReviewRequestEmail(input: ReviewRequestEmailInput): OrderEmail {
+  const subject = 'Як вам покупка? Залиште відгук — BÁLIER';
+  const text = [
+    `${input.customerName}, дякуємо, що обрали BÁLIER!`,
+    '',
+    'Бачимо, що посилку вже отримано. Розкажіть, як вам виріб — кілька слів і оцінка допоможуть іншим покупцям зробити вибір.',
+    '',
+    `Залишити відгук: ${input.reviewUrl}`,
+    '',
+    'BÁLIER — шкіряні вироби ручної роботи, Дніпро.',
+  ].join('\n');
+  const html = [
+    `<p>${escapeHtml(input.customerName)}, дякуємо, що обрали BÁLIER!</p>`,
+    `<p>Бачимо, що посилку вже отримано. Розкажіть, як вам виріб — кілька слів і оцінка допоможуть іншим покупцям зробити вибір.</p>`,
+    `<p><a href="${escapeHtml(input.reviewUrl)}">Залишити відгук</a></p>`,
+    `<p>BÁLIER — шкіряні вироби ручної роботи, Дніпро.</p>`,
+  ].join('\n');
+  return { subject, text, html };
+}
+
+/** Throws on failure; the cron catches and logs it — the request is not retried. */
+export async function sendReviewRequestEmail(
+  email: SendEmail,
+  fromAddress: string,
+  input: ReviewRequestEmailInput,
+): Promise<void> {
+  const { subject, text, html } = formatReviewRequestEmail(input);
+  await email.send({
+    to: input.to,
+    from: { name: 'Balier', email: fromAddress },
+    subject,
+    text,
+    html,
+  });
+}

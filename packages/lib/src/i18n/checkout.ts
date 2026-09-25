@@ -27,6 +27,7 @@ export function checkoutNoticeText(notice: CheckoutNotice): string {
 export const PROMO_ERROR_TEXT = {
   promo_invalid: 'Такого промокоду немає або акцію вимкнено. Перевірте код із листа.',
   promo_used: 'Цей промокод уже використано. Один код діє на одне замовлення.',
+  promo_not_first: 'Цей промокод діє лише на перше замовлення.',
 } as const;
 
 export function codOverLimitText(limitKopiykas: Kopiykas): string {

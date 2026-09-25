@@ -1,5 +1,6 @@
 import {
   boolean,
+  check,
   index,
   integer,
   jsonb,
@@ -8,9 +9,10 @@ import {
   primaryKey,
   text,
   timestamp,
+  unique,
   uuid,
 } from 'drizzle-orm/pg-core';
-import { relations } from 'drizzle-orm';
+import { relations, sql } from 'drizzle-orm';
 
 /**
  * Conventions enforced across this file:
@@ -64,6 +66,7 @@ export const paymentProvider = pgEnum('payment_provider', ['monobank']);
  * Ordered least-privileged first, which is also the column's default.
  */
 export const adminRole = pgEnum('admin_role', ['manager', 'admin']);
+export const reviewStatus = pgEnum('review_status', ['pending', 'published', 'rejected']);
 
 const createdAt = timestamp('created_at', { withTimezone: true }).notNull().defaultNow();
 const updatedAt = timestamp('updated_at', { withTimezone: true }).notNull().defaultNow();
@@ -273,6 +276,14 @@ export const orders = pgTable(
      * cleared back to `null` on a successful revert out of either.
      */
     statusBeforeExit: orderStatus('status_before_exit'),
+    /**
+     * The secret in the customer's «залиште відгук» link (`/review/<token>`).
+     * Random per order, so the link needs no signing key; the page only opens
+     * for a `delivered` order.
+     */
+    reviewToken: uuid('review_token').notNull().unique().defaultRandom(),
+    /** When the cron claimed this order's review e-mail — set once, so a revert and re-advance to `delivered` never sends it twice. */
+    reviewRequestedAt: timestamp('review_requested_at', { withTimezone: true }),
   },
   (t) => [index('orders_status_idx').on(t.status), index('orders_created_at_idx').on(t.createdAt)],
 );
@@ -690,6 +701,37 @@ export const promoCodes = pgTable(
   },
 );
 export type PromoCode = typeof promoCodes.$inferSelect;
+
+/**
+ * A buyer's review of one product from one delivered order — «Перевірена
+ * покупка» by construction, since the only way in is the order's review link.
+ * Nothing is public until a manager publishes it in the panel.
+ */
+export const reviews = pgTable(
+  'reviews',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    productId: uuid('product_id')
+      .notNull()
+      .references(() => products.id, { onDelete: 'cascade' }),
+    orderId: uuid('order_id')
+      .notNull()
+      .references(() => orders.id, { onDelete: 'cascade' }),
+    authorName: text('author_name').notNull(),
+    rating: integer('rating').notNull(),
+    body: text('body'),
+    status: reviewStatus('status').notNull().default('pending'),
+    createdAt,
+    publishedAt: timestamp('published_at', { withTimezone: true }),
+  },
+  (t) => [
+    unique('reviews_order_product_unique').on(t.orderId, t.productId),
+    index('reviews_product_status_idx').on(t.productId, t.status),
+    check('reviews_rating_range', sql`${t.rating} between 1 and 5`),
+  ],
+);
+export type Review = typeof reviews.$inferSelect;
+export type ReviewStatus = (typeof reviewStatus.enumValues)[number];
 
 export const orderItemsRelations = relations(orderItems, ({ one }) => ({
   order: one(orders, { fields: [orderItems.orderId], references: [orders.id] }),

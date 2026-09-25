@@ -1,4 +1,4 @@
-import { and, eq, ne, sql } from 'drizzle-orm';
+import { and, eq, ne, or, sql } from 'drizzle-orm';
 import type { Db, Tx } from '../index';
 import type { PromoCode } from '../schema';
 import { orders, promoCodes } from '../schema';
@@ -51,6 +51,27 @@ export async function promoCodeExists(tx: Tx, code: string): Promise<boolean> {
     .select({ id: promoCodes.id })
     .from(promoCodes)
     .where(eq(promoCodes.code, code))
+    .limit(1);
+  return row !== undefined;
+}
+
+/**
+ * Whether this phone or e-mail already has an order that wasn't cancelled —
+ * what a first-order-only code checks.
+ * ponytail: a new phone and no e-mail passes; a real identity is the upgrade path.
+ */
+export async function hasPriorOrder(tx: Tx, phone: string, email: string | undefined): Promise<boolean> {
+  const [row] = await tx
+    .select({ id: orders.id })
+    .from(orders)
+    .where(
+      and(
+        ne(orders.status, 'cancelled'),
+        email
+          ? or(eq(orders.customerPhone, phone), sql`lower(${orders.customerEmail}) = ${email}`)
+          : eq(orders.customerPhone, phone),
+      ),
+    )
     .limit(1);
   return row !== undefined;
 }

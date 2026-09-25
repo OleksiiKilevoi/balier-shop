@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { PROMO_CODE_PATTERN, normalizePromoCode } from '../orders/promo';
+import { PROMO_CODE_PATTERN, campaignCode, normalizePromoCode } from '../orders/promo';
 import { cartItemsSchema } from './cart';
 
 /**
@@ -82,7 +82,10 @@ export const promoCodeSchema = z
   .max(40)
   .optional()
   .transform((value) => (value ? normalizePromoCode(value) : undefined))
-  .refine((value) => value === undefined || PROMO_CODE_PATTERN.test(value), 'invalid_promo');
+  .refine(
+    (value) => value === undefined || PROMO_CODE_PATTERN.test(value) || campaignCode(value) !== null,
+    'invalid_promo',
+  );
 
 export const checkoutRequestSchema = z.object({
   customerName: z.string().trim().min(2).max(MAX_CUSTOMER_NAME),

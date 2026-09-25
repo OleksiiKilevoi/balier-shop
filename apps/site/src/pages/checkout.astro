@@ -333,7 +333,7 @@ const phoneInputClass = inputClass.replace('px-4', 'pl-16 pr-4');
   import type { CartLine, CartSummary } from '@balier/lib/cart';
   import { fetchCartSummary } from '@balier/lib/cart/client';
   import { PROMO_ERROR_TEXT, checkoutNoticeText, codOverLimitText, settlementLabel } from '@balier/lib/i18n/checkout';
-  import { discountFor, normalizePromoCode } from '@balier/lib/orders/promo';
+  import { campaignCode, discountFor, normalizePromoCode } from '@balier/lib/orders/promo';
   import { formatPrice } from '@balier/lib/money';
   import { applyPhoneMask, isCompletePhoneDigits, phoneDigitsFromInput } from '@balier/lib/phone';
   import { cartItems, clearCart } from '@balier/lib/cart/store';
@@ -509,11 +509,11 @@ const phoneInputClass = inputClass.replace('px-4', 'pl-16 pr-4');
     const paintTotal = (summary: CartSummary) => {
       if (!totalOutput) return;
       const code = normalizePromoCode(promoInput?.value ?? '');
-      const discount =
-        promoPercent !== null && code !== '' ? discountFor(summary.total, promoPercent) : 0;
+      const percent = code === '' ? null : (campaignCode(code)?.percent ?? promoPercent);
+      const discount = percent !== null ? discountFor(summary.total, percent) : 0;
       if (discountRow && discountOutput && discountLabel) {
         discountRow.hidden = discount === 0;
-        discountLabel.textContent = `Знижка ${promoPercent ?? 0} %`;
+        discountLabel.textContent = `Знижка ${percent ?? 0} %`;
         discountOutput.textContent = `−${formatPrice(discount)}`;
       }
       totalOutput.textContent = formatPrice(summary.total - discount);
@@ -837,7 +837,7 @@ const phoneInputClass = inputClass.replace('px-4', 'pl-16 pr-4');
           return;
         }
 
-        if (body.error === 'promo_invalid' || body.error === 'promo_used') {
+        if (body.error === 'promo_invalid' || body.error === 'promo_used' || body.error === 'promo_not_first') {
           if (promoError) {
             promoError.textContent = PROMO_ERROR_TEXT[body.error];
             promoError.hidden = false;
