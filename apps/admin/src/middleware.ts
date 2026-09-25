@@ -1,5 +1,5 @@
 import { defineMiddleware, sequence } from 'astro:middleware';
-import { applySecurityHeaders } from '@balier/lib/securityHeaders';
+import { applySecurityHeaders, withHeaders } from '@balier/lib/securityHeaders';
 import type { AstroCookies } from 'astro';
 import { env } from 'cloudflare:workers';
 import * as Sentry from '@sentry/cloudflare';
@@ -120,9 +120,7 @@ const gate = defineMiddleware(async ({ url, cookies, locals }, next) => {
  * `<head>` — PDFs, redirects, the login page's 303s.
  */
 const noindex = defineMiddleware(async (_context, next) => {
-  const response = await next();
-  response.headers.set('x-robots-tag', 'noindex, nofollow');
-  return response;
+  return withHeaders(await next(), { 'x-robots-tag': 'noindex, nofollow' });
 });
 
 /**

@@ -24,10 +24,25 @@ export function frameAncestors(policy: 'none' | 'self'): string {
   return `frame-ancestors '${policy}'`;
 }
 
+/**
+ * `response` with `headers` set, on a copy. A response straight out of the
+ * edge cache (`caches.default.match`) — or from `fetch`, or `Response.redirect`
+ * — has immutable headers, and setting one throws «Can't modify immutable
+ * headers»: every cached NP lookup 500'd that way (2026-09-25) once the
+ * middleware started adding headers. Copying is cheap — the body stream is
+ * handed over, not read.
+ */
+export function withHeaders(response: Response, headers: Record<string, string>): Response {
+  const copy = new Response(response.body, response);
+  for (const [name, value] of Object.entries(headers)) copy.headers.set(name, value);
+  return copy;
+}
+
 export function applySecurityHeaders(response: Response, policy: 'none' | 'self'): Response {
-  for (const [name, value] of Object.entries(SECURITY_HEADERS)) response.headers.set(name, value);
-  response.headers.set('content-security-policy', frameAncestors(policy));
-  return response;
+  return withHeaders(response, {
+    ...SECURITY_HEADERS,
+    'content-security-policy': frameAncestors(policy),
+  });
 }
 
 /**

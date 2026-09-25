@@ -2,7 +2,7 @@ import { defineMiddleware, sequence } from 'astro:middleware';
 import { env } from 'cloudflare:workers';
 import * as Sentry from '@sentry/cloudflare';
 import { legacyRedirect } from '@balier/lib/legacyRedirects';
-import { applySecurityHeaders } from '@balier/lib/securityHeaders';
+import { applySecurityHeaders, withHeaders } from '@balier/lib/securityHeaders';
 import { checkRateLimit } from '@balier/lib/rateLimit';
 
 /* ------------------------------------------------------------------ sentry */
@@ -93,8 +93,9 @@ const legacy = defineMiddleware(({ request, url }, next) => {
  */
 const apiNoindex = defineMiddleware(async ({ url }, next) => {
   const response = await next();
-  if (url.pathname.startsWith('/api/')) response.headers.set('x-robots-tag', 'noindex');
-  return response;
+  return url.pathname.startsWith('/api/')
+    ? withHeaders(response, { 'x-robots-tag': 'noindex' })
+    : response;
 });
 
 /* ------------------------------------------------------------- rate limiting */
