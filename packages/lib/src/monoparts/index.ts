@@ -180,7 +180,15 @@ export interface MonoPartsEnv {
   MONO_PARTS_SECRET?: string;
 }
 
+/**
+ * The switch. Off (2026-09-25) while monobank refuses the test application
+ * (`ACCOUNT_CLOSED`) — the keys stay set, flip this back once the bank
+ * confirms the service is active.
+ */
+export const PARTS_ENABLED = false;
+
 export function monoPartsFromEnv(env: MonoPartsEnv): MonoPartsPayment | null {
+  if (!PARTS_ENABLED) return null;
   if (!env.MONO_PARTS_URL || !env.MONO_PARTS_STORE_ID || !env.MONO_PARTS_SECRET) return null;
   return createMonoPartsPayment({
     baseUrl: env.MONO_PARTS_URL,
