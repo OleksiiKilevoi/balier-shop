@@ -69,6 +69,9 @@ const NAV = [
   { href: '/orders', label: 'Замовлення' },
   { href: '/customers', label: 'Клієнти' },
   { href: '/products', label: 'Товари' },
+  // Asked for in the header by the owner (2026-09-25), past the four-item
+  // budget above: the row may wrap on a narrow laptop, and that was accepted.
+  { href: '/reviews', label: 'Відгуки' },
   ...(Astro.locals.adminUser?.role === 'admin'
     ? [{ href: '/users', label: 'Користувачі' }]
     : []),
