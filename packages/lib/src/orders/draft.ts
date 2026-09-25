@@ -116,7 +116,6 @@ const PAYMENT_METHODS = new Set<string>(paymentMethod.enumValues);
  * shape `adminNewOrderSchema` rejects. It falls back to the default instead.
  */
 export const SELECTABLE_DELIVERY_METHODS = ['np_warehouse', 'np_postomat'] as const;
-export type SelectableDeliveryMethod = (typeof SELECTABLE_DELIVERY_METHODS)[number];
 
 const DELIVERY_METHODS = new Set<string>(SELECTABLE_DELIVERY_METHODS);
 

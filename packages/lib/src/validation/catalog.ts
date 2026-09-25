@@ -136,8 +136,6 @@ export const newProductSchema = z.object({
   status: z.enum(productStatus.enumValues),
 });
 
-export type NewProductInput = z.infer<typeof newProductSchema>;
-
 /** Matches the `products_companion_discount_range` check. */
 export const COMPANION_DISCOUNT_MAX = 50;
 
@@ -272,7 +270,6 @@ export const productActionSchema = z.discriminatedUnion('intent', [
 ]);
 
 export type ProductAction = z.infer<typeof productActionSchema>;
-export type ProductIntent = ProductAction['intent'];
 
 /* ------------------------------------------------------------- the category */
 
@@ -288,8 +285,6 @@ export const categoryActionSchema = z.discriminatedUnion('intent', [
   z.object({ intent: z.literal('category_create'), ...categoryFields }),
   z.object({ intent: z.literal('category_save'), categoryId: requiredId, ...categoryFields }),
 ]);
-
-export type CategoryAction = z.infer<typeof categoryActionSchema>;
 
 /* ---------------------------------------------------------- error placement */
 

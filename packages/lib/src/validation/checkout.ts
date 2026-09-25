@@ -16,10 +16,6 @@ export const MAX_CUSTOMER_NAME = 100;
 /** Also the `maxlength` on the comment textarea. */
 export const MAX_COMMENT_LENGTH = 500;
 
-/** Also the `maxlength`/`minlength` on the courier street-address field. */
-export const MIN_ADDRESS_LENGTH = 5;
-export const MAX_ADDRESS_LENGTH = 200;
-
 /**
  * Ukrainian mobile numbers only: `0XXXXXXXXX` or `+380XXXXXXXXX`, spaces,
  * dashes and parentheses stripped before matching. Always normalised to
@@ -96,11 +92,6 @@ export const checkoutRequestSchema = z.object({
   paymentMethod: paymentMethodSchema,
   comment: commentSchema,
   items: cartItemsSchema,
-  // Turnstile: disabled 2026-08-05 on request — see `src/pages/checkout.astro`.
-  // Zod strips unknown keys, so a cached client still sending the field is
-  // accepted rather than rejected.
-  // turnstileToken: z.string().min(1),
 });
 
-export type CheckoutRequest = z.infer<typeof checkoutRequestSchema>;
 export type DeliveryInput = z.infer<typeof deliverySchema>;

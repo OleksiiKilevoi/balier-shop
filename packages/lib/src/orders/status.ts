@@ -193,10 +193,6 @@ export function allowedTransitions(order: OrderStateInput): readonly OrderStatus
   return [moneyCollected(order.status, order.paymentMethod) ? 'refunded' : 'cancelled'];
 }
 
-export function canTransition(order: OrderStateInput, next: OrderStatus): boolean {
-  return allowedTransitions(order).includes(next);
-}
-
 /**
  * Statuses at which the customer's own facts — name, phone, email, where the
  * parcel goes — are still the panel's to correct. Everything up to and

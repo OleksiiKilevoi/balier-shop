@@ -128,17 +128,13 @@ export async function removeCancelledOrderInvoices(
   }
 }
 
-/**
- * The customer's facts, as `/orders/[n]/edit` may rewrite them. `delivery`
- * absent means "leave the delivery columns alone" — the contact-only save a
- * legacy courier order gets when its picker was never touched.
- */
+/** The customer's facts and destination, as `/orders/[n]/edit` rewrites them. */
 export interface OrderDetailsPatch {
   customerName: string;
   customerPhone: string;
   /** `null` clears a stored address — the field is optional at checkout too. */
   customerEmail: string | null;
-  delivery?: {
+  delivery: {
     deliveryMethod: 'np_warehouse' | 'np_postomat';
     npSettlementRef: string;
     npSettlementName: string;
@@ -183,10 +179,10 @@ export async function updateOrderDetails(
         customerName: patch.customerName,
         customerPhone: patch.customerPhone,
         customerEmail: patch.customerEmail,
-        // A picked branch replaces the whole destination, including a legacy
-        // courier street address — half-updated delivery columns would name a
-        // branch in one city and a doorstep in another.
-        ...(patch.delivery ? { ...patch.delivery, npAddress: null } : {}),
+        // The whole destination at once; `np_address` only ever held a
+        // courier street address, and courier is gone.
+        ...patch.delivery,
+        npAddress: null,
         updatedAt: sql`now()`,
       })
       .where(eq(orders.id, order.id))

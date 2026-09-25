@@ -282,11 +282,11 @@ export async function listWarehouses(
 }
 
 /**
- * Every active branch (or locker) of one settlement, compact — `[ref, number,
- * description]` — for the checkout to download once and search in the browser.
- * Same order as `listWarehouses`.
+ * Every active branch (or locker) of one settlement, compact — `[ref,
+ * description]`, the number being part of the description — for the checkout
+ * to download once and search in the browser. Same order as `listWarehouses`.
  */
-export type WarehouseRow = [ref: string, number: string | null, description: string];
+export type WarehouseRow = [ref: string, description: string];
 
 export async function listAllWarehouses(
   db: Db,
@@ -294,7 +294,7 @@ export async function listAllWarehouses(
   kind: 'np_warehouse' | 'np_postomat',
 ): Promise<WarehouseRow[]> {
   const rows = await db
-    .select({ ref: npWarehouses.ref, number: npWarehouses.number, description: npWarehouses.description })
+    .select({ ref: npWarehouses.ref, description: npWarehouses.description })
     .from(npWarehouses)
     .where(
       and(
@@ -304,5 +304,5 @@ export async function listAllWarehouses(
       ),
     )
     .orderBy(sql`${npWarehouses.numberSort} asc nulls last`, asc(npWarehouses.number));
-  return rows.map((row) => [row.ref, row.number, row.description]);
+  return rows.map((row) => [row.ref, row.description]);
 }

@@ -10,9 +10,6 @@ DATABASE_URL="postgresql://user:password@ep-xxx-pooler.eu-central-1.aws.neon.tec
 # https://api.monobank.ua/docs/acquiring.html
 MONOBANK_TOKEN=""
 
-# Cloudflare Turnstile secret key. The site key is public — it lives in
-# wrangler.jsonc's `vars` (`PUBLIC_TURNSTILE_SITE_KEY`), not here.
-TURNSTILE_SECRET_KEY=""
 
 # Telegram bot for new-order notifications
 TELEGRAM_BOT_TOKEN=""

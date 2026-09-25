@@ -8,12 +8,10 @@ interface __BaseEnv_Env {
 	PUBLIC_SITE_URL: "https://balier.com.ua";
 	ORDER_EMAIL_FROM: "noreply@mail.balier.com.ua";
 	PUBLIC_TELEGRAM_MANAGER: "balierua";
-	PUBLIC_TURNSTILE_SITE_KEY: "0x4AAAAAAEF8vF0-cXNWdOOY";
 	SENTRY_DSN: "https://10cc802695139cc28dd32cf305de6f34@o4504565189378049.ingest.us.sentry.io/4511881341370368";
 	SENTRY_ENVIRONMENT: "production";
 	DATABASE_URL: string;
 	MONOBANK_TOKEN: string;
-	TURNSTILE_SECRET_KEY: string;
 	TELEGRAM_BOT_TOKEN: string;
 	TELEGRAM_CHAT_ID: string;
 }
@@ -25,7 +23,7 @@ type StringifyValues<EnvType extends Record<string, unknown>> = {
 	[Binding in keyof EnvType]: EnvType[Binding] extends string ? EnvType[Binding] : string;
 };
 declare namespace NodeJS {
-	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "PUBLIC_SITE_URL" | "ORDER_EMAIL_FROM" | "PUBLIC_TELEGRAM_MANAGER" | "PUBLIC_TURNSTILE_SITE_KEY" | "SENTRY_DSN" | "SENTRY_ENVIRONMENT" | "DATABASE_URL" | "MONOBANK_TOKEN" | "TURNSTILE_SECRET_KEY" | "TELEGRAM_BOT_TOKEN" | "TELEGRAM_CHAT_ID">> {}
+	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "PUBLIC_SITE_URL" | "ORDER_EMAIL_FROM" | "PUBLIC_TELEGRAM_MANAGER" | "SENTRY_DSN" | "SENTRY_ENVIRONMENT" | "DATABASE_URL" | "MONOBANK_TOKEN" | "TELEGRAM_BOT_TOKEN" | "TELEGRAM_CHAT_ID">> {}
 }
 
 // Begin runtime types

@@ -1,11 +1,4 @@
 ---
-// TURNSTILE DISABLED (2026-08-05, on request) — commented out, not deleted.
-// To restore, uncomment every block marked `Turnstile:` in this file, plus
-// `turnstileToken` in `src/lib/validation/checkout.ts` and the captcha check
-// in `src/pages/api/checkout.ts`. `src/lib/turnstile/` is untouched.
-// Turnstile: (this import is no longer commented out — the settlement
-// suggestions below need `env` too, so restoring Turnstile only has to add
-// `PUBLIC_TURNSTILE_SITE_KEY` back, not the import.)
 import { env } from 'cloudflare:workers';
 import * as Sentry from '@sentry/cloudflare';
 import BaseLayout from '~/layouts/BaseLayout.astro';
@@ -19,8 +12,6 @@ import { settlementLabel } from '@balier/lib/i18n/checkout';
 import { MAX_COMMENT_LENGTH, MAX_CUSTOMER_NAME } from '@balier/lib/validation/checkout';
 
 export const prerender = false;
-
-// Turnstile: const turnstileSiteKey = env.PUBLIC_TURNSTILE_SITE_KEY;
 
 /**
  * The one-tap chips under the settlement input. Rendered server-side rather
@@ -310,10 +301,6 @@ import { PARTS_AD_LEGAL, PARTS_NAME } from '@balier/lib/monoparts';
               ></textarea>
             </fieldset>
 
-            {/* Turnstile: the widget itself.
-            <div class="cf-turnstile" data-sitekey={turnstileSiteKey} data-action="checkout" data-turnstile-widget></div>
-            */}
-
             <p class="text-ink hidden text-sm" data-submit-error role="alert"></p>
 
             <Button type="submit" size="lg" block data-submit>Підтвердити замовлення</Button>
@@ -350,12 +337,6 @@ import { PARTS_AD_LEGAL, PARTS_NAME } from '@balier/lib/monoparts';
   </Container>
 </BaseLayout>
 
-{/* Turnstile: renders the widget declared above (`.cf-turnstile[data-sitekey]`)
-    and populates its hidden `cf-turnstile-response` input — read directly off
-    the form's `FormData` in the submit handler below, no separate global.
-<script is:inline src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
-*/}
-
 <script>
   import type { CartLine, CartSummary } from '@balier/lib/cart';
   import { fetchCartSummary } from '@balier/lib/cart/client';
@@ -376,20 +357,9 @@ import { PARTS_AD_LEGAL, PARTS_NAME } from '@balier/lib/monoparts';
 
   interface WarehouseResult {
     ref: string;
-    number: string | null;
     description: string;
   }
-  type WarehouseRow = [ref: string, number: string | null, description: string];
-
-  // Turnstile:
-  // declare global {
-  //   interface Window {
-  //     // Loaded by the external `api.js` script above.
-  //     turnstile?: { reset(widgetId?: string): void };
-  //   }
-  // }
-  //
-  // const resetTurnstile = () => window.turnstile?.reset();
+  type WarehouseRow = [ref: string, description: string];
 
   const root = document.querySelector<HTMLElement>('[data-checkout]');
   const form = root?.querySelector<HTMLFormElement>('[data-checkout-form]');
@@ -721,25 +691,24 @@ import { PARTS_AD_LEGAL, PARTS_NAME } from '@balier/lib/monoparts';
     const loadWarehouses = async (query: string) => {
       if (!selectedSettlement || !warehouseQuery) return;
       const method = currentDeliveryMethod();
-      if (method === 'np_courier') return;
-
+      // `v` is the row format — a new one must not meet an hour-old cached list.
       const rows = await lookup<WarehouseRow[]>(
         'warehouse',
-        `/api/checkout/np-warehouses?settlementRef=${encodeURIComponent(selectedSettlement.ref)}&kind=${method}`,
+        `/api/checkout/np-warehouses?settlementRef=${encodeURIComponent(selectedSettlement.ref)}&kind=${method}&v=2`,
       );
       if (!rows) return;
 
       let folded = foldedLists.get(rows);
       if (!folded) {
-        folded = rows.map((row) => fold(row[2]));
+        folded = rows.map((row) => fold(row[1]));
         foldedLists.set(rows, folded);
       }
       const needle = foldQuery(query);
       const results: WarehouseResult[] = [];
       for (let i = 0; i < rows.length && results.length < WAREHOUSE_RESULT_LIMIT; i++) {
         if (needle && !folded[i]!.includes(needle)) continue;
-        const [ref, number, description] = rows[i]!;
-        results.push({ ref, number, description });
+        const [ref, description] = rows[i]!;
+        results.push({ ref, description });
       }
       paintWarehouseResults(results);
     };
@@ -913,16 +882,6 @@ import { PARTS_AD_LEGAL, PARTS_NAME } from '@balier/lib/monoparts';
 
       const data = new FormData(form);
 
-      // Turnstile:
-      // const turnstileToken = String(data.get('cf-turnstile-response') ?? '');
-      // if (!turnstileToken) {
-      //   if (submitError) {
-      //     submitError.textContent = 'Пройдіть перевірку безпеки нижче.';
-      //     submitError.hidden = false;
-      //   }
-      //   return;
-      // }
-
       const delivery = {
         deliveryMethod,
         npSettlementRef: selectedSettlement.ref,
@@ -940,7 +899,6 @@ import { PARTS_AD_LEGAL, PARTS_NAME } from '@balier/lib/monoparts';
         comment: String(data.get('comment') ?? ''),
         promoCode: String(data.get('promoCode') ?? ''),
         items: cartItems.get(),
-        // Turnstile: turnstileToken,
       };
 
       if (submitButton) submitButton.disabled = true;
@@ -1000,15 +958,6 @@ import { PARTS_AD_LEGAL, PARTS_NAME } from '@balier/lib/monoparts';
           return;
         }
 
-        // Turnstile:
-        // if (body.error === 'captcha_failed') {
-        //   if (submitError) {
-        //     submitError.textContent = 'Перевірка безпеки не пройдена. Спробуйте ще раз.';
-        //     submitError.hidden = false;
-        //   }
-        //   return;
-        // }
-
         window.location.href = '/checkout/failure';
       } catch (error) {
         console.error(error);
@@ -1018,7 +967,6 @@ import { PARTS_AD_LEGAL, PARTS_NAME } from '@balier/lib/monoparts';
         }
       } finally {
         if (submitButton) submitButton.disabled = false;
-        // Turnstile: resetTurnstile();
       }
     });
 

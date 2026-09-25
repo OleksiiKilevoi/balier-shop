@@ -11,8 +11,8 @@ declare global {
    * which is what `import { env } from 'cloudflare:workers'` is typed against.
    *
    * Anything added here must also be documented in `.dev.vars.example`.
-   * This is the admin Worker's set — the storefront's Turnstile secret stays
-   * in `apps/site/src/env.d.ts`, and `NOVAPOSHTA_API_KEY` is cron-only.
+   * This is the admin Worker's set; the storefront's live in
+   * `apps/site/src/env.d.ts`, and `NOVAPOSHTA_API_KEY` is cron-only.
    */
   interface Env {
     DATABASE_URL: string;

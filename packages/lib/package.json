@@ -12,8 +12,7 @@
     "./monobank": "./src/monobank/index.ts",
     "./monoparts": "./src/monoparts/index.ts",
     "./rateLimit": "./src/rateLimit/index.ts",
-    "./telegram": "./src/telegram/index.ts",
-    "./turnstile": "./src/turnstile/index.ts"
+    "./telegram": "./src/telegram/index.ts"
   },
   "scripts": {
     "check": "tsc --noEmit",

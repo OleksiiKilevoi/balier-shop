@@ -59,7 +59,7 @@ const adminRedirect = defineMiddleware(async ({ url }, next) => {
 /**
  * On every response the Worker makes. Prerendered pages and assets bypass the
  * Worker entirely, so `public/_headers` carries the same set for those —
- * both are generated from one place (`~/lib/securityHeaders`).
+ * keep the two in step with `@balier/lib/securityHeaders` by hand.
  */
 const securityHeaders = defineMiddleware(async (_context, next) =>
   applySecurityHeaders(await next(), 'self'),
@@ -109,7 +109,7 @@ const apiNoindex = defineMiddleware(async ({ url }, next) => {
  * infrastructure rather than an attacker's.
  *
  * Limits are sized to each route's real cost: `/api/checkout` calls
- * Turnstile/Monobank and creates an order, so it gets the tightest budget;
+ * Monobank and creates an order, so it gets the tightest budget;
  * the two `np-*` search endpoints are debounced keystroke lookups against
  * our own DB and get a generous one.
  *

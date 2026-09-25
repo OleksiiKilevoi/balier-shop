@@ -44,15 +44,3 @@ export function applySecurityHeaders(response: Response, policy: 'none' | 'self'
     'content-security-policy': frameAncestors(policy),
   });
 }
-
-/**
- * The same set as a Cloudflare `_headers` block. Prerendered pages and static
- * assets are served straight off the asset binding and never reach the Worker
- * (`/about` answers `cf-cache-status: HIT`), so the middleware alone would
- * leave exactly the pages a visitor reads uncovered.
- */
-export function headersFileBlock(policy: 'none' | 'self'): string {
-  const lines = Object.entries(SECURITY_HEADERS).map(([name, value]) => `  ${name}: ${value}`);
-  lines.push(`  content-security-policy: ${frameAncestors(policy)}`);
-  return `/*\n${lines.join('\n')}\n`;
-}

@@ -7,7 +7,6 @@ import {
   adminIssueKey,
   adminNpSettingsSchema,
   adminOrderActionSchema,
-  adminOrderEditContactSchema,
   adminOrderEditSchema,
   adminOrderFieldErrors,
   adminPasswordChangeSchema,
@@ -440,16 +439,5 @@ describe('adminOrderEditSchema', () => {
     });
     expect(unpicked.success).toBe(false);
     expect(adminOrderFieldErrors(unpicked.error!).has('settlement')).toBe(true);
-  });
-
-  it('has a contact-only variant that asks nothing about delivery', () => {
-    // The legacy-courier save: the stored street address stays as placed, so
-    // the schema must not force a branch pick on a phone-number fix.
-    const parsed = adminOrderEditContactSchema.parse({
-      customerName: 'Анна Коваль',
-      customerPhone: '380501234567',
-      customerEmail: '',
-    });
-    expect(parsed).toEqual({ customerName: 'Анна Коваль', customerPhone: '+380501234567' });
   });
 });

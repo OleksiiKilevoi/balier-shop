@@ -743,15 +743,3 @@ export async function removeProductImage(
 
   return removed.length > 0 ? { ok: true } : { ok: false, reason: 'not_found' };
 }
-
-/* ---------------------------------------------------------------- existence */
-
-/** Cheap check that a product id names a real row, for the POST path. */
-export async function productExists(db: Db | TxDb | Tx, id: string): Promise<boolean> {
-  const [row] = await db
-    .select({ id: products.id })
-    .from(products)
-    .where(eq(products.id, id))
-    .limit(1);
-  return row !== undefined;
-}

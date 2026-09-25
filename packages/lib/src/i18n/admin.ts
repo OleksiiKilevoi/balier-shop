@@ -152,8 +152,6 @@ export const ADMIN_WAYBILL_ERRORS = {
   invalid_declared_value: 'Оголошена вартість — цілі гривні, від 1.',
 } as const;
 
-export type AdminWaybillError = keyof typeof ADMIN_WAYBILL_ERRORS;
-
 /**
  * Why the create form is not on the page, each one naming the fix. These are
  * states, not errors — the panel is usable long before the NP account is

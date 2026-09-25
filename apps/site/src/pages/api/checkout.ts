@@ -7,7 +7,6 @@ import { monoPartsFromEnv } from '@balier/lib/monoparts';
 import { createEmailNotifier } from '@balier/lib/notify/email';
 import { createTelegramNotifier } from '@balier/lib/notify/telegram';
 import { createOrder } from '@balier/lib/orders/create';
-// Turnstile: import { createTurnstileCaptcha } from '@balier/lib/turnstile';
 import { checkoutRequestSchema } from '@balier/lib/validation/checkout';
 
 export const prerender = false;
@@ -21,7 +20,7 @@ export const prerender = false;
  *
  * Rate limited per IP in `src/middleware.ts` (tightest budget of any route —
  * this one calls Monobank and creates a row; it is also the only bot defence
- * left while Turnstile is commented out below).
+ * the endpoint has).
  */
 export const POST: APIRoute = async ({ request, locals }) => {
   let payload: unknown;
@@ -35,19 +34,6 @@ export const POST: APIRoute = async ({ request, locals }) => {
   const parsed = checkoutRequestSchema.safeParse(payload);
   if (!parsed.success) return json({ error: 'invalid_request' }, 400);
   if (parsed.data.items.length === 0) return json({ error: 'empty_cart' }, 400);
-
-  // Turnstile: disabled 2026-08-05 on request — commented out, not deleted.
-  // `src/lib/turnstile/` and its tests are untouched; restoring means
-  // uncommenting this, the `turnstileToken` field in
-  // `src/lib/validation/checkout.ts`, and the blocks marked `Turnstile:` in
-  // `src/pages/checkout.astro`.
-  //
-  // const captcha = createTurnstileCaptcha(env.TURNSTILE_SECRET_KEY);
-  // const captchaOk = await captcha.verify(
-  //   parsed.data.turnstileToken,
-  //   request.headers.get('cf-connecting-ip') ?? undefined,
-  // );
-  // if (!captchaOk) return json({ error: 'captcha_failed' }, 400);
 
   const db = createDb(env.DATABASE_URL);
   const [codLimitKopiykas, paymentTtlMinutes, promo] = await Promise.all([

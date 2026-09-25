@@ -237,8 +237,3 @@ export interface NotifierPort {
   paymentAfterCancellation(notification: OrderNotification): Promise<void>;
 }
 
-/* ------------------------------------------------------------ bot protection */
-
-export interface CaptchaPort {
-  verify(token: string, remoteIp?: string): Promise<boolean>;
-}

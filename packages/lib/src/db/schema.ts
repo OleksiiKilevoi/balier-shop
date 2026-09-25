@@ -602,7 +602,6 @@ export const authAttempts = pgTable('auth_attempts', {
   count: integer('count').notNull(),
   windowStart: timestamp('window_start', { withTimezone: true }).notNull().defaultNow(),
 });
-export type AuthAttempt = typeof authAttempts.$inferSelect;
 
 export const adminUsers = pgTable('admin_users', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -784,17 +783,14 @@ export const pageTranslationsRelations = relations(pageTranslations, ({ one }) =
 
 /* -------------------------------------------------------------------- types */
 
-export type AdminUser = typeof adminUsers.$inferSelect;
 export type AdminRole = (typeof adminRole.enumValues)[number];
 export type Category = typeof categories.$inferSelect;
 export type Product = typeof products.$inferSelect;
 export type ProductVariant = typeof productVariants.$inferSelect;
 export type ProductImage = typeof productImages.$inferSelect;
 export type Order = typeof orders.$inferSelect;
-export type NewOrder = typeof orders.$inferInsert;
 export type OrderItem = typeof orderItems.$inferSelect;
 export type Payment = typeof payments.$inferSelect;
-export type Locale = (typeof locale.enumValues)[number];
 export type ProductStatus = (typeof productStatus.enumValues)[number];
 export type ParcelSize = (typeof parcelSize.enumValues)[number];
 export type OrderStatus = (typeof orderStatus.enumValues)[number];

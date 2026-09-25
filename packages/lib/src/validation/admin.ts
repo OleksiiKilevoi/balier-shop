@@ -40,8 +40,6 @@ export const adminLoginSchema = z.object({
   password: z.string().min(1).max(PASSWORD_MAX_LENGTH),
 });
 
-export type AdminLogin = z.infer<typeof adminLoginSchema>;
-
 /**
  * `/login/telegram`, both steps — the same deliberate looseness as
  * `adminLoginSchema`, and for the same reason: these are shape checks, and a
@@ -114,8 +112,6 @@ const waybillCreateSchema = z.object({
   }),
 });
 
-export type WaybillCreateInput = z.infer<typeof waybillCreateSchema>;
-
 export const adminOrderActionSchema = z.discriminatedUnion('intent', [
   z.object({
     intent: z.literal('status'),
@@ -130,8 +126,6 @@ export const adminOrderActionSchema = z.discriminatedUnion('intent', [
   waybillCreateSchema,
   z.object({ intent: z.literal('waybill_delete') }),
 ]);
-
-export type AdminOrderAction = z.infer<typeof adminOrderActionSchema>;
 
 /* ------------------------------------------------- register of shipments --- */
 
@@ -158,8 +152,6 @@ export const adminRegisterCreateSchema = z.object({
     .max(REGISTER_ORDERS_MAX, 'register_no_selection'),
 });
 
-export type AdminRegisterCreate = z.infer<typeof adminRegisterCreateSchema>;
-
 /** What one register's own page can POST to itself. */
 export const adminRegisterActionSchema = z.discriminatedUnion('intent', [
   z.object({
@@ -168,8 +160,6 @@ export const adminRegisterActionSchema = z.discriminatedUnion('intent', [
   }),
   z.object({ intent: z.literal('register_delete') }),
 ]);
-
-export type AdminRegisterAction = z.infer<typeof adminRegisterActionSchema>;
 
 /**
  * The cash-on-delivery limit, as `/admin/settings` submits it.
@@ -214,8 +204,6 @@ export const adminPromoSchema = z.object({
     .refine((value) => value >= PROMO_PERCENT_MIN && value <= PROMO_PERCENT_MAX, 'invalid_promo_percent'),
 });
 
-export type AdminSettings = z.infer<typeof adminSettingsSchema>;
-
 /* --------------------------------------------------- nova poshta sender ----- */
 
 /**
@@ -252,8 +240,6 @@ export const adminNpSettingsSchema = z.object({
     .refine((value) => value.length <= NP_CARGO_DESCRIPTION_MAX, 'invalid_np_description')
     .transform((value): string | null => (value === '' ? null : value)),
 });
-
-export type AdminNpSettings = z.infer<typeof adminNpSettingsSchema>;
 
 /*
  * The branch picker deliberately has no schema: it is a draft flow in the
@@ -317,8 +303,6 @@ export const adminPasswordChangeSchema = z
     message: 'password_unchanged',
     path: ['newPassword'],
   });
-
-export type AdminPasswordChange = z.infer<typeof adminPasswordChangeSchema>;
 
 /**
  * `/users` — admin-only, and the role is re-read from the database on every one
@@ -386,8 +370,6 @@ export const adminUserActionSchema = z.discriminatedUnion('intent', [
   }),
 ]);
 
-export type AdminUserAction = z.infer<typeof adminUserActionSchema>;
-
 /**
  * The one message a rejected password or user form is shown as.
  *
@@ -447,10 +429,6 @@ export const adminOrderEditSchema = z.object({
   customerEmail: customerEmailSchema,
   delivery: deliverySchema,
 });
-
-export const adminOrderEditContactSchema = adminOrderEditSchema.omit({ delivery: true });
-
-export type AdminOrderEdit = z.infer<typeof adminOrderEditSchema>;
 
 /** Where a rejection is shown on the form. */
 export type AdminOrderField =

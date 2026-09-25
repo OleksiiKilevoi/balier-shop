@@ -3,7 +3,6 @@ import { orderStatus } from '../db/schema';
 import type { OrderStatus, PaymentMethod } from '../db/schema';
 import {
   allowedTransitions,
-  canTransition,
   carrierCanAdvance,
   orderDetailsLock,
   revertTarget,
@@ -33,6 +32,8 @@ const LIVE_SALE_STATUSES: OrderStatus[] = [
 function order(status: OrderStatus, paymentMethod: PaymentMethod, statusBeforeExit?: OrderStatus | null) {
   return { status, paymentMethod, statusBeforeExit };
 }
+
+const allows = (o: ReturnType<typeof order>, next: OrderStatus) => allowedTransitions(o).includes(next);
 
 describe('allowedTransitions', () => {
   it('offers the panel nothing but the exit from every non-terminal status — the forward chain is carrier-driven', () => {
@@ -141,38 +142,26 @@ describe('allowedTransitions', () => {
   });
 });
 
-describe('canTransition', () => {
-  it('agrees with allowedTransitions', () => {
-    for (const status of ALL_STATUSES) {
-      for (const method of METHODS) {
-        for (const target of ALL_STATUSES) {
-          expect(canTransition(order(status, method), target)).toBe(
-            allowedTransitions(order(status, method)).includes(target),
-          );
-        }
-      }
-    }
-  });
-
+describe('allowedTransitions as the move check', () => {
   it('refuses every forward-chain move — forward and backward alike', () => {
     // Forward is the carrier's (`carrierCanAdvance`); backward out of `packed`
     // is deleting the waybill; and un-marking `shipped`/`delivered` by hand
     // would only be re-applied by the next tracking tick.
-    expect(canTransition(order('paid', 'card'), 'packed')).toBe(false);
-    expect(canTransition(order('confirmed', 'cod'), 'packed')).toBe(false);
-    expect(canTransition(order('packed', 'card'), 'shipped')).toBe(false);
-    expect(canTransition(order('shipped', 'card'), 'delivered')).toBe(false);
-    expect(canTransition(order('shipped', 'card'), 'packed')).toBe(false);
-    expect(canTransition(order('delivered', 'cod'), 'shipped')).toBe(false);
-    expect(canTransition(order('packed', 'card'), 'paid')).toBe(false);
-    expect(canTransition(order('packed', 'cod'), 'confirmed')).toBe(false);
+    expect(allows(order('paid', 'card'), 'packed')).toBe(false);
+    expect(allows(order('confirmed', 'cod'), 'packed')).toBe(false);
+    expect(allows(order('packed', 'card'), 'shipped')).toBe(false);
+    expect(allows(order('shipped', 'card'), 'delivered')).toBe(false);
+    expect(allows(order('shipped', 'card'), 'packed')).toBe(false);
+    expect(allows(order('delivered', 'cod'), 'shipped')).toBe(false);
+    expect(allows(order('packed', 'card'), 'paid')).toBe(false);
+    expect(allows(order('packed', 'cod'), 'confirmed')).toBe(false);
   });
 
   it('allows reverting `cancelled`/`refunded` only onto the exact recorded `statusBeforeExit`', () => {
-    expect(canTransition(order('refunded', 'card', 'paid'), 'paid')).toBe(true);
-    expect(canTransition(order('refunded', 'card', 'paid'), 'packed')).toBe(false);
-    expect(canTransition(order('cancelled', 'cod', 'confirmed'), 'confirmed')).toBe(true);
-    expect(canTransition(order('cancelled', 'cod', 'confirmed'), 'paid')).toBe(false);
+    expect(allows(order('refunded', 'card', 'paid'), 'paid')).toBe(true);
+    expect(allows(order('refunded', 'card', 'paid'), 'packed')).toBe(false);
+    expect(allows(order('cancelled', 'cod', 'confirmed'), 'confirmed')).toBe(true);
+    expect(allows(order('cancelled', 'cod', 'confirmed'), 'paid')).toBe(false);
   });
 });
 

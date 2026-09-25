@@ -36,11 +36,11 @@ export const GET: APIRoute = async ({ url, locals }) => {
 
   return jsonWithEdgeCache(
     {
-      // `settlementRef` is an opaque NP GUID and already canonical. `v=all`
-      // keeps these apart from the per-query entries the old picker cached.
+      // `settlementRef` is an opaque NP GUID and already canonical. `v` is the
+      // row format; bump it (here and in checkout.astro) when the rows change.
       key:
         `${url.origin}/api/checkout/np-warehouses` +
-        `?settlementRef=${encodeURIComponent(settlementRef)}&kind=${kind}&v=all`,
+        `?settlementRef=${encodeURIComponent(settlementRef)}&kind=${kind}&v=2`,
       ttlSeconds: EDGE_TTL_SECONDS,
       browserTtlSeconds: BROWSER_TTL_SECONDS,
       waitUntil: (promise) => locals.cfContext.waitUntil(promise),

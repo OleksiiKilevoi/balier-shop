@@ -47,10 +47,9 @@ export const MAX_REQUEST_BYTES = 2 * 1024 * 1024;
 export const MAX_UPLOAD_BYTES = 1 * 1024 * 1024;
 
 /**
- * What `test-products/` was shot and exported at. No longer enforced — quoted to
- * the manager as the shape that fills the catalog's frame without cropping.
+ * The long edge photos are downscaled to before upload (`/products/[id]`), the
+ * height `test-products/` was shot at — the shape that fills the catalog frame.
  */
-export const EXPECTED_WIDTH = 1440;
 export const EXPECTED_HEIGHT = 1920;
 
 export type UploadIssue = 'empty' | 'too_large' | 'unreadable' | 'unsupported_format';
@@ -88,9 +87,4 @@ export function checkUploadedImage({ size, format }: UploadCandidate): UploadIss
   if (toMediaExtension(format) === null) return 'unsupported_format';
 
   return null;
-}
-
-/** The stored extension for an accepted candidate, from its decoded format. */
-export function uploadExtension(format: string): MediaExtension | null {
-  return toMediaExtension(format);
 }

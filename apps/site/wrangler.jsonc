@@ -52,8 +52,7 @@
   "send_email": [{ "name": "EMAIL" }],
   // Secrets are NOT set here. Locally they live in `.dev.vars`; in production
   // they are set with `wrangler secret put <NAME>` from this directory:
-  //   DATABASE_URL, MONOBANK_TOKEN, TURNSTILE_SECRET_KEY (only if Turnstile
-  //   is switched back on), TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+  //   DATABASE_URL, MONOBANK_TOKEN, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
   //
   // ADMIN_SESSION_SECRET belongs to the admin Worker (`apps/admin`), and
   // NOVAPOSHTA_API_KEY to the admin and cron Workers — none is read here.
@@ -74,15 +73,6 @@
     // validates it, and an empty value hides the button rather than shipping a
     // link to a stranger.
     "PUBLIC_TELEGRAM_MANAGER": "balierua",
-    // Turnstile site key — public by definition, it was embedded in the
-    // checkout page's HTML. The paired secret (`TURNSTILE_SECRET_KEY`) is a
-    // Worker secret, never here.
-    // CURRENTLY UNUSED: Turnstile is commented out (2026-08-05, on request,
-    // and off at launch by decision) — see the `Turnstile:` markers in
-    // `src/pages/checkout.astro`. Bringing it back means a new widget on the
-    // client's account for `balier.com.ua`; this key belongs to the retired dev
-    // widget and is kept only so the var stays typed.
-    "PUBLIC_TURNSTILE_SITE_KEY": "0x4AAAAAAEF8vF0-cXNWdOOY",
     // Sentry (`docs/plans/sentry.md`) — a DSN is a public project identifier,
     // not a secret. One project (`balier`) for all three Workers; the wrapper
     // in `src/middleware.ts` tags events `worker:site`. The Sentry org stays

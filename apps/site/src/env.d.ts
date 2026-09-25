@@ -16,7 +16,6 @@ declare global {
   interface Env {
     DATABASE_URL: string;
     MONOBANK_TOKEN: string;
-    TURNSTILE_SECRET_KEY: string;
     TELEGRAM_BOT_TOKEN: string;
     TELEGRAM_CHAT_ID: string;
   }
