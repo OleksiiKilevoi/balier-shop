@@ -305,6 +305,21 @@ export async function findAdminProduct(db: Db, id: string): Promise<AdminProduct
   };
 }
 
+/** The companion picker on the product form — every product but archived ones, by name. */
+export async function listProductOptions(
+  db: Db,
+): Promise<{ id: string; title: string; status: ProductStatus }[]> {
+  return db
+    .select({ id: products.id, title: productTranslations.title, status: products.status })
+    .from(products)
+    .innerJoin(
+      productTranslations,
+      and(eq(productTranslations.productId, products.id), eq(productTranslations.locale, LOCALE)),
+    )
+    .where(ne(products.status, 'archived'))
+    .orderBy(asc(productTranslations.title));
+}
+
 /** The category picker on the product form — every category, active or not. */
 export async function listCategoryOptions(
   db: Db,
@@ -394,6 +409,8 @@ export interface ProductFields {
   status: ProductStatus;
   isFeatured: boolean;
   position: number;
+  companionProductId: string | null;
+  companionDiscountPercent: number;
   title: string;
   description: string | null;
   details: string | null;
@@ -420,6 +437,10 @@ export async function updateProduct(
           status: fields.status,
           isFeatured: fields.isFeatured,
           position: fields.position,
+          // A product cannot be its own companion (the table refuses it too).
+          companionProductId:
+            fields.companionProductId === productId ? null : fields.companionProductId,
+          companionDiscountPercent: fields.companionDiscountPercent,
           updatedAt: new Date(),
         })
         .where(eq(products.id, productId));

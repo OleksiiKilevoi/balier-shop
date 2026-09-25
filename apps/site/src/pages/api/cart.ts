@@ -2,7 +2,8 @@ import { env } from 'cloudflare:workers';
 import type { APIRoute } from 'astro';
 import { buildCartSummary, emptyCartSummary, mergeCartItems } from '@balier/lib/cart';
 import { createDb } from '@balier/lib/db';
-import { findCartVariants } from '@balier/lib/db/queries/cart';
+import { findBundleRules, findCartVariants, findCompanionOffer } from '@balier/lib/db/queries/cart';
+import { missingCompanions } from '@balier/lib/cart/bundle';
 import { cartRequestSchema } from '@balier/lib/validation/cart';
 
 export const prerender = false;
@@ -40,7 +41,16 @@ export const POST: APIRoute = async ({ request }) => {
     items.map((item) => item.variantId),
   );
 
-  return json(buildCartSummary(items, variants), 200);
+  const rules = await findBundleRules(db, [...new Set(variants.map((variant) => variant.productId))]);
+  const summary = buildCartSummary(items, variants, rules);
+  const offers = await Promise.all(
+    missingCompanions(summary.lines, rules).map(({ companionProductId, percent }) =>
+      findCompanionOffer(db, companionProductId, percent),
+    ),
+  );
+  summary.offers = offers.filter((offer) => offer !== null);
+
+  return json(summary, 200);
 };
 
 function json(body: unknown, status: number): Response {

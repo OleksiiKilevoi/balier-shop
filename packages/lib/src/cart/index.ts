@@ -1,4 +1,5 @@
 import type { Kopiykas } from '../money';
+import { applyBundles, type BundleRule } from './bundle';
 import { MAX_CART_LINES, MAX_ITEM_QUANTITY, type CartItemInput } from '../validation/cart';
 
 /**
@@ -20,6 +21,7 @@ export type CartItem = CartItemInput;
 /** What the database knows about one variant sitting in someone's cart. */
 export interface CartVariantData {
   variantId: string;
+  productId: string;
   productSlug: string;
   productTitle: string;
   /** NULL when the product has no colour choice — the line then shows no swatch. */
@@ -36,8 +38,21 @@ export interface CartVariantData {
 
 export interface CartLine extends CartVariantData {
   quantity: number;
-  /** Kopiykas. `unitPrice × quantity`, computed here and never sent by the client. */
+  /** Units priced at `bundleUnitPrice` because the main product is in the cart (`./bundle.ts`). */
+  bundleUnits: number;
+  bundleUnitPrice: Kopiykas;
+  /** Kopiykas, computed here and never sent by the client. */
   lineTotal: Kopiykas;
+}
+
+/** A companion product the cart could still take at its bundle price. */
+export interface CompanionOffer {
+  variantId: string;
+  productSlug: string;
+  productTitle: string;
+  imageUrl: string | null;
+  unitPrice: Kopiykas;
+  bundleUnitPrice: Kopiykas;
 }
 
 /**
@@ -78,6 +93,8 @@ export interface CartSummary {
   total: Kopiykas;
   /** Units, not lines — this is the number on the header badge. */
   itemCount: number;
+  /** Filled by `/api/cart`; the pure summary has no catalog to look them up in. */
+  offers: CompanionOffer[];
 }
 
 /**
@@ -102,7 +119,7 @@ export function mergeCartItems(items: readonly CartItem[]): CartItem[] {
 
 /** A cart with nothing in it — the answer for an empty request, with no DB round trip. */
 export function emptyCartSummary(): CartSummary {
-  return { lines: [], notices: [], itemsTotal: 0, deliveryTotal: 0, total: 0, itemCount: 0 };
+  return { lines: [], notices: [], itemsTotal: 0, deliveryTotal: 0, total: 0, itemCount: 0, offers: [] };
 }
 
 /**
@@ -116,6 +133,7 @@ export function emptyCartSummary(): CartSummary {
 export function buildCartSummary(
   items: readonly CartItem[],
   variants: readonly CartVariantData[],
+  rules: readonly BundleRule[] = [],
 ): CartSummary {
   const byId = new Map(variants.map((variant) => [variant.variantId, variant]));
 
@@ -143,8 +161,11 @@ export function buildCartSummary(
     // which is now the only ceiling there is.
     const quantity = item.quantity;
 
-    lines.push({ ...variant, quantity, lineTotal: variant.unitPrice * quantity });
+    lines.push({ ...variant, quantity, bundleUnits: 0, bundleUnitPrice: variant.unitPrice, lineTotal: 0 });
   }
+
+  const priced = applyBundles(lines, rules);
+  lines.forEach((line, index) => Object.assign(line, priced[index]));
 
   const itemsTotal = lines.reduce((total, line) => total + line.lineTotal, 0);
   const deliveryTotal = 0;
@@ -156,5 +177,6 @@ export function buildCartSummary(
     deliveryTotal,
     total: itemsTotal + deliveryTotal,
     itemCount: lines.reduce((count, line) => count + line.quantity, 0),
+    offers: [],
   };
 }

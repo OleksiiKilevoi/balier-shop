@@ -1,7 +1,7 @@
 import * as Sentry from '@sentry/cloudflare';
 import { eq, sql } from 'drizzle-orm';
 import type { TxDb } from '../db';
-import { findCheckoutVariants } from '../db/queries/cart';
+import { findBundleRules, findCheckoutVariants } from '../db/queries/cart';
 import { bindPromoCode, findUsablePromoCode, hasPriorOrder, promoCodeExists } from '../db/queries/promo';
 import type { Order, OrderItem } from '../db/schema';
 import { orderItems, orders, payments } from '../db/schema';
@@ -141,7 +141,8 @@ export async function createOrder(
     try {
       created = await txDb.transaction(async (tx) => {
         const variants = await findCheckoutVariants(tx, variantIds);
-        const resolved = resolveCheckoutCart(input.items, variants);
+        const rules = await findBundleRules(tx, [...new Set(variants.map((variant) => variant.productId))]);
+        const resolved = resolveCheckoutCart(input.items, variants, rules);
 
         if (!resolved.ok) {
           failure = { ok: false, reason: 'cart_changed', notices: resolved.notices };
@@ -233,17 +234,36 @@ export async function createOrder(
         const items = await tx
           .insert(orderItems)
           .values(
-            resolved.lines.map((line) => ({
-              orderId: order.id,
-              variantId: line.variantId,
-              productSlug: line.productSlug,
-              productTitle: line.productTitle,
-              variantName: line.variantName,
-              sku: line.sku,
-              unitPrice: line.unitPrice,
-              quantity: line.quantity,
-              lineTotal: line.lineTotal,
-            })),
+            // A line partly at the bundle price becomes two rows, so every
+            // row keeps `unit_price × quantity = line_total` and everything
+            // that reads order items (e-mail, Telegram, the panel, the
+            // Monobank basket) needs no idea what a bundle is.
+            resolved.lines.flatMap((line) => {
+              const row = {
+                orderId: order.id,
+                variantId: line.variantId,
+                productSlug: line.productSlug,
+                productTitle: line.productTitle,
+                variantName: line.variantName,
+                sku: line.sku,
+              };
+              const full = line.quantity - line.bundleUnits;
+              return [
+                ...(line.bundleUnits > 0
+                  ? [
+                      {
+                        ...row,
+                        unitPrice: line.bundleUnitPrice,
+                        quantity: line.bundleUnits,
+                        lineTotal: line.bundleUnitPrice * line.bundleUnits,
+                      },
+                    ]
+                  : []),
+                ...(full > 0
+                  ? [{ ...row, unitPrice: line.unitPrice, quantity: full, lineTotal: line.unitPrice * full }]
+                  : []),
+              ];
+            }),
           )
           .returning();
 
@@ -306,7 +326,7 @@ export async function createOrder(
       items:
         created.order.discountTotal > 0
           ? []
-          : created.lines.map((line) => ({
+          : created.items.map((line) => ({
               productTitle: line.productTitle,
               unitPrice: line.unitPrice,
               quantity: line.quantity,

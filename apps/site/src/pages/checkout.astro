@@ -307,6 +307,13 @@ const phoneInputClass = inputClass.replace('px-4', 'pl-16 pr-4');
 
             <ul data-summary-lines class="border-line mt-4 divide-y divide-(--color-line) border-t text-sm"></ul>
 
+            {/* Companions of what is in the cart, not yet added — filled by the
+                script from `/api/cart`'s `offers`. */}
+            <div class="border-line mt-4 border-t pt-4" data-offers hidden>
+              <p class="text-ink text-sm font-medium">Додайте до замовлення</p>
+              <ul class="mt-3 space-y-3 text-sm" data-offer-list></ul>
+            </div>
+
             <div class="border-line mt-4 flex items-baseline justify-between gap-4 border-t pt-4 text-sm" data-discount-row hidden>
               <span class="text-ink-muted" data-discount-label>Знижка</span>
               <span class="price" data-discount></span>
@@ -336,7 +343,7 @@ const phoneInputClass = inputClass.replace('px-4', 'pl-16 pr-4');
   import { campaignCode, discountFor, normalizePromoCode } from '@balier/lib/orders/promo';
   import { formatPrice } from '@balier/lib/money';
   import { applyPhoneMask, isCompletePhoneDigits, phoneDigitsFromInput } from '@balier/lib/phone';
-  import { cartItems, clearCart } from '@balier/lib/cart/store';
+  import { addToCart, cartItems, clearCart } from '@balier/lib/cart/store';
 
   interface SettlementResult {
     ref: string;
@@ -485,6 +492,13 @@ const phoneInputClass = inputClass.replace('px-4', 'pl-16 pr-4');
             label.appendChild(qty);
           }
 
+          if (line.bundleUnits > 0 && line.bundleUnitPrice < line.unitPrice) {
+            const bundle = document.createElement('p');
+            bundle.className = 'text-brand text-xs';
+            bundle.textContent = `${line.bundleUnits} шт. — ціна в наборі`;
+            label.appendChild(bundle);
+          }
+
           const price = document.createElement('span');
           price.className = 'price shrink-0';
           price.textContent = formatPrice(line.lineTotal);
@@ -498,7 +512,67 @@ const phoneInputClass = inputClass.replace('px-4', 'pl-16 pr-4');
         }),
       );
 
+      paintOffers(summary);
       paintTotal(summary);
+    };
+
+    /** One row per offer: photo, name, bundle price, «+ Додати». */
+    const paintOffers = (summary: CartSummary) => {
+      const block = root.querySelector<HTMLElement>('[data-offers]');
+      const list = root.querySelector<HTMLElement>('[data-offer-list]');
+      if (!block || !list) return;
+      block.hidden = summary.offers.length === 0;
+      list.replaceChildren(
+        ...summary.offers.map((offer) => {
+          const item = document.createElement('li');
+          item.className = 'flex items-center gap-3';
+
+          if (offer.imageUrl) {
+            const image = document.createElement('img');
+            image.src = offer.imageUrl;
+            image.alt = '';
+            image.width = 48;
+            image.height = 48;
+            image.className = 'rounded-btn h-12 w-12 shrink-0 object-cover';
+            item.appendChild(image);
+          }
+
+          const label = document.createElement('div');
+          label.className = 'min-w-0 flex-1';
+          const title = document.createElement('p');
+          title.className = 'text-ink truncate';
+          title.textContent = offer.productTitle;
+          const price = document.createElement('p');
+          price.className = 'text-xs';
+          if (offer.bundleUnitPrice < offer.unitPrice) {
+            const full = document.createElement('s');
+            full.className = 'text-ink-muted mr-1.5';
+            full.textContent = formatPrice(offer.unitPrice);
+            price.appendChild(full);
+          }
+          const bundle = document.createElement('span');
+          bundle.className = 'price';
+          bundle.textContent = formatPrice(offer.bundleUnitPrice);
+          price.appendChild(bundle);
+          label.appendChild(title);
+          label.appendChild(price);
+
+          const add = document.createElement('button');
+          add.type = 'button';
+          add.className =
+            'border-line-strong text-ink hover:bg-paper rounded-btn min-h-touch shrink-0 border px-3 text-sm sm:min-h-9';
+          add.textContent = '+ Додати';
+          add.addEventListener('click', async () => {
+            add.disabled = true;
+            addToCart(offer.variantId, 1);
+            await refresh();
+          });
+
+          item.appendChild(label);
+          item.appendChild(add);
+          return item;
+        }),
+      );
     };
 
     /**
@@ -739,6 +813,18 @@ const phoneInputClass = inputClass.replace('px-4', 'pl-16 pr-4');
     };
 
     retry?.addEventListener('click', () => void load());
+
+    /** Re-price after the cart changed on this page, without leaving the form. */
+    const refresh = async () => {
+      try {
+        const summary = await fetchCartSummary();
+        cart = summary;
+        paintSummary(summary);
+        paintCodAvailability();
+      } catch (error) {
+        console.error(error);
+      }
+    };
 
     form.addEventListener('submit', async (event) => {
       event.preventDefault();

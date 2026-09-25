@@ -154,6 +154,7 @@ export const prerender = false;
                 aria-hidden="true"></span>
               <span data-line-variant-name></span>
             </p>
+            <p data-line-bundle class="text-brand mt-1 text-xs" hidden></p>
 
           </div>
 
@@ -230,10 +231,27 @@ export const prerender = false;
     const quantityOf = (item: HTMLElement) =>
       item.querySelector<HTMLInputElement>('input[data-quantity]');
 
+    /**
+     * A row's total at the quantity in its field: the server's own figure when
+     * that is what it priced, otherwise the bundle units it granted kept and
+     * the rest at full price until the next revalidation says otherwise.
+     */
+    const lineTotalAt = (line: CartLine, quantity: number) => {
+      if (quantity === line.quantity) return line.lineTotal;
+      const bundled = Math.min(line.bundleUnits, quantity);
+      return bundled * line.bundleUnitPrice + (quantity - bundled) * line.unitPrice;
+    };
+
     /** Everything on a row that depends on the quantity currently in its field. */
     const paintLine = (item: HTMLElement, line: CartLine, quantity: number) => {
       const lineTotal = item.querySelector<HTMLElement>('[data-line-total]');
-      if (lineTotal) lineTotal.textContent = formatPrice(line.unitPrice * quantity);
+      if (lineTotal) lineTotal.textContent = formatPrice(lineTotalAt(line, quantity));
+      const bundle = item.querySelector<HTMLElement>('[data-line-bundle]');
+      if (bundle) {
+        const units = Math.min(line.bundleUnits, quantity);
+        bundle.hidden = units === 0 || line.bundleUnitPrice >= line.unitPrice;
+        bundle.textContent = `${units} шт. — ціна в наборі ${formatPrice(line.bundleUnitPrice)}`;
+      }
     };
 
     /** Row fields that only change when the server says something new. */
@@ -308,7 +326,7 @@ export const prerender = false;
         if (!line || !quantity) continue;
 
         const value = Number(quantity.value) || 1;
-        itemsTotal += line.unitPrice * value;
+        itemsTotal += lineTotalAt(line, value);
         paintLine(item, line, value);
       }
 

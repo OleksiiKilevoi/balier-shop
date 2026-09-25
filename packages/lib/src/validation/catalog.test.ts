@@ -35,6 +35,8 @@ const BASE = {
   parcelSize: 'small',
   status: 'active',
   position: '0',
+  companionProductId: '',
+  companionDiscountPercent: '0',
 } as const;
 
 function saveProduct(overrides: Record<string, string> = {}) {
@@ -289,6 +291,19 @@ describe('categoryActionSchema', () => {
       }).success,
     ).toBe(true);
     expect(categoryActionSchema.safeParse({ intent: 'category_save', ...fields }).success).toBe(false);
+  });
+});
+
+describe('product_save companion', () => {
+  it('reads an empty picker as none and a blank percentage as 0, and caps it', () => {
+    const none = saveProduct({ companionDiscountPercent: '' });
+    expect(none.success && none.data.intent === 'product_save' && none.data.companionProductId).toBeNull();
+    expect(none.success && none.data.intent === 'product_save' && none.data.companionDiscountPercent).toBe(0);
+
+    const set = saveProduct({ companionProductId: '4f1c7e2a-0000-4000-8000-000000000009', companionDiscountPercent: '20' });
+    expect(set.success && set.data.intent === 'product_save' && set.data.companionDiscountPercent).toBe(20);
+
+    expect(saveProduct({ companionDiscountPercent: '51' }).success).toBe(false);
   });
 });
 

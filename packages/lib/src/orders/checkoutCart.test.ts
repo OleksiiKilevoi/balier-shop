@@ -13,6 +13,7 @@ const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')
 
 function variant(overrides: Partial<CartVariantData> & { variantId: string }): CartVariantData {
   return {
+    productId: 'product-1',
     productSlug: 'sumka',
     productTitle: 'Сумка',
     variantName: null,

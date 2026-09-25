@@ -17,6 +17,7 @@ const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')
 
 function variant(overrides: Partial<CartVariantData> & { variantId: string }): CartVariantData {
   return {
+    productId: 'product-1',
     productSlug: 'sumka',
     productTitle: 'Сумка',
     variantName: null,
@@ -127,7 +128,24 @@ describe('buildCartSummary', () => {
       deliveryTotal: 0,
       total: 0,
       itemCount: 0,
+      offers: [],
     });
+  });
+
+  it('prices the companion at the bundle price when its main product is in the cart', () => {
+    const summary = buildCartSummary(
+      [
+        { variantId: id(1), quantity: 1 },
+        { variantId: id(2), quantity: 2 },
+      ],
+      [
+        variant({ variantId: id(1), productId: 'bag', unitPrice: 1_550_000 }),
+        variant({ variantId: id(2), productId: 'holder', unitPrice: 150_000 }),
+      ],
+      [{ productId: 'bag', companionProductId: 'holder', percent: 20 }],
+    );
+    expect(summary.lines[1]).toMatchObject({ bundleUnits: 1, bundleUnitPrice: 120_000, lineTotal: 270_000 });
+    expect(summary.total).toBe(1_550_000 + 270_000);
   });
 });
 

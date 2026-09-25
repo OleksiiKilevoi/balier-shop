@@ -138,6 +138,9 @@ export const newProductSchema = z.object({
 
 export type NewProductInput = z.infer<typeof newProductSchema>;
 
+/** Matches the `products_companion_discount_range` check. */
+export const COMPANION_DISCOUNT_MAX = 50;
+
 const productSaveSchema = z.object({
   intent: z.literal('product_save'),
   title: z.string().trim().min(1, 'invalid_title').max(TITLE_MAX, 'invalid_title'),
@@ -153,6 +156,12 @@ const productSaveSchema = z.object({
   status: z.enum(productStatus.enumValues),
   isFeatured: checkbox,
   position: wholeNumber(POSITION_MAX, 'invalid_position'),
+  /** The upsell (`~/lib/cart/bundle.ts`). Empty = none. */
+  companionProductId: optionalId,
+  companionDiscountPercent: z
+    .string()
+    .transform((raw) => raw.trim() || '0')
+    .pipe(wholeNumber(COMPANION_DISCOUNT_MAX, 'invalid_companion_discount')),
 });
 
 /* ------------------------------------------------------------- the variants */
@@ -290,6 +299,8 @@ const CATALOG_FIELDS = [
   'categoryId',
   'parcelSize',
   'position',
+  'companionProductId',
+  'companionDiscountPercent',
   'sku',
   'colorName',
   'colorHex',

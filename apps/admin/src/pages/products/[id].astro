@@ -10,6 +10,7 @@ import {
   findAdminProduct,
   findProductIdBySlug,
   listCategoryOptions,
+  listProductOptions,
   moveProductImage,
   removeProductImage,
   setVariantActive,
@@ -258,9 +259,10 @@ if (Astro.request.method === 'POST') {
 
 /* -------------------------------------------------------------- GET / render */
 
-const [detail, categories] = await Promise.all([
+const [detail, categories, productOptions] = await Promise.all([
   findAdminProduct(db, productId),
   listCategoryOptions(db),
+  listProductOptions(db),
 ]);
 
 if (!detail) {
@@ -721,6 +723,78 @@ function imageMeta(image: (typeof images)[number]): string {
                     class:list={['admin-field mt-1', invalid.has('position') && 'border-danger']}
                   />
                   <p class="text-fg-subtle mt-1 text-xs">Менше — вище в каталозі.</p>
+                </div>
+              </div>
+
+              {/* The upsell: offered under this product's buy button and at
+                  checkout, cheaper by the percentage for as many units as this
+                  product has in the cart. */}
+              <div class="mt-4 flex flex-wrap gap-4">
+                <div class="w-full flex-1">
+                  <label for="companionProductId" class="text-fg-subtle text-xs">Супутній товар</label>
+                  <div class="relative mt-1">
+                    <select
+                      id="companionProductId"
+                      name="companionProductId"
+                      class:list={['admin-field admin-select', invalid.has('companionProductId') && 'border-danger']}
+                    >
+                      <option value="">Немає</option>
+                      {productOptions
+                        .filter((option) => option.id !== product!.id)
+                        .map((option) => (
+                          <option
+                            value={option.id}
+                            selected={
+                              option.id ===
+                              redraw('product_save', 'companionProductId', product!.companionProductId)
+                            }
+                          >
+                            {option.title}
+                            {option.status !== 'active' && ' (не опубліковано)'}
+                          </option>
+                        ))}
+                    </select>
+                    <svg
+                      class="text-fg-subtle pointer-events-none absolute top-1/2 right-4 h-4 w-4 -translate-y-1/2"
+                      viewBox="0 0 16 16"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.5"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      aria-hidden="true"
+                    >
+                      <path d="m4 6 4 4 4-4" />
+                    </svg>
+                  </div>
+                  <p class="text-fg-subtle mt-1 text-xs">
+                    Пропонується під кнопкою «Додати до кошика» і при оформленні.
+                  </p>
+                  {invalid.has('companionProductId') && (
+                    <p class="text-danger mt-1 text-xs">{ADMIN_CATALOG_ERRORS.companionProductId}</p>
+                  )}
+                </div>
+
+                <div class="w-full sm:w-40">
+                  <label for="companionDiscountPercent" class="text-fg-subtle text-xs">
+                    Знижка в наборі, %
+                  </label>
+                  <input
+                    id="companionDiscountPercent"
+                    name="companionDiscountPercent"
+                    type="text"
+                    inputmode="numeric"
+                    value={redraw('product_save', 'companionDiscountPercent', product!.companionDiscountPercent)}
+                    autocomplete="off"
+                    class:list={[
+                      'admin-field mt-1',
+                      invalid.has('companionDiscountPercent') && 'border-danger',
+                    ]}
+                  />
+                  <p class="text-fg-subtle mt-1 text-xs">На супутній товар, зазвичай 10. 0 — без знижки.</p>
+                  {invalid.has('companionDiscountPercent') && (
+                    <p class="text-danger mt-1 text-xs">{ADMIN_CATALOG_ERRORS.companionDiscountPercent}</p>
+                  )}
                 </div>
               </div>
 

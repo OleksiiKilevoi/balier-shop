@@ -8,7 +8,11 @@ import {
   PASSWORD_MAX_LENGTH,
   PASSWORD_MIN_LENGTH,
 } from '../validation/admin';
-import { PRODUCT_PRICE_MAX_HRYVNIAS, PRODUCT_PRICE_MIN_HRYVNIAS } from '../validation/catalog';
+import {
+  COMPANION_DISCOUNT_MAX,
+  PRODUCT_PRICE_MAX_HRYVNIAS,
+  PRODUCT_PRICE_MIN_HRYVNIAS,
+} from '../validation/catalog';
 import type { CatalogField } from '../validation/catalog';
 
 /** UI strings for the admin panel. Ukrainian, like the storefront. */
@@ -593,6 +597,8 @@ export const ADMIN_CATALOG_ERRORS: Record<CatalogField, string> = {
   categoryId: 'Оберіть категорію зі списку.',
   parcelSize: 'Оберіть коробку — до 2 кг або до 10 кг.',
   position: 'Порядок — ціле число від 0.',
+  companionProductId: 'Оберіть товар зі списку.',
+  companionDiscountPercent: `Знижка в наборі — ціле число від 0 до ${COMPANION_DISCOUNT_MAX} %.`,
   sku: 'Тільки великі латинські літери, цифри й дефіси — наприклад, SUMKA-LIUNET-CHORNYI.',
   colorName: 'Назва кольору задовга.',
   colorHex: 'Колір у форматі #1a1a1a.',

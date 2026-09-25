@@ -1,5 +1,6 @@
 import type { Kopiykas } from '../money';
 import type { CartVariantData } from '../cart';
+import { applyBundles, type BundleRule } from '../cart/bundle';
 import type { CartItemInput } from '../validation/cart';
 
 /**
@@ -23,7 +24,10 @@ export interface CheckoutNotice {
 
 export interface CheckoutLine extends CartVariantData {
   quantity: number;
-  /** Kopiykas. `unitPrice × quantity`. */
+  /** Units at `bundleUnitPrice` (`~/lib/cart/bundle.ts`); the rest at `unitPrice`. */
+  bundleUnits: number;
+  bundleUnitPrice: Kopiykas;
+  /** Kopiykas. */
   lineTotal: Kopiykas;
 }
 
@@ -42,6 +46,7 @@ export type CheckoutCartResult =
 export function resolveCheckoutCart(
   items: readonly CartItemInput[],
   variants: readonly CartVariantData[],
+  rules: readonly BundleRule[] = [],
 ): CheckoutCartResult {
   const byId = new Map(variants.map((variant) => [variant.variantId, variant]));
   const notices: CheckoutNotice[] = [];
@@ -60,10 +65,19 @@ export function resolveCheckoutCart(
       continue;
     }
 
-    lines.push({ ...variant, quantity: item.quantity, lineTotal: variant.unitPrice * item.quantity });
+    lines.push({
+      ...variant,
+      quantity: item.quantity,
+      bundleUnits: 0,
+      bundleUnitPrice: variant.unitPrice,
+      lineTotal: 0,
+    });
   }
 
   if (notices.length > 0) return { ok: false, notices };
+
+  const priced = applyBundles(lines, rules);
+  lines.forEach((line, index) => Object.assign(line, priced[index]));
 
   const itemsTotal = lines.reduce((total, line) => total + line.lineTotal, 0);
   return { ok: true, lines, itemsTotal };

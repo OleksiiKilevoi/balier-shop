@@ -196,7 +196,12 @@ import Button from './Button.astro';
       }
 
       const qty = item.querySelector<HTMLElement>('[data-line-qty]');
-      if (qty) qty.textContent = `${line.quantity} шт. × ${formatPrice(line.unitPrice)}`;
+      if (qty) {
+        qty.textContent = `${line.quantity} шт. × ${formatPrice(line.unitPrice)}`;
+        if (line.bundleUnits > 0 && line.bundleUnitPrice < line.unitPrice) {
+          qty.textContent += ` · ${line.bundleUnits} у наборі по ${formatPrice(line.bundleUnitPrice)}`;
+        }
+      }
 
       const total = item.querySelector<HTMLElement>('[data-line-total]');
       if (total) total.textContent = formatPrice(line.lineTotal);

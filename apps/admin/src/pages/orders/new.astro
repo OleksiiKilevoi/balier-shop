@@ -3,7 +3,8 @@ import { env } from 'cloudflare:workers';
 import AdminLayout from '~/layouts/AdminLayout.astro';
 import { createDb, createTxDb } from '@balier/lib/db';
 import type { TxDb } from '@balier/lib/db';
-import { findCartVariants } from '@balier/lib/db/queries/cart';
+import { findBundleRules, findCartVariants } from '@balier/lib/db/queries/cart';
+import { applyBundles } from '@balier/lib/cart/bundle';
 import {
   SETTLEMENT_MIN_QUERY_LENGTH,
   findSettlement,
@@ -264,15 +265,26 @@ const [basketVariants, productResults, settlementResults, warehouseResults, sett
  * would still refuse the order, and a manager needs to see the thing they have
  * to remove.
  */
-const basket = draft.items.map((item) => ({
+const bundleRules = await findBundleRules(db, [
+  ...new Set(basketVariants.map((variant) => variant.productId)),
+]);
+const unpriced = draft.items.map((item) => ({
   ...item,
   variant: basketVariants.find((candidate) => candidate.variantId === item.variantId) ?? null,
 }));
-
-const itemsTotal = basket.reduce(
-  (total, line) => total + (line.variant ? line.variant.unitPrice * line.quantity : 0),
-  0,
+// The same bundle pricing `createOrder` applies; lines that cannot be ordered
+// are priced at nothing, as before.
+const bundlePricing = applyBundles(
+  unpriced.map((line) => ({
+    productId: line.variant?.productId ?? '',
+    unitPrice: line.variant?.unitPrice ?? 0,
+    quantity: line.variant ? line.quantity : 0,
+  })),
+  bundleRules,
 );
+const basket = unpriced.map((line, index) => ({ ...line, pricing: bundlePricing[index]! }));
+
+const itemsTotal = basket.reduce((total, line) => total + line.pricing.lineTotal, 0);
 
 /** Display only. The order is priced from the database inside `createOrder`. */
 const hasUnavailable = basket.some((line) => !line.variant);
@@ -414,6 +426,8 @@ const DELIVERY_CHOICES = [
                       <p class="text-fg-subtle text-xs">
                         <span class="font-mono">{line.variant.sku}</span> ·{' '}
                         {formatPrice(line.variant.unitPrice)}
+                        {line.pricing.bundleUnits > 0 &&
+                          ` · ${line.pricing.bundleUnits} шт. в наборі по ${formatPrice(line.pricing.bundleUnitPrice)}`}
                       </p>
                     </>
                   ) : (
@@ -443,7 +457,7 @@ const DELIVERY_CHOICES = [
                 />
 
                 <p class="text-fg w-24 text-right font-medium tabular-nums">
-                  {line.variant ? formatPrice(line.variant.unitPrice * line.quantity) : '—'}
+                  {line.variant ? formatPrice(line.pricing.lineTotal) : '—'}
                 </p>
 
                 <button

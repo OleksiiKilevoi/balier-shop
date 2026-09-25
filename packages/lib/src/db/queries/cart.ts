@@ -1,7 +1,9 @@
 import { and, asc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 import type { Db, Tx } from '../index';
+import { bundleUnitPrice, type BundleRule } from '../../cart/bundle';
 import { productImages, productTranslations, productVariants, products } from '../schema';
-import type { CartVariantData } from '../../cart';
+import type { CartVariantData, CompanionOffer } from '../../cart';
 import { LOCALE } from './locale';
 
 /**
@@ -77,6 +79,7 @@ export async function findCartVariants(
 
     return {
       variantId: row.variantId,
+      productId: row.productId,
       productSlug: row.productSlug,
       productTitle: row.productTitle,
       variantName: row.variantName,
@@ -112,6 +115,7 @@ export async function findCheckoutVariants(
   const rows = await tx
     .select({
       variantId: productVariants.id,
+      productId: products.id,
       productSlug: products.slug,
       productTitle: productTranslations.title,
       variantName: productVariants.colorName,
@@ -135,4 +139,71 @@ export async function findCheckoutVariants(
     );
 
   return rows.map((row) => ({ ...row, imageUrl: null, imageAlt: null }));
+}
+
+/**
+ * The bundle rules for the products in a cart: which companion each names, at
+ * what percentage. Only companions that are themselves on sale count — a rule
+ * pointing at an archived product prices nothing.
+ */
+export async function findBundleRules(
+  db: Db | Tx,
+  productIds: readonly string[],
+): Promise<BundleRule[]> {
+  if (productIds.length === 0) return [];
+  const companion = alias(products, 'companion');
+  const rows = await db
+    .select({
+      productId: products.id,
+      companionProductId: products.companionProductId,
+      percent: products.companionDiscountPercent,
+    })
+    .from(products)
+    .innerJoin(companion, eq(companion.id, products.companionProductId))
+    .where(and(inArray(products.id, [...productIds]), eq(companion.status, 'active')));
+  return rows.flatMap((row) =>
+    row.companionProductId ? [{ ...row, companionProductId: row.companionProductId }] : [],
+  );
+}
+
+/**
+ * What to show for a companion product: its first in-stock active variant,
+ * with the lead photo, priced both ways. A companion with nothing in stock is
+ * not offered.
+ */
+export async function findCompanionOffer(
+  db: Db,
+  companionProductId: string,
+  percent: number,
+): Promise<CompanionOffer | null> {
+  const [row] = await db
+    .select({
+      variantId: productVariants.id,
+      productSlug: products.slug,
+      productTitle: productTranslations.title,
+      unitPrice: sql<number>`coalesce(${productVariants.priceOverride}, ${products.basePrice})`,
+      imageUrl: sql<string | null>`(
+        select ${productImages.url} from ${productImages}
+        where ${productImages.productId} = ${products.id}
+          and (${productImages.variantId} is null or ${productImages.variantId} = ${productVariants.id})
+        order by ${productImages.position}, ${productImages.id} limit 1
+      )`,
+    })
+    .from(productVariants)
+    .innerJoin(products, eq(products.id, productVariants.productId))
+    .innerJoin(
+      productTranslations,
+      and(eq(productTranslations.productId, products.id), eq(productTranslations.locale, LOCALE)),
+    )
+    .where(
+      and(
+        eq(products.id, companionProductId),
+        eq(products.status, 'active'),
+        eq(productVariants.isActive, true),
+        eq(productVariants.inStock, true),
+      ),
+    )
+    .orderBy(asc(productVariants.position), asc(productVariants.sku))
+    .limit(1);
+  return row ? { ...row, bundleUnitPrice: bundleUnitPrice(row.unitPrice, percent) } : null;
 }

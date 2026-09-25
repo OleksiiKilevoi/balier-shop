@@ -8,6 +8,7 @@ import QuantityStepper from '~/components/QuantityStepper.astro';
 import { createDb } from '@balier/lib/db';
 import { getProductBySlug } from '@balier/lib/db/queries/products';
 import { getProductReviews } from '@balier/lib/db/queries/reviews';
+import { findCompanionOffer } from '@balier/lib/db/queries/cart';
 import { pluralUk } from '@balier/lib/i18n/plural';
 import { formatPrice } from '@balier/lib/money';
 import { orderDeepLink } from '@balier/lib/telegram';
@@ -21,6 +22,10 @@ const [product, reviews] = await Promise.all([
   getProductReviews(db, Astro.params.slug ?? ''),
 ]);
 if (!product) return Astro.rewrite('/404');
+
+const companion = product.companionProductId
+  ? await findCompanionOffer(db, product.companionProductId, product.companionDiscountPercent)
+  : null;
 
 const reviewDate = new Intl.DateTimeFormat('uk-UA', { day: 'numeric', month: 'long', year: 'numeric' });
 const stars = (rating: number) => '★'.repeat(rating) + '☆'.repeat(5 - rating);
@@ -299,6 +304,51 @@ const structuredData = [
           }
         </div>
 
+        {/* The upsell: the companion the manager picked for this product, at
+            its bundle price. The price is a promise the cart keeps — it is
+            computed from the same rule by `/api/cart` and at checkout. */}
+        {
+          companion && (
+            <div class="border-line mt-6 border-t pt-5">
+              <h2 class="text-sm">
+                До комплекту
+                {companion.bundleUnitPrice < companion.unitPrice && (
+                  <span class="text-ink-muted"> — разом дешевше</span>
+                )}
+              </h2>
+              <div class="mt-3 flex items-center gap-4">
+                {companion.imageUrl && (
+                  <img
+                    src={companion.imageUrl}
+                    alt=""
+                    width="64"
+                    height="64"
+                    loading="lazy"
+                    class="rounded-btn bg-paper-raised h-16 w-16 shrink-0 object-cover"
+                  />
+                )}
+                <div class="min-w-0 flex-1">
+                  <a
+                    href={`/products/${companion.productSlug}`}
+                    class="text-ink block text-sm underline-offset-2 hover:underline"
+                  >
+                    {companion.productTitle}
+                  </a>
+                  <p class="mt-1 text-sm">
+                    {companion.bundleUnitPrice < companion.unitPrice && (
+                      <s class="text-ink-muted mr-2">{formatPrice(companion.unitPrice)}</s>
+                    )}
+                    <span class="price">{formatPrice(companion.bundleUnitPrice)}</span>
+                  </p>
+                </div>
+                <Button variant="secondary" size="sm" data-add-companion={companion.variantId}>
+                  + Додати
+                </Button>
+              </div>
+            </div>
+          )
+        }
+
         {product.description && (
           <p class="text-ink-muted border-line mt-8 border-t pt-6">{product.description}</p>
         )}
@@ -461,5 +511,12 @@ const structuredData = [
         openCartPopup();
       });
     }
+
+    root.querySelector<HTMLButtonElement>('[data-add-companion]')?.addEventListener('click', (event) => {
+      const variantId = (event.currentTarget as HTMLButtonElement).dataset.addCompanion;
+      if (!variantId) return;
+      addToCart(variantId, 1);
+      openCartPopup();
+    });
   }
 </script>
