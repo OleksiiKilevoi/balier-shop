@@ -20,6 +20,7 @@ const STATIC_PATHS = [
   '/',
   '/products',
   '/about',
+  '/vyrobnytstvo',
   '/care',
   '/delivery',
   '/returns',
