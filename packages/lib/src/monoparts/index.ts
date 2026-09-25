@@ -182,10 +182,10 @@ export interface MonoPartsEnv {
 
 /**
  * The switch: false hides the option, the hint and the callback while the
- * keys stay set (it was off for a few hours on 2026-09-25 while the bank
- * refused the test application with `ACCOUNT_CLOSED`).
+ * keys stay set. Off since 2026-09-25: monobank refuses every application
+ * with `ACCOUNT_CLOSED` until the bank sorts out the store's side.
  */
-export const PARTS_ENABLED = true;
+export const PARTS_ENABLED = false;
 
 export function monoPartsFromEnv(env: MonoPartsEnv): MonoPartsPayment | null {
   if (!PARTS_ENABLED) return null;
