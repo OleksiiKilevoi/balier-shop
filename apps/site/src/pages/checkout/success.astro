@@ -26,6 +26,8 @@ const order = await findOrderByNumber(db, orderNumber);
 if (!order) return Astro.rewrite('/404');
 
 const copy = orderStatusCopy(order.status, order.paymentMethod);
+const waitingForParts =
+  order.paymentMethod === 'parts' && (order.status === 'pending' || order.status === 'awaiting_payment');
 
 // Reporting only — `paid` is still the webhook's word (hard rule 2). COD orders
 // count: they are real orders. `transaction_id` makes a reload one conversion.
@@ -41,6 +43,9 @@ const conversion =
 ---
 
 <BaseLayout title="Замовлення оформлено" noindex>
+  {/* «Частинами» is approved in the monobank app while this page is open; the
+      callback moves the order, and a refresh every 5 s shows it. */}
+  {waitingForParts && <meta slot="head" http-equiv="refresh" content="5" />}
   {conversion && (
     <script is:inline slot="head" define:vars={{ conversion }}>
       window.gtag?.('event', 'conversion', conversion);

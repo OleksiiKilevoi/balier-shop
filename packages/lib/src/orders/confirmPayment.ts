@@ -57,7 +57,7 @@ const FAILURE_STATUSES = new Set<InvoiceStatus>(['failure', 'reversed', 'expired
 export async function confirmPayment(
   txDb: TxDb,
   invoiceId: string,
-  statusResult: { status: InvoiceStatus; amount: Kopiykas },
+  statusResult: { status: InvoiceStatus; amount: Kopiykas | null },
   rawPayload: unknown,
 ): Promise<ConfirmPaymentResult> {
   return txDb.transaction(async (tx) => {
@@ -75,7 +75,7 @@ export async function confirmPayment(
 
         await tx
           .update(payments)
-          .set({ status: 'success', amount: statusResult.amount, lastPayload: rawPayload, updatedAt: sql`now()` })
+          .set({ status: 'success', amount: statusResult.amount ?? payment.amount, lastPayload: rawPayload, updatedAt: sql`now()` })
           .where(eq(payments.id, payment.id));
 
         return { ok: true, transitioned: 'paid_after_cancellation', order, items: order.items };
@@ -85,12 +85,12 @@ export async function confirmPayment(
     }
 
     if (statusResult.status === 'success') {
-      if (statusResult.amount !== order.total) {
+      if (statusResult.amount !== null && statusResult.amount !== order.total) {
         // The money is real, so it is recorded; what is refused is the
         // conclusion that this order is settled.
         await tx
           .update(payments)
-          .set({ amount: statusResult.amount, lastPayload: rawPayload, updatedAt: sql`now()` })
+          .set({ amount: statusResult.amount ?? payment.amount, lastPayload: rawPayload, updatedAt: sql`now()` })
           .where(eq(payments.id, payment.id));
 
         return { ok: true, transitioned: 'amount_mismatch', order, items: order.items };
@@ -98,7 +98,7 @@ export async function confirmPayment(
 
       await tx
         .update(payments)
-        .set({ status: 'success', amount: statusResult.amount, lastPayload: rawPayload, updatedAt: sql`now()` })
+        .set({ status: 'success', amount: statusResult.amount ?? payment.amount, lastPayload: rawPayload, updatedAt: sql`now()` })
         .where(eq(payments.id, payment.id));
 
       const [paidOrder] = await tx

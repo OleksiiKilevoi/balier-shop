@@ -83,6 +83,12 @@ export async function updateOrderStatus(
 
 /** Provider statuses whose payment link may still accept money. */
 const LIVE_INVOICE_STATUSES = new Set(['created', 'processing', 'hold']);
+/**
+ * A «частинами» application can still be withdrawn after the client approved
+ * (`success`): nothing is debited until the hand-over confirm. Once confirmed,
+ * cancelling is a return — a person's job in the monobank cabinet for now.
+ */
+const WITHDRAWABLE_PARTS_STATUSES = new Set([...LIVE_INVOICE_STATUSES, 'success']);
 
 /**
  * The follow-up to cancelling a not-yet-paid card order: invalidate its
@@ -99,16 +105,19 @@ const LIVE_INVOICE_STATUSES = new Set(['created', 'processing', 'hold']);
  */
 export async function removeCancelledOrderInvoices(
   db: Db,
-  payment: PaymentPort,
+  ports: { monobank: PaymentPort; monobank_parts: PaymentPort | null },
   orderId: string,
 ): Promise<void> {
   const rows = await db
-    .select({ invoiceId: payments.invoiceId, status: payments.status })
+    .select({ invoiceId: payments.invoiceId, status: payments.status, provider: payments.provider })
     .from(payments)
     .where(eq(payments.orderId, orderId));
 
   for (const row of rows) {
-    if (!LIVE_INVOICE_STATUSES.has(row.status)) continue;
+    const payment = ports[row.provider];
+    const withdrawable =
+      row.provider === 'monobank_parts' ? WITHDRAWABLE_PARTS_STATUSES : LIVE_INVOICE_STATUSES;
+    if (!payment || !withdrawable.has(row.status)) continue;
     try {
       await payment.removeInvoice(row.invoiceId);
     } catch (err) {
@@ -187,4 +196,36 @@ export async function updateOrderDetails(
 
     return { ok: true, order: updated };
   });
+}
+
+/**
+ * The «частинами» hand-over: once the parcel is on its way, tell monobank the
+ * goods were given, which activates the plan and takes the first payment.
+ * Best-effort after the waybill committed; the payment row's `confirmed` is
+ * what makes a second waybill (after a delete) not confirm twice, and what the
+ * order page shows. A failure is left `success` for a person to retry.
+ */
+export async function confirmPartsHandover(
+  db: Db,
+  parts: { confirm(orderId: string): Promise<void> },
+  orderId: string,
+): Promise<void> {
+  const rows = await db
+    .select({ id: payments.id, invoiceId: payments.invoiceId, status: payments.status })
+    .from(payments)
+    .where(eq(payments.orderId, orderId));
+
+  for (const row of rows) {
+    if (row.status !== 'success') continue;
+    try {
+      await parts.confirm(row.invoiceId);
+      await db
+        .update(payments)
+        .set({ status: 'confirmed', updatedAt: sql`now()` })
+        .where(eq(payments.id, row.id));
+    } catch (err) {
+      console.error(`monobank parts confirm failed for ${row.invoiceId}`, err);
+      Sentry.captureException(err);
+    }
+  }
 }

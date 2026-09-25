@@ -70,6 +70,26 @@ export interface OrderStatusCopy {
  * state the order can actually be in when the page loads.
  */
 export function orderStatusCopy(status: OrderStatus, paymentMethod: PaymentMethod): OrderStatusCopy {
+  if (paymentMethod === 'parts') {
+    if (status === 'awaiting_payment' || status === 'pending') {
+      return {
+        heading: 'Підтвердіть заявку в застосунку monobank',
+        body: 'Ми надіслали заявку на покупку частинами. Відкрийте застосунок monobank, оберіть кількість платежів і підтвердіть — на це є 15 хвилин. Сторінка оновиться сама.',
+      };
+    }
+    if (status === 'paid') {
+      return {
+        heading: 'Заявку схвалено',
+        body: 'Покупку частинами оформлено. Перший платіж спишеться, коли ми відправимо замовлення. Менеджер зв’яжеться з вами щодо доставки.',
+      };
+    }
+    if (status === 'cancelled') {
+      return {
+        heading: 'Заявку не схвалено',
+        body: 'Покупку частинами не оформлено — заявку відхилено або час на підтвердження минув. Спробуйте оформити замовлення ще раз з оплатою карткою.',
+      };
+    }
+  }
   switch (status) {
     case 'paid':
       return {

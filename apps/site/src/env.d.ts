@@ -21,6 +21,21 @@ declare global {
     TELEGRAM_CHAT_ID: string;
   }
 
+  /**
+   * monobank «Покупка частинами» (`@balier/lib/monoparts`), optional: all three
+   * set or the option is off. On `Cloudflare.Env` because that is what
+   * `cloudflare:workers`' `env` is typed as. Sandbox:
+   * `https://u2-demo-ext.mono.st4g3.com`, store `test_store_with_confirm`,
+   * secret from monobank's public docs.
+   */
+  namespace Cloudflare {
+    interface Env {
+      MONO_PARTS_URL?: string;
+      MONO_PARTS_STORE_ID?: string;
+      MONO_PARTS_SECRET?: string;
+    }
+  }
+
   /** `Astro.locals.cfContext.waitUntil(...)` — see `docs/OVERVIEW.md`. */
   namespace App {
     interface Locals extends Runtime {}

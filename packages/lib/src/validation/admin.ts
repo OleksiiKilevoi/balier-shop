@@ -422,7 +422,9 @@ export const adminNewOrderSchema = z.object({
   customerPhone: customerPhoneSchema,
   customerEmail: customerEmailSchema,
   delivery: deliverySchema,
-  paymentMethod: paymentMethodSchema,
+  // «Частинами» needs the client in the monobank app at the moment of
+  // ordering, so the panel keeps to the two methods it can offer.
+  paymentMethod: paymentMethodSchema.exclude(['parts']),
   comment: commentSchema,
   items: cartItemsSchema.min(1),
 });

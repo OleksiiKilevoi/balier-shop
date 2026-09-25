@@ -267,6 +267,20 @@ const phoneInputClass = inputClass.replace('px-4', 'pl-16 pr-4');
                 <input type="radio" name="paymentMethod" value="card" checked data-payment-method />
                 Карткою онлайн
               </label>
+              {/* Shown by the script only when `/api/checkout/limits` says
+                  «частинами» is configured and the cart reaches its minimum. */}
+              <label
+                class="border-line-strong has-checked:border-brand has-checked:bg-brand/5 rounded-btn flex min-h-touch cursor-pointer items-center gap-2 border px-4 py-2 text-sm"
+                data-parts-label
+                hidden
+              >
+                <input type="radio" name="paymentMethod" value="parts" data-payment-method />
+                <span>
+                  Покупка частинами monobank ·
+                  <a href="/chastynamy" target="_blank" class="text-ink-muted text-xs underline underline-offset-2">умови</a>
+                  <span class="text-ink-muted block text-xs" data-parts-hint></span>
+                </span>
+              </label>
               <label
                 class="border-line-strong has-checked:border-brand has-checked:bg-brand/5 rounded-btn flex min-h-touch cursor-pointer items-center gap-2 border px-4 text-sm has-disabled:cursor-not-allowed has-disabled:opacity-50"
                 data-cod-label
@@ -404,6 +418,10 @@ const phoneInputClass = inputClass.replace('px-4', 'pl-16 pr-4');
 
     let cart: CartSummary | null = null;
     let codLimitKopiykas = 0;
+    /** «Частинами» as `/api/checkout/limits` reports it; null = not offered. */
+    let partsOffer: { minTotalKopiykas: number; maxCount: number } | null = null;
+    const partsLabel = form.querySelector<HTMLElement>('[data-parts-label]');
+    const partsHint = form.querySelector<HTMLElement>('[data-parts-hint]');
     /** Percent the promo is running at, or null when it is off. */
     let promoPercent: number | null = null;
     let selectedSettlement: SettlementResult | null = null;
@@ -598,7 +616,23 @@ const phoneInputClass = inputClass.replace('px-4', 'pl-16 pr-4');
       if (cart) paintTotal(cart);
     });
 
+    /** Offered from the minimum up; below it the option disappears and card is picked. */
+    const paintPartsAvailability = () => {
+      if (!cart || !partsLabel) return;
+      const available = partsOffer !== null && cart.total >= partsOffer.minTotalKopiykas;
+      partsLabel.hidden = !available;
+      const radio = partsLabel.querySelector<HTMLInputElement>('input[value="parts"]');
+      if (!available && radio?.checked) {
+        const cardRadio = form.querySelector<HTMLInputElement>('input[name="paymentMethod"][value="card"]');
+        if (cardRadio) cardRadio.checked = true;
+      }
+      if (available && partsHint && partsOffer) {
+        partsHint.textContent = `від ${formatPrice(Math.ceil(cart.total / partsOffer.maxCount / 100) * 100)} на місяць · підтвердження в застосунку monobank`;
+      }
+    };
+
     const paintCodAvailability = () => {
+      paintPartsAvailability();
       if (!cart || !codLabel || !codOverLimitNote) return;
       const codRadio = codLabel.querySelector<HTMLInputElement>('input[value="cod"]');
       const overLimit = cart.total > codLimitKopiykas;
@@ -789,11 +823,13 @@ const phoneInputClass = inputClass.replace('px-4', 'pl-16 pr-4');
           fetchCartSummary(),
           fetch('/api/checkout/limits'),
         ]);
-        const { codLimitKopiykas: limit, promo } = (await limitsResponse.json()) as {
+        const { codLimitKopiykas: limit, promo, parts } = (await limitsResponse.json()) as {
           codLimitKopiykas: number;
           promo: { percent: number } | null;
+          parts: { minTotalKopiykas: number; maxCount: number } | null;
         };
         promoPercent = promo?.percent ?? null;
+        partsOffer = parts;
 
         if (summary.lines.length === 0) {
           showState('empty');
@@ -912,6 +948,14 @@ const phoneInputClass = inputClass.replace('px-4', 'pl-16 pr-4');
             submitError.hidden = false;
           }
           await load();
+          return;
+        }
+
+        if (body.error === 'parts_unavailable') {
+          if (submitError) {
+            submitError.textContent = 'Покупка частинами зараз недоступна для цього замовлення. Оберіть оплату карткою.';
+            submitError.hidden = false;
+          }
           return;
         }
 

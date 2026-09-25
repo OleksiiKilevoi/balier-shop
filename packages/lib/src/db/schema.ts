@@ -48,13 +48,13 @@ export const orderStatus = pgEnum('order_status', [
  * weight nobody measured was only ever standing in for this choice.
  */
 export const parcelSize = pgEnum('parcel_size', ['small', 'large']);
-export const paymentMethod = pgEnum('payment_method', ['card', 'cod']);
+export const paymentMethod = pgEnum('payment_method', ['card', 'cod', 'parts']);
 export const deliveryMethod = pgEnum('delivery_method', [
   'np_warehouse',
   'np_postomat',
   'np_courier',
 ]);
-export const paymentProvider = pgEnum('payment_provider', ['monobank']);
+export const paymentProvider = pgEnum('payment_provider', ['monobank', 'monobank_parts']);
 
 /**
  * What an admin account may do. Two values, and deliberately not a permission

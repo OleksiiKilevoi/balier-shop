@@ -67,7 +67,7 @@ export const deliverySchema = z.discriminatedUnion('deliveryMethod', [
   npPostomatDeliverySchema,
 ]);
 
-export const paymentMethodSchema = z.enum(['card', 'cod']);
+export const paymentMethodSchema = z.enum(['card', 'cod', 'parts']);
 
 export const commentSchema = z
   .string()

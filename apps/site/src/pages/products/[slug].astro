@@ -9,6 +9,7 @@ import { createDb } from '@balier/lib/db';
 import { getProductBySlug } from '@balier/lib/db/queries/products';
 import { getProductReviews } from '@balier/lib/db/queries/reviews';
 import { listCompanionOffers } from '@balier/lib/db/queries/cart';
+import { PARTS_COUNTS, PARTS_MIN_TOTAL, monoPartsFromEnv } from '@balier/lib/monoparts';
 import { pluralUk } from '@balier/lib/i18n/plural';
 import { formatPrice } from '@balier/lib/money';
 import { orderDeepLink } from '@balier/lib/telegram';
@@ -25,6 +26,7 @@ if (!product) return Astro.rewrite('/404');
 
 const companions = await listCompanionOffers(db, product.id, product.companionDiscountPercent);
 
+
 const reviewDate = new Intl.DateTimeFormat('uk-UA', { day: 'numeric', month: 'long', year: 'numeric' });
 const stars = (rating: number) => '★'.repeat(rating) + '☆'.repeat(5 - rating);
 
@@ -32,6 +34,12 @@ const stars = (rating: number) => '★'.repeat(rating) + '☆'.repeat(5 - rating
 // `noUncheckedIndexedAccess` is right to make us say so.
 const [defaultVariant] = product.variants;
 if (!defaultVariant) return Astro.rewrite('/404');
+
+/** Monthly payment at the most parts, rounded up to whole hryvnias; null when not offered. */
+const partsFrom =
+  monoPartsFromEnv(env) && defaultVariant.price >= PARTS_MIN_TOTAL
+    ? Math.ceil(defaultVariant.price / Math.max(...PARTS_COUNTS) / 100) * 100
+    : null;
 
 const hasColourChoice = product.variants.length > 1;
 
@@ -301,6 +309,15 @@ const structuredData = [
             )
           }
         </div>
+
+        {/* «Покупка частинами» (`@balier/lib/monoparts`) — said where the price
+            is read, only when it is configured and this price reaches it. */}
+        {partsFrom !== null && (
+          <p class="text-ink-muted mt-3 text-sm">
+            Покупка частинами monobank — від {formatPrice(partsFrom)} на місяць.{' '}
+            <a href="/chastynamy" class="underline underline-offset-2">Умови</a>
+          </p>
+        )}
 
         {/* The upsell: the companions the manager picked for this product, at
             their bundle price. The price is a promise the cart keeps — it is

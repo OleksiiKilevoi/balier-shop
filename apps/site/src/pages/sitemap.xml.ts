@@ -28,6 +28,7 @@ const STATIC_PATHS = [
   '/palette',
   '/corporate',
   '/offer',
+  '/chastynamy',
   '/privacy',
 ];
 

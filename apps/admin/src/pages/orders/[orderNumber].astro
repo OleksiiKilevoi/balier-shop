@@ -28,12 +28,14 @@ import {
 import type { AdminOrderMessage } from '@balier/lib/i18n/admin';
 import { formatPrice } from '@balier/lib/money';
 import { createMonobankPayment } from '@balier/lib/monobank';
+import { monoPartsFromEnv } from '@balier/lib/monoparts';
 import { DELIVERY_METHOD_LABELS, PAYMENT_METHOD_LABELS, deliveryDestination } from '@balier/lib/notify/format';
 import { PARCEL_SIZES, parcelSizeForOrder } from '@balier/lib/novaposhta/parcel';
 import { createNovaPoshtaShipping } from '@balier/lib/novaposhta/shipping';
 import { splitRecipientName } from '@balier/lib/novaposhta/waybill';
 import { allowedTransitions, orderDetailsLock, revertTarget } from '@balier/lib/orders/status';
-import { removeCancelledOrderInvoices, updateOrderStatus } from '@balier/lib/orders/updateStatus';
+import { confirmPartsHandover,
+  removeCancelledOrderInvoices, updateOrderStatus } from '@balier/lib/orders/updateStatus';
 import { attachWaybill, detachWaybill } from '@balier/lib/orders/waybill';
 import type { NpSenderSettings } from '@balier/lib/db/queries/settings';
 import { parcelSize } from '@balier/lib/db/schema';
@@ -165,7 +167,17 @@ if (Astro.request.method === 'POST') {
           ttn: created.number,
           ttnRef: created.ref,
         });
-        if (result.ok) return done('waybill_created');
+        if (result.ok) {
+          // The parcel is going out: for «частинами» that is the hand-over
+          // monobank waits for before the plan starts.
+          const parts = monoPartsFromEnv(env);
+          if (current.paymentMethod === 'parts' && parts) {
+            Astro.locals.cfContext.waitUntil(
+              confirmPartsHandover(createDb(env.DATABASE_URL), parts, current.id),
+            );
+          }
+          return done('waybill_created');
+        }
 
         /*
          * The order moved between the pre-check and the lock — a second
@@ -254,11 +266,19 @@ if (Astro.request.method === 'POST') {
         // Cancelling an order whose card payment hasn't happened yet leaves its
         // Monobank link payable until the invoice's own validity runs out — kill
         // it now, after the transition committed, off the response path.
-        if (result.order.status === 'cancelled' && result.order.paidAt === null) {
+        // «Частинами» is withdrawn even once approved (`paidAt` set): nothing
+        // is debited before the hand-over, so the function decides per row.
+        if (
+          result.order.status === 'cancelled' &&
+          (result.order.paidAt === null || result.order.paymentMethod === 'parts')
+        ) {
           Astro.locals.cfContext.waitUntil(
             removeCancelledOrderInvoices(
               createDb(env.DATABASE_URL),
-              createMonobankPayment(env.MONOBANK_TOKEN),
+              {
+                monobank: createMonobankPayment(env.MONOBANK_TOKEN),
+                monobank_parts: monoPartsFromEnv(env),
+              },
               result.order.id,
             ),
           );

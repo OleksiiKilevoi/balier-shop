@@ -7,6 +7,7 @@ import { claimReviewRequest } from '@balier/lib/db/queries/reviews';
 import { getPaymentTtlMinutes } from '@balier/lib/db/queries/settings';
 import { orders, payments } from '@balier/lib/db/schema';
 import { createMonobankPayment } from '@balier/lib/monobank';
+import { monoPartsFromEnv } from '@balier/lib/monoparts';
 import { createEmailNotifier, sendReviewRequestEmail } from '@balier/lib/notify/email';
 import { createTelegramNotifier } from '@balier/lib/notify/telegram';
 import { createNovaPoshtaClient } from '@balier/lib/novaposhta/client';
@@ -145,19 +146,23 @@ async function reconcileAwaitingPayment(
   expired: SQL,
 ): Promise<void> {
   const stale = await db
-    .select({ orderNumber: orders.orderNumber, invoiceId: payments.invoiceId })
+    .select({ orderNumber: orders.orderNumber, invoiceId: payments.invoiceId, provider: payments.provider })
     .from(orders)
     .innerJoin(payments, eq(payments.orderId, orders.id))
     .where(and(eq(orders.status, 'awaiting_payment'), expired));
 
   if (stale.length === 0) return;
 
-  const payment = createMonobankPayment(env.MONOBANK_TOKEN);
+  const card = createMonobankPayment(env.MONOBANK_TOKEN);
+  const parts = monoPartsFromEnv(env);
   const notifier = createTelegramNotifier(env.TELEGRAM_BOT_TOKEN, env.TELEGRAM_CHAT_ID);
   const email = createEmailNotifier(env.EMAIL, env.ORDER_EMAIL_FROM);
 
   for (const row of stale) {
     try {
+      const payment = row.provider === 'monobank_parts' ? parts : card;
+      // Keys removed while an application was open: leave it for a person.
+      if (!payment) continue;
       const status = await payment.getInvoiceStatus(row.invoiceId);
       const result = await confirmPayment(db, row.invoiceId, status, {
         reconciledBy: 'cron',

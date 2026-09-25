@@ -12,6 +12,7 @@ import type { DeliveryInput } from '../validation/checkout';
 import { type CheckoutLine, type CheckoutNotice, resolveCheckoutCart } from './checkoutCart';
 import { generateOrderNumber } from './orderNumber';
 import { campaignCode, discountFor } from './promo';
+import { PARTS_MIN_TOTAL } from '../monoparts';
 
 /**
  * Places an order: reprice the cart against the database and (for card) create
@@ -34,7 +35,7 @@ export interface CreateOrderInput {
   customerPhone: string;
   customerEmail?: string;
   delivery: DeliveryInput;
-  paymentMethod: 'card' | 'cod';
+  paymentMethod: 'card' | 'cod' | 'parts';
   comment?: string;
   items: CartItemInput[];
   /** Normalised by `promoCodeSchema`; absent = no discount asked for. */
@@ -93,6 +94,8 @@ export type CreateOrderResult =
   | { ok: true; orderNumber: string; redirectUrl: string }
   | { ok: false; reason: 'cart_changed'; notices: CheckoutNotice[] }
   | { ok: false; reason: 'cod_over_limit' }
+  /** «Частинами» asked for below `PARTS_MIN_TOTAL`, or while it is not configured. */
+  | { ok: false; reason: 'parts_unavailable' }
   | { ok: false; reason: 'promo_invalid' }
   | { ok: false; reason: 'promo_used' }
   | { ok: false; reason: 'promo_not_first' }
@@ -190,6 +193,12 @@ export async function createOrder(
         }
         const discountTotal = promo?.discount ?? 0;
         const total = resolved.itemsTotal - discountTotal;
+
+        if (input.paymentMethod === 'parts' && total < PARTS_MIN_TOTAL) {
+          failure = { ok: false, reason: 'parts_unavailable' };
+          tx.rollback();
+          throw new Error('unreachable: tx.rollback() throws');
+        }
 
         if (input.paymentMethod === 'cod' && total > deps.codLimitKopiykas) {
           failure = { ok: false, reason: 'cod_over_limit' };
@@ -310,7 +319,8 @@ export async function createOrder(
     };
   }
 
-  // Card: the order sits `pending` until the invoice exists. Monobank is called
+  // Card and «частинами»: `deps.payment` is the port for the chosen method
+  // (the caller picks it). The order sits `pending` until the invoice exists. Monobank is called
   // *outside* the transaction above — a network call must never hold a DB
   // transaction open. The id survives outside the `try` so the catch can tell
   // the two failure shapes apart: no invoice (Monobank refused) versus an
@@ -334,6 +344,7 @@ export async function createOrder(
             })),
       redirectUrl: successUrl(deps.redirectBaseUrl, created.orderNumber),
       webhookUrl: deps.webhookUrl,
+      customerPhone: created.order.customerPhone,
       validitySeconds: deps.paymentTtlMinutes * 60,
     });
     createdInvoiceId = invoice.invoiceId;
@@ -341,6 +352,7 @@ export async function createOrder(
     const [updatedOrder] = await txDb.transaction(async (tx) => {
       await tx.insert(payments).values({
         orderId: created!.orderId,
+        provider: input.paymentMethod === 'parts' ? 'monobank_parts' : 'monobank',
         invoiceId: invoice.invoiceId,
         status: 'created',
         amount: created!.total,

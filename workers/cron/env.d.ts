@@ -6,4 +6,8 @@
 // in `index.ts` must survive that.
 interface Env {
   SENTRY_RELEASE?: string;
+  /** monobank «Покупка частинами» — secrets, optional; see `@balier/lib/monoparts`. */
+  MONO_PARTS_URL?: string;
+  MONO_PARTS_STORE_ID?: string;
+  MONO_PARTS_SECRET?: string;
 }

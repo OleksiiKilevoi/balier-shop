@@ -17,3 +17,10 @@ TURNSTILE_SECRET_KEY=""
 # Telegram bot for new-order notifications
 TELEGRAM_BOT_TOKEN=""
 TELEGRAM_CHAT_ID=""
+
+# monobank «Покупка частинами» — all three, or the option is off. Sandbox values
+# (from monobank's public docs) shown; production keys come from the bank and
+# go in with `wrangler secret put`, never in this file's committed copy.
+MONO_PARTS_URL="https://u2-demo-ext.mono.st4g3.com"
+MONO_PARTS_STORE_ID="test_store_with_confirm"
+MONO_PARTS_SECRET="secret_98765432--123-123"

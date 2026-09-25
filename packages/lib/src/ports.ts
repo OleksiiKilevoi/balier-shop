@@ -18,6 +18,8 @@ export interface CreateInvoiceInput {
   items: readonly Pick<OrderItem, 'productTitle' | 'unitPrice' | 'quantity' | 'sku'>[];
   redirectUrl: string;
   webhookUrl: string;
+  /** `+380…` — required by monobank «Покупка частинами», ignored by the card invoice. */
+  customerPhone?: string;
   /** Seconds the invoice stays payable. Must match the stock reservation TTL. */
   validitySeconds: number;
 }
@@ -41,9 +43,13 @@ export interface PaymentPort {
   createInvoice(input: CreateInvoiceInput): Promise<Invoice>;
   /**
    * Authoritative status straight from the provider. The webhook body is only a
-   * hint that something changed — always confirm through this.
+   * hint that something changed — always confirm through this. `amount` is
+   * null for a provider that does not report the charged sum (monobank
+   * «Покупка частинами», where the sum is the one we fixed at creation).
    */
-  getInvoiceStatus(invoiceId: string): Promise<{ status: InvoiceStatus; amount: Kopiykas }>;
+  getInvoiceStatus(
+    invoiceId: string,
+  ): Promise<{ status: InvoiceStatus; amount: Kopiykas | null }>;
   /** Verifies the raw request body against the provider signature header. */
   verifyWebhook(rawBody: string, signature: string | null): Promise<boolean>;
   /**

@@ -1,0 +1,34 @@
+---
+import StaticPageLayout from '~/layouts/StaticPageLayout.astro';
+
+// Static HTML, built once — see StaticPageLayout.
+export const prerender = true;
+
+/*
+ * The bank's required disclosure for «Покупка частинами», copied verbatim as
+ * monobank sent it (2026-09-25). Do not edit the wording — only the bank can.
+ * Linked as «Умови» wherever «частинами» is offered.
+ */
+---
+
+<StaticPageLayout
+  title="Покупка частинами monobank | Universal Bank"
+  description="Покупка частинами monobank: надавач послуг і характеристики продукту."
+>
+  <h2>Надавач послуг:</h2>
+  <p>АТ «УНІВЕРСАЛ БАНК» ліцензія НБУ No92 від 20.01.1994, номер у держреєстрі банків No 226.</p>
+
+  <h2>Характеристики продукту:</h2>
+  <ul>
+    <li>Мінімальна сума розстрочки: 2 грн</li>
+    <li>Максимальна сума розстрочки: 400 000 грн</li>
+    <li>Реальна річна процентна ставка: 0,000001%</li>
+    <li>Доступний строк, платежів: 3 - 25</li>
+    <li>Порядок погашення: щомісячні платежі рівними частинами</li>
+    <li>Перший платіж у момент оформлення покупки</li>
+    <li>
+      Інформація про істотні характеристики продукту та попередження розміщені на сайті продукту
+      <a href="https://chast.monobank.ua" rel="noopener" target="_blank">chast.monobank.ua</a>
+    </li>
+  </ul>
+</StaticPageLayout>

@@ -29,6 +29,15 @@ declare global {
     ADMIN_SESSION_SECRET: string;
   }
 
+  /** monobank «Покупка частинами» — optional secrets, see `apps/site/src/env.d.ts`. */
+  namespace Cloudflare {
+    interface Env {
+      MONO_PARTS_URL?: string;
+      MONO_PARTS_STORE_ID?: string;
+      MONO_PARTS_SECRET?: string;
+    }
+  }
+
   /** `Astro.locals.cfContext.waitUntil(...)` — see `docs/OVERVIEW.md`. */
   namespace App {
     interface Locals extends Runtime {

@@ -2,6 +2,7 @@ import { env } from 'cloudflare:workers';
 import type { APIRoute } from 'astro';
 import { createDb } from '@balier/lib/db';
 import { getCodLimitKopiykas, getPromoSettings } from '@balier/lib/db/queries/settings';
+import { PARTS_COUNTS, PARTS_MIN_TOTAL, monoPartsFromEnv } from '@balier/lib/monoparts';
 
 export const prerender = false;
 
@@ -22,7 +23,13 @@ export const GET: APIRoute = async () => {
   // checkout summary's preview percentage; the server still decides at submit.
   const promo = promoSettings.enabled ? { percent: promoSettings.percent } : null;
 
-  return new Response(JSON.stringify({ codLimitKopiykas, promo }), {
+  // «Частинами» is offered only when its keys are set; the minimum and the
+  // largest count drive the «від N ₴» hint.
+  const parts = monoPartsFromEnv(env)
+    ? { minTotalKopiykas: PARTS_MIN_TOTAL, maxCount: Math.max(...PARTS_COUNTS) }
+    : null;
+
+  return new Response(JSON.stringify({ codLimitKopiykas, promo, parts }), {
     status: 200,
     headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
   });
