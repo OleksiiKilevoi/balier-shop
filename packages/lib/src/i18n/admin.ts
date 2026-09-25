@@ -511,6 +511,8 @@ export const ADMIN_PRODUCT_MESSAGES = {
   image_saved: 'Фото збережено.',
   image_moved: 'Порядок фото змінено.',
   image_removed: 'Фото прибрано з товару.',
+  companion_added: 'Супутній товар додано.',
+  companion_removed: 'Супутній товар прибрано.',
   slug_taken: 'Таку адресу вже займає інший товар. Змініть slug.',
   sku_taken: 'Такий артикул уже існує — SKU має бути унікальним у всьому каталозі.',
   last_active_variant:

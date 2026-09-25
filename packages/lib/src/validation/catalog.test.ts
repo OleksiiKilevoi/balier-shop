@@ -35,7 +35,6 @@ const BASE = {
   parcelSize: 'small',
   status: 'active',
   position: '0',
-  companionProductId: '',
   companionDiscountPercent: '0',
 } as const;
 
@@ -295,15 +294,26 @@ describe('categoryActionSchema', () => {
 });
 
 describe('product_save companion', () => {
-  it('reads an empty picker as none and a blank percentage as 0, and caps it', () => {
-    const none = saveProduct({ companionDiscountPercent: '' });
-    expect(none.success && none.data.intent === 'product_save' && none.data.companionProductId).toBeNull();
-    expect(none.success && none.data.intent === 'product_save' && none.data.companionDiscountPercent).toBe(0);
+  it('reads a blank percentage as 0, and caps it', () => {
+    const blank = saveProduct({ companionDiscountPercent: '' });
+    expect(blank.success && blank.data.intent === 'product_save' && blank.data.companionDiscountPercent).toBe(0);
 
-    const set = saveProduct({ companionProductId: '4f1c7e2a-0000-4000-8000-000000000009', companionDiscountPercent: '20' });
+    const set = saveProduct({ companionDiscountPercent: '20' });
     expect(set.success && set.data.intent === 'product_save' && set.data.companionDiscountPercent).toBe(20);
 
     expect(saveProduct({ companionDiscountPercent: '51' }).success).toBe(false);
+  });
+
+  it('adds and removes a companion by id, from the bodies the forms post', () => {
+    const add = new FormData();
+    add.set('intent', 'companion_add');
+    add.set('companionProductId', '4f1c7e2a-0000-4000-8000-000000000009');
+    expect(productActionSchema.safeParse(Object.fromEntries(add)).success).toBe(true);
+
+    const empty = new FormData();
+    empty.set('intent', 'companion_add');
+    empty.set('companionProductId', '');
+    expect(productActionSchema.safeParse(Object.fromEntries(empty)).success).toBe(false);
   });
 });
 

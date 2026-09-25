@@ -1,5 +1,4 @@
 import {
-  type AnyPgColumn,
   boolean,
   check,
   index,
@@ -115,14 +114,7 @@ export const products = pgTable(
     status: productStatus('status').notNull().default('draft'),
     isFeatured: boolean('is_featured').notNull().default(false),
     position: integer('position').notNull().default(0),
-    /**
-     * The upsell: offered under this product and at checkout, and priced
-     * `companion_discount_percent` lower for as many units as this product has
-     * in the cart (`~/lib/cart/bundle.ts`). NULL = no companion.
-     */
-    companionProductId: uuid('companion_product_id').references((): AnyPgColumn => products.id, {
-      onDelete: 'set null',
-    }),
+    /** The bundle discount on every companion in `product_companions` (`~/lib/cart/bundle.ts`). */
     companionDiscountPercent: integer('companion_discount_percent').notNull().default(10),
     createdAt,
     updatedAt,
@@ -131,7 +123,29 @@ export const products = pgTable(
     index('products_status_idx').on(t.status),
     index('products_category_idx').on(t.categoryId),
     check('products_companion_discount_range', sql`${t.companionDiscountPercent} between 0 and 50`),
-    check('products_companion_not_self', sql`${t.companionProductId} <> ${t.id}`),
+  ],
+);
+
+/**
+ * The upsell list: companions offered under a product and at checkout, each
+ * priced `products.companion_discount_percent` lower for as many units as the
+ * main product has in the cart (`~/lib/cart/bundle.ts`). Shown in the order
+ * they were added.
+ */
+export const productCompanions = pgTable(
+  'product_companions',
+  {
+    productId: uuid('product_id')
+      .notNull()
+      .references(() => products.id, { onDelete: 'cascade' }),
+    companionProductId: uuid('companion_product_id')
+      .notNull()
+      .references(() => products.id, { onDelete: 'cascade' }),
+    createdAt,
+  },
+  (t) => [
+    primaryKey({ columns: [t.productId, t.companionProductId] }),
+    check('product_companions_not_self', sql`${t.productId} <> ${t.companionProductId}`),
   ],
 );
 

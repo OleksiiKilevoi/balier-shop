@@ -48,8 +48,8 @@ export interface ProductDetailData {
   categorySlug: string | null;
   /** Free text exactly as written on the card, e.g. `30х17х10 см`. */
   dimensions: string | null;
-  /** The upsell offered under the buy button, and its bundle discount (`~/lib/cart/bundle.ts`). */
-  companionProductId: string | null;
+  id: string;
+  /** The bundle discount on this product's companions (`~/lib/cart/bundle.ts`). */
   companionDiscountPercent: number;
   /** Always at least one. There is no product-without-variants path. */
   variants: ProductVariantData[];
@@ -381,7 +381,6 @@ export async function getProductBySlug(db: Db, slug: string): Promise<ProductDet
       metaDescription: productTranslations.metaDescription,
       categoryTitle: categoryTranslations.title,
       categorySlug: categories.slug,
-      companionProductId: products.companionProductId,
       companionDiscountPercent: products.companionDiscountPercent,
     })
     .from(products)
@@ -449,7 +448,7 @@ export async function getProductBySlug(db: Db, slug: string): Promise<ProductDet
     categoryTitle: row.categoryTitle,
     categorySlug: row.categorySlug,
     dimensions: row.dimensions,
-    companionProductId: row.companionProductId,
+    id: row.id,
     companionDiscountPercent: row.companionDiscountPercent,
     variants: variants.map((variant) => ({
       id: variant.id,

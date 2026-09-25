@@ -5,6 +5,7 @@ import type { Category, Product, ProductImage, ParcelSize, ProductStatus, Produc
 import {
   categories,
   categoryTranslations,
+  productCompanions,
   productImages,
   productTranslations,
   productVariants,
@@ -305,6 +306,55 @@ export async function findAdminProduct(db: Db, id: string): Promise<AdminProduct
   };
 }
 
+/** The product's companions, in the order they were added. */
+export async function listCompanions(
+  db: Db,
+  productId: string,
+): Promise<{ id: string; title: string; status: ProductStatus }[]> {
+  return db
+    .select({ id: products.id, title: productTranslations.title, status: products.status })
+    .from(productCompanions)
+    .innerJoin(products, eq(products.id, productCompanions.companionProductId))
+    .innerJoin(
+      productTranslations,
+      and(eq(productTranslations.productId, products.id), eq(productTranslations.locale, LOCALE)),
+    )
+    .where(eq(productCompanions.productId, productId))
+    .orderBy(asc(productCompanions.createdAt));
+}
+
+/** Adding one twice is a no-op; a product naming itself is refused by the table and reported as `conflict`. */
+export async function addCompanion(
+  db: TxDb,
+  productId: string,
+  companionProductId: string,
+): Promise<CatalogResult> {
+  if (productId === companionProductId) return { ok: false, reason: 'conflict' };
+  return guarded(async () => {
+    await db
+      .insert(productCompanions)
+      .values({ productId, companionProductId })
+      .onConflictDoNothing();
+  });
+}
+
+export async function removeCompanion(
+  db: TxDb,
+  productId: string,
+  companionProductId: string,
+): Promise<CatalogResult> {
+  return guarded(async () => {
+    await db
+      .delete(productCompanions)
+      .where(
+        and(
+          eq(productCompanions.productId, productId),
+          eq(productCompanions.companionProductId, companionProductId),
+        ),
+      );
+  });
+}
+
 /** The companion picker on the product form — every product but archived ones, by name. */
 export async function listProductOptions(
   db: Db,
@@ -409,7 +459,6 @@ export interface ProductFields {
   status: ProductStatus;
   isFeatured: boolean;
   position: number;
-  companionProductId: string | null;
   companionDiscountPercent: number;
   title: string;
   description: string | null;
@@ -437,9 +486,6 @@ export async function updateProduct(
           status: fields.status,
           isFeatured: fields.isFeatured,
           position: fields.position,
-          // A product cannot be its own companion (the table refuses it too).
-          companionProductId:
-            fields.companionProductId === productId ? null : fields.companionProductId,
           companionDiscountPercent: fields.companionDiscountPercent,
           updatedAt: new Date(),
         })

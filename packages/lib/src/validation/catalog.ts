@@ -156,8 +156,7 @@ const productSaveSchema = z.object({
   status: z.enum(productStatus.enumValues),
   isFeatured: checkbox,
   position: wholeNumber(POSITION_MAX, 'invalid_position'),
-  /** The upsell (`~/lib/cart/bundle.ts`). Empty = none. */
-  companionProductId: optionalId,
+  /** On every companion in the list below the form (`~/lib/cart/bundle.ts`). */
   companionDiscountPercent: z
     .string()
     .transform((raw) => raw.trim() || '0')
@@ -245,6 +244,18 @@ const imageRemoveSchema = z.object({
   imageId: requiredId,
 });
 
+/* ------------------------------------------------------------ the companions */
+
+const companionAddSchema = z.object({
+  intent: z.literal('companion_add'),
+  companionProductId: requiredId,
+});
+
+const companionRemoveSchema = z.object({
+  intent: z.literal('companion_remove'),
+  companionProductId: requiredId,
+});
+
 /* ------------------------------------------------------------- the assembly */
 
 export const productActionSchema = z.discriminatedUnion('intent', [
@@ -256,6 +267,8 @@ export const productActionSchema = z.discriminatedUnion('intent', [
   imageSaveSchema,
   imageMoveSchema,
   imageRemoveSchema,
+  companionAddSchema,
+  companionRemoveSchema,
 ]);
 
 export type ProductAction = z.infer<typeof productActionSchema>;

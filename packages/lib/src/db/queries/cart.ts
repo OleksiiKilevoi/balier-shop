@@ -2,7 +2,13 @@ import { and, asc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import type { Db, Tx } from '../index';
 import { bundleUnitPrice, type BundleRule } from '../../cart/bundle';
-import { productImages, productTranslations, productVariants, products } from '../schema';
+import {
+  productCompanions,
+  productImages,
+  productTranslations,
+  productVariants,
+  products,
+} from '../schema';
 import type { CartVariantData, CompanionOffer } from '../../cart';
 import { LOCALE } from './locale';
 
@@ -152,18 +158,37 @@ export async function findBundleRules(
 ): Promise<BundleRule[]> {
   if (productIds.length === 0) return [];
   const companion = alias(products, 'companion');
-  const rows = await db
+  return db
     .select({
-      productId: products.id,
-      companionProductId: products.companionProductId,
+      productId: productCompanions.productId,
+      companionProductId: productCompanions.companionProductId,
       percent: products.companionDiscountPercent,
     })
-    .from(products)
-    .innerJoin(companion, eq(companion.id, products.companionProductId))
-    .where(and(inArray(products.id, [...productIds]), eq(companion.status, 'active')));
-  return rows.flatMap((row) =>
-    row.companionProductId ? [{ ...row, companionProductId: row.companionProductId }] : [],
+    .from(productCompanions)
+    .innerJoin(products, eq(products.id, productCompanions.productId))
+    .innerJoin(companion, eq(companion.id, productCompanions.companionProductId))
+    .where(and(inArray(productCompanions.productId, [...productIds]), eq(companion.status, 'active')));
+}
+
+/**
+ * Every companion of one product that can be offered right now, in the order
+ * the manager added them.
+ * ponytail: one query per companion; a single join if lists ever grow long.
+ */
+export async function listCompanionOffers(
+  db: Db,
+  productId: string,
+  percent: number,
+): Promise<CompanionOffer[]> {
+  const companions = await db
+    .select({ id: productCompanions.companionProductId })
+    .from(productCompanions)
+    .where(eq(productCompanions.productId, productId))
+    .orderBy(asc(productCompanions.createdAt));
+  const offers = await Promise.all(
+    companions.map((companion) => findCompanionOffer(db, companion.id, percent)),
   );
+  return offers.filter((offer) => offer !== null);
 }
 
 /**
