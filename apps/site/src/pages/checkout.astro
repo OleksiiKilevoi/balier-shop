@@ -364,6 +364,7 @@ import { PARTS_AD_LEGAL, PARTS_NAME } from '@balier/lib/monoparts';
   import { formatPrice } from '@balier/lib/money';
   import { applyPhoneMask, isCompletePhoneDigits, phoneDigitsFromInput } from '@balier/lib/phone';
   import { addToCart, cartItems, clearCart } from '@balier/lib/cart/store';
+  import { fold, foldQuery } from '@balier/lib/novaposhta/normalize';
 
   interface SettlementResult {
     ref: string;
@@ -378,6 +379,7 @@ import { PARTS_AD_LEGAL, PARTS_NAME } from '@balier/lib/monoparts';
     number: string | null;
     description: string;
   }
+  type WarehouseRow = [ref: string, number: string | null, description: string];
 
   // Turnstile:
   // declare global {
@@ -433,7 +435,6 @@ import { PARTS_AD_LEGAL, PARTS_NAME } from '@balier/lib/monoparts';
     let selectedSettlement: SettlementResult | null = null;
     let selectedWarehouse: WarehouseResult | null = null;
     let settlementSearchDebounce: number | undefined;
-    let warehouseSearchDebounce: number | undefined;
 
     /**
      * Short, because the lookups behind it are edge-cached now and usually
@@ -707,23 +708,40 @@ import { PARTS_AD_LEGAL, PARTS_NAME } from '@balier/lib/monoparts';
       warehouseResultsList.hidden = results.length === 0;
     };
 
-    // Unlike the settlement search (26 791 rows nationwide, needs 2+ typed
-    // characters to be worth a query), a warehouse search is already scoped
-    // to one settlement — even an empty query is a cheap, useful "browse the
-    // first N" default, so this fires on focus too, not just on input.
-    const loadWarehouses = (query: string) => {
+    /**
+     * The whole list for the chosen settlement and kind is downloaded once
+     * (edge-cached a day, kept by `lookup` for the page's life) and searched
+     * here, so typing costs no request. Matching is the server's old rule:
+     * the folded query as a substring of the folded description, which also
+     * carries the number («№12»). The folded text is computed once per list.
+     */
+    const foldedLists = new WeakMap<WarehouseRow[], string[]>();
+    const WAREHOUSE_RESULT_LIMIT = 50;
+
+    const loadWarehouses = async (query: string) => {
       if (!selectedSettlement || !warehouseQuery) return;
       const method = currentDeliveryMethod();
       if (method === 'np_courier') return;
 
-      window.clearTimeout(warehouseSearchDebounce);
-      warehouseSearchDebounce = window.setTimeout(async () => {
-        const results = await lookup<WarehouseResult[]>(
-          'warehouse',
-          `/api/checkout/np-warehouses?settlementRef=${encodeURIComponent(selectedSettlement!.ref)}&kind=${method}&q=${encodeURIComponent(query)}`,
-        );
-        if (results) paintWarehouseResults(results);
-      }, SEARCH_DEBOUNCE_MS);
+      const rows = await lookup<WarehouseRow[]>(
+        'warehouse',
+        `/api/checkout/np-warehouses?settlementRef=${encodeURIComponent(selectedSettlement.ref)}&kind=${method}`,
+      );
+      if (!rows) return;
+
+      let folded = foldedLists.get(rows);
+      if (!folded) {
+        folded = rows.map((row) => fold(row[2]));
+        foldedLists.set(rows, folded);
+      }
+      const needle = foldQuery(query);
+      const results: WarehouseResult[] = [];
+      for (let i = 0; i < rows.length && results.length < WAREHOUSE_RESULT_LIMIT; i++) {
+        if (needle && !folded[i]!.includes(needle)) continue;
+        const [ref, number, description] = rows[i]!;
+        results.push({ ref, number, description });
+      }
+      paintWarehouseResults(results);
     };
 
     warehouseQuery?.addEventListener('focus', () => {
