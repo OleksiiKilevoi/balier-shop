@@ -4,8 +4,8 @@ import BaseLayout from '~/layouts/BaseLayout.astro';
 import Container from '~/components/Container.astro';
 import Button from '~/components/Button.astro';
 import { createDb } from '@balier/lib/db';
-import { findOrderByNumber } from '@balier/lib/db/queries/orders';
-import { orderStatusCopy } from '@balier/lib/i18n/checkout';
+import { findOrderByNumber, findPartsFailureState } from '@balier/lib/db/queries/orders';
+import { PARTS_COMMON_FAILURES, orderStatusCopy, partsFailureText } from '@balier/lib/i18n/checkout';
 import { formatPrice } from '@balier/lib/money';
 import { GOOGLE_ADS_ID, GOOGLE_ADS_PURCHASE_LABEL } from '~/lib/googleAds';
 
@@ -26,6 +26,12 @@ const order = await findOrderByNumber(db, orderNumber);
 if (!order) return Astro.rewrite('/404');
 
 const copy = orderStatusCopy(order.status, order.paymentMethod);
+// A declined «частинами» application: say why, in the bank's own terms.
+const partsFailure =
+  order.paymentMethod === 'parts' && order.status === 'cancelled'
+    ? partsFailureText(await findPartsFailureState(db, order.id))
+    : null;
+
 const waitingForParts =
   order.paymentMethod === 'parts' && (order.status === 'pending' || order.status === 'awaiting_payment');
 
@@ -66,6 +72,24 @@ const conversion =
           <dd class="price">{formatPrice(order.total)}</dd>
         </div>
       </dl>
+
+      {
+        partsFailure && (
+          <div class="border-line bg-paper-raised rounded-card mt-6 border p-5 text-left text-sm sm:p-6">
+            <p class="text-ink font-medium">Причина</p>
+            <p class="text-ink-muted mt-1">{partsFailure}</p>
+            <p class="text-ink mt-4 font-medium">Часті причини відмови</p>
+            <ul class="text-ink-muted mt-1 list-disc space-y-1 pl-5">
+              {PARTS_COMMON_FAILURES.map((reason) => (
+                <li>{reason}</li>
+              ))}
+            </ul>
+            <p class="text-ink-muted mt-4">
+              Можна оформити замовлення ще раз — з Покупкою Частинами або оплатою карткою.
+            </p>
+          </div>
+        )
+      }
 
       <Button href="/products" class="mt-8 w-full sm:w-auto">Продовжити покупки</Button>
     </div>

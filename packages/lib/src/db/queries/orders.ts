@@ -2,7 +2,7 @@ import { and, desc, eq, inArray, isNotNull, isNull, or, sql } from 'drizzle-orm'
 import type { SQL } from 'drizzle-orm';
 import type { Db, Tx, TxDb } from '../index';
 import type { Order, OrderItem, OrderStatus, ParcelSize, Payment } from '../schema';
-import { orderItems, orders, products, productVariants } from '../schema';
+import { orderItems, orders, payments, products, productVariants } from '../schema';
 import type { Kopiykas } from '../../money';
 import { likeContains } from './like';
 
@@ -20,6 +20,18 @@ export async function findOrderByNumber(
     with: { items: true },
   });
   return order ?? null;
+}
+
+/** The `order_sub_state` monobank gave when it declined an order's «частинами» application. */
+export async function findPartsFailureState(db: Db, orderId: string): Promise<string | null> {
+  const [row] = await db
+    .select({ payload: payments.lastPayload })
+    .from(payments)
+    .where(and(eq(payments.orderId, orderId), eq(payments.provider, 'monobank_parts')))
+    .orderBy(desc(payments.createdAt))
+    .limit(1);
+  const state = (row?.payload as { order_sub_state?: unknown } | null | undefined)?.order_sub_state;
+  return typeof state === 'string' ? state : null;
 }
 
 export interface OrderForAdmin extends Order {

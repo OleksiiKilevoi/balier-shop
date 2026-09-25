@@ -125,3 +125,47 @@ export function orderStatusCopy(status: OrderStatus, paymentMethod: PaymentMetho
       };
   }
 }
+
+/* ------------------------------------------------ «Покупка Частинами» failures */
+
+/**
+ * What monobank's `order_sub_state` on a declined application means for the
+ * buyer, and what to do. Codes from the API's own enum (`OrderStateInfo`);
+ * anything unlisted — including `ACCOUNT_CLOSED`, which the bank does not
+ * document — falls back to «the bank declined».
+ */
+const PARTS_FAILURE_TEXT: Record<string, string> = {
+  CLIENT_NOT_FOUND:
+    'Цей номер телефону не зареєстрований у monobank. Оформіть замовлення ще раз і вкажіть номер, до якого прив’язаний ваш monobank.',
+  WRONG_CLIENT_APP_VERSION: 'Застаріла версія застосунку monobank. Оновіть застосунок і спробуйте ще раз.',
+  EXCEEDED_SUM_LIMIT: 'Сума замовлення перевищує ваш доступний ліміт Покупки Частинами в monobank.',
+  EXISTS_OTHER_OPEN_ORDER:
+    'У вас є інша незавершена заявка на Покупку Частинами. Підтвердьте або скасуйте її в застосунку monobank і спробуйте ще раз.',
+  EXISTS_EXT_OTHER_OPEN_ORDER:
+    'У вас є інша незавершена заявка на Покупку Частинами. Підтвердьте або скасуйте її в застосунку monobank і спробуйте ще раз.',
+  NOT_ENOUGH_MONEY_FOR_INIT_DEBIT: 'На картці недостатньо коштів для першого платежу.',
+  PAY_PARTS_ARE_NOT_ACCEPTABLE: 'З такою кількістю платежів оформити Покупку Частинами не вдалося.',
+  CLIENT_PUSH_TIMEOUT: 'Заявку не підтвердили в застосунку monobank протягом 15 хвилин.',
+  CLIENT_CONFIRM_TIME_EXPIRED: 'Заявку не підтвердили в застосунку monobank протягом 15 хвилин.',
+  CONFIRM_TIME_EXPIRED: 'Час на підтвердження заявки минув.',
+  REJECTED_BY_CLIENT: 'Заявку відхилено в застосунку monobank.',
+  REJECTED_BY_STORE: 'Заявку скасовано магазином.',
+};
+
+const PARTS_FAILURE_FALLBACK =
+  'monobank не погодив заявку. Точну причину можна дізнатися в підтримці monobank.';
+
+export function partsFailureText(subState: string | null | undefined): string {
+  return subState && Object.hasOwn(PARTS_FAILURE_TEXT, subState)
+    ? PARTS_FAILURE_TEXT[subState]!
+    : PARTS_FAILURE_FALLBACK;
+}
+
+/** Shown under the reason, so a buyer can check themselves before retrying. */
+export const PARTS_COMMON_FAILURES = [
+  'Номер телефону в замовленні не той, до якого прив’язаний monobank.',
+  'Недостатньо доступного ліміту Покупки Частинами — його видно в застосунку monobank, розділ «Кредити».',
+  'Є інша незавершена заявка на Покупку Частинами в іншому магазині.',
+  'Заявку не підтвердили в застосунку протягом 15 хвилин.',
+  'Застаріла версія застосунку monobank.',
+] as const;
