@@ -46,6 +46,7 @@ try {
 const inputClass =
   'border-line-strong bg-paper-raised text-ink placeholder:text-ink-muted rounded-btn h-touch w-full min-w-0 appearance-none border px-4 text-base sm:h-11 sm:text-sm';
 const phoneInputClass = inputClass.replace('px-4', 'pl-16 pr-4');
+import { PARTS_AD_LEGAL, PARTS_NAME } from '@balier/lib/monoparts';
 ---
 
 {/* Same reasoning as /cart: per-visitor, worth nothing to a crawler. */}
@@ -276,9 +277,14 @@ const phoneInputClass = inputClass.replace('px-4', 'pl-16 pr-4');
               >
                 <input type="radio" name="paymentMethod" value="parts" data-payment-method />
                 <span>
-                  Покупка частинами monobank ·
+                  {PARTS_NAME} ·
                   <a href="/chastynamy" target="_blank" class="text-ink-muted text-xs underline underline-offset-2">умови</a>
                   <span class="text-ink-muted block text-xs" data-parts-hint></span>
+                  {/* monobank's two required legal texts, at 12px against the
+                      name's 14px — the rule is at least half its size. */}
+                  {PARTS_AD_LEGAL.map((text) => (
+                    <span class="text-ink-muted mt-1 block text-xs">{text}</span>
+                  ))}
                 </span>
               </label>
               <label
@@ -953,7 +959,7 @@ const phoneInputClass = inputClass.replace('px-4', 'pl-16 pr-4');
 
         if (body.error === 'parts_unavailable') {
           if (submitError) {
-            submitError.textContent = 'Покупка частинами зараз недоступна для цього замовлення. Оберіть оплату карткою.';
+            submitError.textContent = 'Покупка Частинами зараз недоступна для цього замовлення. Оберіть оплату карткою.';
             submitError.hidden = false;
           }
           return;

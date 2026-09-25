@@ -15,7 +15,7 @@ export const DELIVERY_METHOD_LABELS: Record<DeliveryMethod, string> = {
 export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
   card: 'Карткою онлайн',
   cod: 'Готівкою при отриманні',
-  parts: 'Покупка частинами monobank',
+  parts: 'Покупка Частинами monobank',
 };
 
 export function deliveryDestination(order: Order): string {

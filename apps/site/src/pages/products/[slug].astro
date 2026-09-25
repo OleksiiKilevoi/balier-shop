@@ -9,7 +9,13 @@ import { createDb } from '@balier/lib/db';
 import { getProductBySlug } from '@balier/lib/db/queries/products';
 import { getProductReviews } from '@balier/lib/db/queries/reviews';
 import { listCompanionOffers } from '@balier/lib/db/queries/cart';
-import { PARTS_COUNTS, PARTS_MIN_TOTAL, monoPartsFromEnv } from '@balier/lib/monoparts';
+import {
+  PARTS_AD_LEGAL,
+  PARTS_COUNTS,
+  PARTS_MIN_TOTAL,
+  PARTS_NAME,
+  monoPartsFromEnv,
+} from '@balier/lib/monoparts';
 import { pluralUk } from '@balier/lib/i18n/plural';
 import { formatPrice } from '@balier/lib/money';
 import { orderDeepLink } from '@balier/lib/telegram';
@@ -313,10 +319,17 @@ const structuredData = [
         {/* «Покупка частинами» (`@balier/lib/monoparts`) — said where the price
             is read, only when it is configured and this price reaches it. */}
         {partsFrom !== null && (
-          <p class="text-ink-muted mt-3 text-sm">
-            Покупка частинами monobank — від {formatPrice(partsFrom)} на місяць.{' '}
-            <a href="/chastynamy" class="underline underline-offset-2">Умови</a>
-          </p>
+          <div class="mt-3">
+            <p class="text-ink-muted text-sm">
+              {PARTS_NAME} — від {formatPrice(partsFrom)} на місяць.{' '}
+              <a href="/chastynamy" class="underline underline-offset-2">Умови</a>
+            </p>
+            {/* monobank's two required legal texts, verbatim; 12px against the
+                name's 14px — the rule is at least half its size. */}
+            {PARTS_AD_LEGAL.map((text) => (
+              <p class="text-ink-muted mt-1 text-xs">{text}</p>
+            ))}
+          </div>
         )}
 
         {/* The upsell: the companions the manager picked for this product, at

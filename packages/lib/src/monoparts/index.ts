@@ -23,6 +23,19 @@ import type { CreateInvoiceInput, Invoice, InvoiceStatus, PaymentPort } from '..
  * requests and on the callback alike.
  */
 
+/**
+ * The two legal texts monobank requires next to any advertising of the
+ * product (knowledge-base/chast/marketing), verbatim. The first must be at
+ * least half the size of the words «Покупка Частинами». Do not edit.
+ */
+export const PARTS_AD_LEGAL = [
+  'Реальна річна процентна ставка — 0,000001%, макс. строк кредитування до 400 000 грн — 24 місяці. Перший внесок — аванс у розмірі щомісячного платежу.',
+  'АТ "УНІВЕРСАЛ БАНК", Ліцензія НБУ №92 від 20.01.1994, у держреєстрі банків No226, деталі на monobank.ua',
+] as const;
+
+/** The product's name as the brand book spells it. */
+export const PARTS_NAME = 'Покупка Частинами monobank';
+
 /** What the customer may choose from in the app. */
 export const PARTS_COUNTS = [3, 4, 6] as const;
 /** Below this the option is not offered. Kopiykas. */
