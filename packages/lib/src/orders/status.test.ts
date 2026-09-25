@@ -111,6 +111,14 @@ describe('allowedTransitions', () => {
     expect(allowedTransitions(order('confirmed', 'cod'))).toContain('cancelled');
     expect(allowedTransitions(order('packed', 'cod'))).toContain('cancelled');
     expect(allowedTransitions(order('delivered', 'cod'))).toContain('refunded');
+
+    // «Частинами»: approval is not money — only the hand-over (the waybill) is.
+    expect(allowedTransitions(order('paid', 'parts'))).toEqual(['cancelled']);
+    expect(allowedTransitions(order('packed', 'parts'))).toEqual(['refunded']);
+  });
+
+  it('never revives a cancelled «частинами» order — its application was withdrawn', () => {
+    expect(allowedTransitions(order('cancelled', 'parts', 'paid'))).toEqual([]);
   });
 
   it('never offers both ways out at once', () => {

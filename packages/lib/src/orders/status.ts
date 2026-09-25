@@ -104,6 +104,13 @@ export function carrierCanAdvance(current: OrderStatus, next: CarrierMove): bool
  */
 function moneyCollected(status: OrderStatus, paymentMethod: PaymentMethod): boolean {
   if (paymentMethod === 'cod') return status === 'delivered';
+  // «Покупка Частинами»: `paid` is the client's approval; nothing is debited
+  // until the hand-over confirm, which the waybill (`packed`) sends. So `paid`
+  // is cancelled (the application withdrawn), not refunded.
+  // ponytail: a waybill deleted after that confirm puts the order back at
+  // `paid` with the plan already running — its cancel is then a return in
+  // the monobank cabinet; the payment row's `confirmed` shows it.
+  if (paymentMethod === 'parts' && status === 'paid') return false;
   return (
     status === 'paid' ||
     status === 'packed' ||
@@ -150,6 +157,9 @@ export function revertTarget(order: OrderStateInput): OrderStatus | null {
       return 'arrived';
     case 'cancelled':
     case 'refunded': {
+      // A cancelled «частинами» order withdrew its application at monobank;
+      // putting it back to `paid` would claim an approval that no longer exists.
+      if (order.paymentMethod === 'parts' && order.status === 'cancelled') return null;
       const prior = order.statusBeforeExit;
       return prior && LIVE_SALE.has(prior) ? prior : null;
     }
