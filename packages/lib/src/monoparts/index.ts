@@ -38,8 +38,12 @@ export const PARTS_NAME = 'Покупка Частинами monobank';
 
 /** What the customer may choose from in the app. */
 export const PARTS_COUNTS = [3, 4, 6] as const;
-/** Below this the option is not offered. Kopiykas. */
-export const PARTS_MIN_TOTAL: Kopiykas = 150_000;
+/**
+ * Below this the option is not offered. Kopiykas.
+ * TEMPORARY (2026-09-25): 2 ₴ for monobank's pre-launch test purchase on a
+ * 2 ₴ test product; back to 150_000 once the bank has activated the service.
+ */
+export const PARTS_MIN_TOTAL: Kopiykas = 200;
 
 export interface MonoPartsConfig {
   /** `https://u2.monobank.com.ua` in production, `https://u2-demo-ext.mono.st4g3.com` in the sandbox. */
