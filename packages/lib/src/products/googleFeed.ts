@@ -1,4 +1,5 @@
 import type { FeedVariantData } from '../db/queries/products';
+import { variantLabel } from './variant';
 
 /**
  * The Merchant Center feed (RSS 2.0 + `g:` namespace), one item per variant so
@@ -17,7 +18,8 @@ export function escapeXml(value: string): string {
 }
 
 export function feedItem(variant: FeedVariantData, origin: string): string {
-  const title = variant.colorName ? `${variant.title} — ${variant.colorName}` : variant.title;
+  const label = variantLabel(variant.colorName, variant.size);
+  const title = label ? `${variant.title} — ${label}` : variant.title;
   const fields: [string, string | null][] = [
     ['g:id', variant.sku],
     ['g:item_group_id', variant.productId],
@@ -32,6 +34,7 @@ export function feedItem(variant: FeedVariantData, origin: string): string {
     ['g:brand', BRAND],
     ['g:identifier_exists', 'no'],
     ['g:color', variant.colorName],
+    ['g:size', variant.size],
   ];
   const lines = fields.flatMap(([tag, value]) =>
     value === null ? [] : [`    <${tag}>${escapeXml(value)}</${tag}>`],

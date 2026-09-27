@@ -47,7 +47,36 @@ const partsFrom =
     ? Math.ceil(defaultVariant.price / Math.max(...PARTS_COUNTS) / 100) * 100
     : null;
 
-const hasColourChoice = product.variants.length > 1;
+/**
+ * A variant is a colour × size. The page shows one row of colours and one of
+ * sizes — each only when there is more than one to choose from — and the
+ * script resolves the pair back to a variant.
+ */
+const colours = [
+  ...new Map(
+    product.variants.flatMap((variant) =>
+      variant.colorName ? [[variant.colorName, { name: variant.colorName, hex: variant.colorHex }] as const] : [],
+    ),
+  ).values(),
+];
+const sizes = [...new Set(product.variants.flatMap((variant) => (variant.size ? [variant.size] : [])))];
+const hasColourChoice = colours.length > 1;
+const hasSizeChoice = sizes.length > 1;
+/** What the script needs to resolve a colour and a size to a variant. */
+const variantData = product.variants.map((variant) => ({
+  id: variant.id,
+  sku: variant.sku,
+  price: variant.price,
+  inStock: variant.inStock,
+  colour: variant.colorName,
+  size: variant.size,
+  dimensions: variant.dimensions ?? product.dimensions,
+}));
+const defaultLabel = variantLabel(
+  hasColourChoice ? defaultVariant.colorName : null,
+  hasSizeChoice ? defaultVariant.size : null,
+);
+const defaultDimensions = defaultVariant.dimensions ?? product.dimensions;
 
 const detailLines =
   product.details
@@ -69,7 +98,7 @@ const telegramHref = orderDeepLink(manager, {
   price: defaultVariant.price,
   quantity: 1,
   url: productUrl,
-  variantName: hasColourChoice ? defaultVariant.colorName : null,
+  variantName: defaultLabel,
 });
 
 const inStock = defaultVariant.inStock;
@@ -146,6 +175,7 @@ const structuredData = [
     ],
   },
 ];
+import { variantLabel } from '@balier/lib/products/variant';
 ---
 
 <BaseLayout
@@ -164,7 +194,9 @@ const structuredData = [
       data-title={product.title}
       data-url={productUrl}
       data-manager={manager}
+      data-variants={JSON.stringify(variantData)}
       data-colour-choice={String(hasColourChoice)}
+      data-size-choice={String(hasSizeChoice)}
     >
       <ProductGallery images={product.images} title={product.title} />
 
@@ -230,32 +262,50 @@ const structuredData = [
           hidden={!hasColourChoice}
         >
           <p class="text-sm">
-            Колір: <span class="text-ink-muted" data-variant-name>{defaultVariant.colorName}</span>
+            Колір: <span class="text-ink-muted" data-colour-label>{defaultVariant.colorName}</span>
           </p>
-
-          {/* `data-in-stock` is `String(...)`, not a bare boolean: Astro renders
-              an empty attribute value as a valueless attribute, so `false` would
-              arrive in the DOM as a present-looking `data-in-stock`. */}
           <div class="mt-3 flex flex-wrap gap-2">
             {
-              product.variants.map((variant, index) => (
+              colours.map((colour) => (
                 <button
                   type="button"
-                  data-variant
-                  data-variant-id={variant.id}
-                  data-sku={variant.sku}
-                  data-price={String(variant.price)}
-                  data-in-stock={String(variant.inStock)}
-                  data-colour-name={variant.colorName ?? ''}
-                  aria-pressed={index === 0 ? 'true' : 'false'}
+                  data-colour={colour.name}
+                  aria-pressed={colour.name === defaultVariant.colorName ? 'true' : 'false'}
                   class="border-line-strong rounded-btn aria-pressed:border-brand aria-pressed:bg-tag/60 inline-flex min-h-touch items-center gap-2 border px-3 text-sm transition-colors md:min-h-10"
                 >
                   <span
                     class="border-line-strong size-4 shrink-0 rounded-full border"
-                    style={variant.colorHex ? `background-color:${variant.colorHex}` : undefined}
+                    style={colour.hex ? `background-color:${colour.hex}` : undefined}
                     aria-hidden="true"
                   />
-                  {variant.colorName}
+                  {colour.name}
+                </button>
+              ))
+            }
+          </div>
+        </div>
+
+        {/* Sizes of the chosen colour; a size that colour is not made in is
+            disabled rather than hidden, so the row does not jump. */}
+        <div
+          role="group"
+          aria-label="Розмір"
+          class:list={['mt-5', !hasColourChoice && 'border-line mt-6 border-t pt-5']}
+          hidden={!hasSizeChoice}
+        >
+          <p class="text-sm">
+            Розмір: <span class="text-ink-muted" data-size-label>{defaultVariant.size}</span>
+          </p>
+          <div class="mt-3 flex flex-wrap gap-2">
+            {
+              sizes.map((size) => (
+                <button
+                  type="button"
+                  data-size={size}
+                  aria-pressed={size === defaultVariant.size ? 'true' : 'false'}
+                  class="border-line-strong rounded-btn aria-pressed:border-brand aria-pressed:bg-tag/60 disabled:text-ink-muted inline-flex min-h-touch min-w-12 items-center justify-center border px-3 text-sm transition-colors disabled:cursor-not-allowed disabled:line-through md:min-h-10"
+                >
+                  {size}
                 </button>
               ))
             }
@@ -414,14 +464,11 @@ const structuredData = [
           .
         </p>
 
-        {
-          product.dimensions && (
-            <div class="border-line mt-6 border-t pt-5">
-              <h2 class="text-sm">Розміри</h2>
-              <p class="text-ink-muted mt-1 text-sm">{product.dimensions}</p>
-            </div>
-          )
-        }
+        {/* The chosen size's own measurements when it has them. */}
+        <div class="border-line mt-6 border-t pt-5" data-dimensions-block hidden={!defaultDimensions}>
+          <h2 class="text-sm">Розміри</h2>
+          <p class="text-ink-muted mt-1 text-sm" data-dimensions>{defaultDimensions}</p>
+        </div>
 
       </div>
     </div>
@@ -454,13 +501,28 @@ const structuredData = [
   import { orderDeepLink } from '@balier/lib/telegram';
   import { openCartPopup } from '@balier/lib/cartPopup';
   import { addToCart } from '@balier/lib/cart/store';
+  import { variantLabel } from '@balier/lib/products/variant';
 
   const root = document.querySelector<HTMLElement>('[data-product]');
 
   if (root) {
-    const variantButtons = [...root.querySelectorAll<HTMLButtonElement>('button[data-variant]')];
+    interface VariantData {
+      id: string;
+      sku: string;
+      price: number;
+      inStock: boolean;
+      colour: string | null;
+      size: string | null;
+      dimensions: string | null;
+    }
+    const variants = JSON.parse(root.dataset.variants ?? '[]') as VariantData[];
+    const colourButtons = [...root.querySelectorAll<HTMLButtonElement>('button[data-colour]')];
+    const sizeButtons = [...root.querySelectorAll<HTMLButtonElement>('button[data-size]')];
     const priceDisplay = root.querySelector<HTMLElement>('[data-price-display]');
-    const variantName = root.querySelector<HTMLElement>('[data-variant-name]');
+    const colourLabel = root.querySelector<HTMLElement>('[data-colour-label]');
+    const sizeLabel = root.querySelector<HTMLElement>('[data-size-label]');
+    const dimensionsBlock = root.querySelector<HTMLElement>('[data-dimensions-block]');
+    const dimensionsText = root.querySelector<HTMLElement>('[data-dimensions]');
     const quantity = root.querySelector<HTMLInputElement>('input[data-quantity]');
     const addButton = root.querySelector<HTMLButtonElement>('[data-add-to-cart]');
     const telegram = root.querySelector<HTMLAnchorElement>('a[data-telegram]');
@@ -470,55 +532,79 @@ const structuredData = [
     const url = root.dataset.url ?? '';
     const manager = root.dataset.manager ?? '';
     const showsColour = root.dataset.colourChoice === 'true';
+    const showsSize = root.dataset.sizeChoice === 'true';
 
-    /** The colour currently pressed — the one every action on this page applies to. */
-    const currentVariant = () =>
-      variantButtons.find((button) => button.getAttribute('aria-pressed') === 'true') ??
-      variantButtons[0];
+    /** The pressed colour and size — the variant every action on the page applies to. */
+    let current: VariantData | undefined = variants[0];
 
-    /** Re-derives everything that depends on the chosen colour and quantity. */
+    /**
+     * A colour and a size back to a variant. The exact pair when it exists;
+     * otherwise the other axis gives way — picking a colour that has no «L»
+     * lands on that colour's first size, preferring one in stock.
+     */
+    const resolve = (colour: string | null, size: string | null): VariantData | undefined => {
+      const exact = variants.find((v) => v.colour === colour && v.size === size);
+      if (exact) return exact;
+      const sameColour = variants.filter((v) => v.colour === colour);
+      return sameColour.find((v) => v.inStock) ?? sameColour[0] ?? variants[0];
+    };
+
+    /** Re-derives everything that depends on the chosen variant and quantity. */
     const render = () => {
-      const variant = currentVariant();
+      const variant = current;
       if (!variant) return;
 
-      const price = Number(variant.dataset.price);
-      const inStock = variant.dataset.inStock === 'true';
-      const colourName = variant.dataset.colourName || null;
+      for (const button of colourButtons) {
+        button.setAttribute('aria-pressed', String(button.dataset.colour === variant.colour));
+      }
+      for (const button of sizeButtons) {
+        button.setAttribute('aria-pressed', String(button.dataset.size === variant.size));
+        button.disabled = !variants.some((v) => v.colour === variant.colour && v.size === button.dataset.size);
+      }
+      if (colourLabel) colourLabel.textContent = variant.colour ?? '';
+      if (sizeLabel) sizeLabel.textContent = variant.size ?? '';
+      if (dimensionsText) dimensionsText.textContent = variant.dimensions ?? '';
+      if (dimensionsBlock) dimensionsBlock.hidden = !variant.dimensions;
 
-      if (priceDisplay) priceDisplay.textContent = formatPrice(price);
-      if (variantName && colourName) variantName.textContent = colourName;
-
-      if (addButton) addButton.disabled = !inStock;
-      if (stockNote) stockNote.hidden = inStock;
+      if (priceDisplay) priceDisplay.textContent = formatPrice(variant.price);
+      if (addButton) addButton.disabled = !variant.inStock;
+      if (stockNote) stockNote.hidden = variant.inStock;
 
       if (telegram) {
         const href = orderDeepLink(manager, {
           title,
-          sku: variant.dataset.sku ?? '',
-          price,
+          sku: variant.sku,
+          price: variant.price,
           quantity: Number(quantity?.value) || 1,
           url,
-          variantName: showsColour ? colourName : null,
+          variantName: variantLabel(showsColour ? variant.colour : null, showsSize ? variant.size : null),
         });
         if (href) telegram.href = href;
       }
     };
 
-    for (const button of variantButtons) {
-      button.addEventListener('click', () => {
-        for (const other of variantButtons) {
-          other.setAttribute('aria-pressed', String(other === button));
-        }
-
-        // The gallery listens for this and swaps to that colour's photos.
+    const choose = (next: VariantData | undefined) => {
+      const colourChanged = next?.colour !== current?.colour;
+      current = next;
+      // The gallery shows the chosen colour's photos — every size of that
+      // colour shares them, whichever variant row they were uploaded to.
+      if (colourChanged && next) {
         document.dispatchEvent(
           new CustomEvent('product:variant', {
-            detail: { variantId: button.dataset.variantId ?? '' },
+            detail: {
+              variantIds: variants.filter((v) => v.colour === next.colour).map((v) => v.id),
+            },
           }),
         );
+      }
+      render();
+    };
 
-        render();
-      });
+    for (const button of colourButtons) {
+      button.addEventListener('click', () => choose(resolve(button.dataset.colour ?? null, current?.size ?? null)));
+    }
+    for (const button of sizeButtons) {
+      button.addEventListener('click', () => choose(resolve(current?.colour ?? null, button.dataset.size ?? null)));
     }
 
     document.addEventListener('quantity:change', render);
@@ -535,8 +621,7 @@ const structuredData = [
      */
     if (addButton) {
       addButton.addEventListener('click', () => {
-        const variant = currentVariant();
-        const variantId = variant?.dataset.variantId;
+        const variantId = current?.id;
         if (!variantId) return;
 
         addToCart(variantId, Number(quantity?.value) || 1);

@@ -84,7 +84,8 @@ if (!UUID.test(productId)) {
   return new Response('Not found', { status: 404 });
 }
 
-/* ------------------------------------------------------------- POST handling */
+/* import { variantLabel as labelVariant } from '@balier/lib/products/variant';
+------------------------------------------------------------- POST handling */
 
 let invalid = new Set<CatalogField>();
 let banner: AdminProductMessage | null = null;
@@ -395,10 +396,12 @@ const featured =
 const statusValue = redraw('product_save', 'status', product?.status) || 'draft';
 
 /** Suggested for the next variant, from the slug the product actually has. */
-const nextSku = product ? suggestSku(product.slug, body.colorName) : '';
+const nextSku = product
+  ? suggestSku(product.slug, [body.colorName, body.size].filter(Boolean).join(' '))
+  : '';
 
 const variantLabel = (variant: (typeof variants)[number]) =>
-  variant.colorName ?? variant.sku;
+  labelVariant(variant.colorName, variant.size) ?? variant.sku;
 
 /**
  * «1440×1920 px · 204 КБ» — the two facts about the file under its url, either
@@ -925,6 +928,41 @@ function imageMeta(image: (typeof images)[number]): string {
                         />
                       </div>
 
+                      <div class="w-full sm:w-24">
+                        <label for={`size-${variant.id}`} class="text-fg-subtle text-xs">
+                          Розмір
+                        </label>
+                        <input
+                          id={`size-${variant.id}`}
+                          name="size"
+                          type="text"
+                          value={redrawVariant(variant.id, 'size', variant.size)}
+                          maxlength={20}
+                          autocomplete="off"
+                          placeholder="M"
+                          class:list={[
+                            'admin-field mt-1',
+                            variantRowFailed(variant.id) && invalid.has('size') && 'border-danger',
+                          ]}
+                        />
+                      </div>
+
+                      <div class="w-full sm:w-40">
+                        <label for={`dimensions-${variant.id}`} class="text-fg-subtle text-xs">
+                          Розміри, см
+                        </label>
+                        <input
+                          id={`dimensions-${variant.id}`}
+                          name="dimensions"
+                          type="text"
+                          value={redrawVariant(variant.id, 'dimensions', variant.dimensions)}
+                          maxlength={100}
+                          autocomplete="off"
+                          placeholder="як у товару"
+                          class="admin-field mt-1"
+                        />
+                      </div>
+
                       {/* The whole of "how much of this is there". A tick is
                           the storefront's «Додати до кошика»; untick it and the
                           page says «Немає в наявності» instead. Nothing else
@@ -1096,6 +1134,37 @@ function imageMeta(image: (typeof images)[number]): string {
                       id="new-colorHex"
                       value={redraw('variant_add', 'colorHex', '')}
                       invalid={failedIntent === 'variant_add' && invalid.has('colorHex')}
+                    />
+                  </div>
+
+                  <div class="w-full sm:w-24">
+                    <label for="new-size" class="text-fg-subtle text-xs">Розмір</label>
+                    <input
+                      id="new-size"
+                      name="size"
+                      type="text"
+                      value={redraw('variant_add', 'size', '')}
+                      maxlength={20}
+                      autocomplete="off"
+                      placeholder="M"
+                      class:list={[
+                        'admin-field mt-1',
+                        failedIntent === 'variant_add' && invalid.has('size') && 'border-danger',
+                      ]}
+                    />
+                  </div>
+
+                  <div class="w-full sm:w-40">
+                    <label for="new-dimensions" class="text-fg-subtle text-xs">Розміри, см</label>
+                    <input
+                      id="new-dimensions"
+                      name="dimensions"
+                      type="text"
+                      value={redraw('variant_add', 'dimensions', '')}
+                      maxlength={100}
+                      autocomplete="off"
+                      placeholder="як у товару"
+                      class="admin-field mt-1"
                     />
                   </div>
 

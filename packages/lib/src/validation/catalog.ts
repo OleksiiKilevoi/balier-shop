@@ -82,6 +82,8 @@ export const DIMENSIONS_MAX = 100;
 export const META_TITLE_MAX = 200;
 export const META_DESCRIPTION_MAX = 300;
 export const COLOR_NAME_MAX = 60;
+/** «S», «XL», «Mini», «13″» — a label on a button, not a description. */
+export const SIZE_MAX = 20;
 export const ALT_MAX = 300;
 
 /**
@@ -167,6 +169,8 @@ const variantFields = {
   sku: skuSchema,
   colorName: optionalText(COLOR_NAME_MAX),
   colorHex: colorHexSchema,
+  size: optionalText(SIZE_MAX),
+  dimensions: optionalText(DIMENSIONS_MAX),
   priceOverride: optionalPriceSchema,
   /**
    * A checkbox, so «немає в наявності» is the *absent* key — which is exactly
@@ -312,6 +316,7 @@ const CATALOG_FIELDS = [
   'sku',
   'colorName',
   'colorHex',
+  'size',
   'priceOverride',
   'alt',
 ] as const;

@@ -11,6 +11,7 @@ import {
 import type { Kopiykas } from '../../money';
 import { likeContains } from './like';
 import { LOCALE } from './locale';
+import { VARIANT_NAME_SQL } from './variantName';
 
 /** A single buyable row. `id` is what the cart and every order reference. */
 export interface ProductVariantData {
@@ -19,6 +20,10 @@ export interface ProductVariantData {
   /** NULL when the product has no colour choice. */
   colorName: string | null;
   colorHex: string | null;
+  /** NULL when the product comes in one size. */
+  size: string | null;
+  /** This size's own measurements; NULL = the product's `dimensions`. */
+  dimensions: string | null;
   /** Kopiykas, already resolved against `products.base_price`. */
   price: Kopiykas;
   /** The manager's flag, verbatim — there is no count behind it. */
@@ -175,9 +180,14 @@ async function hydrateProductCards(
       price: prices.length > 0 ? Math.min(...prices) : row.basePrice,
       imageUrl: image?.url ?? null,
       imageAlt: image?.alt ?? null,
-      swatches: rowVariants.flatMap((variant) =>
-        variant.colorName ? [{ name: variant.colorName, hex: variant.colorHex }] : [],
-      ),
+      // One swatch per colour, however many sizes it comes in.
+      swatches: [
+        ...new Map(
+          rowVariants.flatMap((variant) =>
+            variant.colorName ? [[variant.colorName, { name: variant.colorName, hex: variant.colorHex }] as const] : [],
+          ),
+        ).values(),
+      ],
       inStock: rowVariants.some((variant) => variant.inStock),
     };
   });
@@ -266,7 +276,7 @@ export async function searchProducts(db: Db, tokens: string[]): Promise<ProductC
     ${productTranslations.title},
     ${productTranslations.description},
     ${categoryTranslations.title},
-    (select string_agg(concat_ws(' ', ${productVariants.colorName}, ${productVariants.sku}), ' ')
+    (select string_agg(concat_ws(' ', ${productVariants.colorName}, ${productVariants.size}, ${productVariants.sku}), ' ')
        from ${productVariants}
       where ${productVariants.productId} = ${products.id}
         and ${productVariants.isActive})
@@ -292,8 +302,8 @@ export interface AdminVariantResult {
   variantId: string;
   sku: string;
   productTitle: string;
-  /** NULL when the product has no colour choice. */
-  colorName: string | null;
+  /** «Чорний · M» — `variantLabel`; NULL for a product with one plain variant. */
+  variantName: string | null;
   price: Kopiykas;
   inStock: boolean;
 }
@@ -326,10 +336,11 @@ export async function searchAdminVariants(
     sql`, `,
   )}]`;
 
-  // Title, colour and SKU: the three things a manager reads off a chat message.
+  // Title, colour, size and SKU: what a manager reads off a chat message.
   const haystack = sql`concat_ws(' ',
     ${productTranslations.title},
     ${productVariants.colorName},
+    ${productVariants.size},
     ${productVariants.sku}
   )`;
 
@@ -338,7 +349,7 @@ export async function searchAdminVariants(
       variantId: productVariants.id,
       sku: productVariants.sku,
       productTitle: productTranslations.title,
-      colorName: productVariants.colorName,
+      variantName: VARIANT_NAME_SQL,
       price: sql<number>`coalesce(${productVariants.priceOverride}, ${products.basePrice})`,
       inStock: productVariants.inStock,
     })
@@ -416,6 +427,8 @@ export async function getProductBySlug(db: Db, slug: string): Promise<ProductDet
         sku: productVariants.sku,
         colorName: productVariants.colorName,
         colorHex: productVariants.colorHex,
+        size: productVariants.size,
+        dimensions: productVariants.dimensions,
         priceOverride: productVariants.priceOverride,
         inStock: productVariants.inStock,
       })
@@ -455,6 +468,8 @@ export async function getProductBySlug(db: Db, slug: string): Promise<ProductDet
       sku: variant.sku,
       colorName: variant.colorName,
       colorHex: variant.colorHex,
+      size: variant.size,
+      dimensions: variant.dimensions,
       price: variant.priceOverride ?? row.basePrice,
       inStock: variant.inStock,
     })),
@@ -470,6 +485,7 @@ export interface FeedVariantData {
   title: string;
   description: string | null;
   colorName: string | null;
+  size: string | null;
   price: Kopiykas;
   inStock: boolean;
   /** The variant's own photo when it has one, else the product's lead photo. Relative. */
@@ -486,6 +502,7 @@ export async function listFeedVariants(db: Db): Promise<FeedVariantData[]> {
       title: productTranslations.title,
       description: productTranslations.description,
       colorName: productVariants.colorName,
+      size: productVariants.size,
       price: sql<number>`coalesce(${productVariants.priceOverride}, ${products.basePrice})`,
       inStock: productVariants.inStock,
     })

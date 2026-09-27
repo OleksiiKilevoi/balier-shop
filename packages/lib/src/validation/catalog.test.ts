@@ -47,6 +47,8 @@ const VARIANT = {
   sku: 'SUMKA-LIUNET',
   colorName: '',
   colorHex: '',
+  size: '',
+  dimensions: '',
   priceOverride: '',
   inStock: 'on',
   position: '0',

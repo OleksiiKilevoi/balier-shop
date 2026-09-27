@@ -14,7 +14,7 @@
  * Getting the payload down is the export-size decision in roadmap.md, not a
  * markup change.
  *
- * Listens for `product:variant` so choosing a colour swaps the gallery —
+ * Listens for `product:variant` (the chosen colour's variant ids) so choosing a colour swaps the gallery —
  * `product_images.variant_id` is NULL for photos shared by every variant and set
  * for photos belonging to one colour only.
  */
@@ -183,12 +183,13 @@ const { images, title } = Astro.props;
     }
 
     document.addEventListener('product:variant', (event) => {
-      const { variantId } = (event as CustomEvent<{ variantId: string }>).detail;
+      // Every variant of the chosen colour — its sizes share its photos.
+      const { variantIds } = (event as CustomEvent<{ variantIds: string[] }>).detail;
 
       // Empty owner = shared by every variant, so it stays throughout.
       const belongs = (element: HTMLElement) => {
         const owner = element.dataset.variantId ?? '';
-        return owner === '' || owner === variantId;
+        return owner === '' || variantIds.includes(owner);
       };
 
       let first = -1;

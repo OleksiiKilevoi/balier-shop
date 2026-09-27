@@ -182,6 +182,13 @@ export const productVariants = pgTable(
     colorName: text('color_name'),
     /** Hex swatch for the picker, e.g. `#1a1a1a`. */
     colorHex: text('color_hex'),
+    /**
+     * Free text — «S», «M», «L», «Mini», «13″». NULL for a product sold in one
+     * size. A variant is a colour × size; the price stays the product's.
+     */
+    size: text('size'),
+    /** This size's own «30х17х10 см»; NULL falls back to `products.dimensions`. */
+    dimensions: text('dimensions'),
     /** Kopiykas. NULL means "use products.base_price". */
     priceOverride: integer('price_override'),
     /**

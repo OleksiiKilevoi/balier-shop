@@ -11,6 +11,7 @@ import {
 } from '../schema';
 import type { CartVariantData, CompanionOffer } from '../../cart';
 import { LOCALE } from './locale';
+import { VARIANT_NAME_SQL } from './variantName';
 
 /**
  * The authoritative half of the cart: everything the customer's variant ids
@@ -33,7 +34,7 @@ export async function findCartVariants(
       productId: products.id,
       productSlug: products.slug,
       productTitle: productTranslations.title,
-      variantName: productVariants.colorName,
+      variantName: VARIANT_NAME_SQL,
       variantHex: productVariants.colorHex,
       sku: productVariants.sku,
       unitPrice: sql<number>`coalesce(${productVariants.priceOverride}, ${products.basePrice})`,
@@ -124,7 +125,7 @@ export async function findCheckoutVariants(
       productId: products.id,
       productSlug: products.slug,
       productTitle: productTranslations.title,
-      variantName: productVariants.colorName,
+      variantName: VARIANT_NAME_SQL,
       variantHex: productVariants.colorHex,
       sku: productVariants.sku,
       unitPrice: sql<number>`coalesce(${productVariants.priceOverride}, ${products.basePrice})`,

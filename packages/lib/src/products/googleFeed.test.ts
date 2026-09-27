@@ -9,6 +9,7 @@ const variant: FeedVariantData = {
   title: 'Tote <mini> & co',
   description: null,
   colorName: 'Чорний',
+  size: null,
   price: 420_050,
   inStock: false,
   imageUrl: '/media/tote.jpg',

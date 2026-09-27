@@ -526,6 +526,8 @@ export interface VariantFields {
   sku: string;
   colorName: string | null;
   colorHex: string | null;
+  size: string | null;
+  dimensions: string | null;
   priceOverride: Kopiykas | null;
   inStock: boolean;
   position: number;
@@ -533,10 +535,11 @@ export interface VariantFields {
 
 /**
  * A nameless variant is fine while it is the only one — the storefront hides
- * the picker. Next to a sibling it becomes a swatch with no label, and an
- * order placed on it carries no colour anywhere (2026-09-20, the belt). So a
- * second active variant must be named, and naming is refused only where the
- * problem actually arises, never on the one-variant product.
+ * the picker. Next to a sibling it becomes a button with no label, and an
+ * order placed on it says nothing about what was bought (2026-09-20, the
+ * belt). So a second active variant needs a colour or a size, and it is
+ * refused only where the problem actually arises, never on the one-variant
+ * product.
  */
 async function siblingsNeedName(
   db: TxDb,
@@ -544,7 +547,7 @@ async function siblingsNeedName(
   fields: VariantFields,
   exceptVariantId?: string,
 ): Promise<boolean> {
-  if (fields.colorName !== null) return false;
+  if (fields.colorName !== null || fields.size !== null) return false;
   const [row] = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(productVariants)
