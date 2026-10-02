@@ -9,6 +9,7 @@ import { createDb } from '@balier/lib/db';
 import { listActiveProducts } from '@balier/lib/db/queries/products';
 import { listActiveCategories } from '@balier/lib/db/queries/categories';
 import { pluralUk } from '@balier/lib/i18n/plural';
+import { collectionPageJsonLd } from '@balier/lib/seo';
 
 export const prerender = false;
 
@@ -30,12 +31,23 @@ const countLabel = `${products.length} ${pluralUk(products.length, {
   few: 'товари',
   many: 'товарів',
 })}`;
+
+const description =
+  'Каталог шкіряних виробів BÁLIER ручної роботи: жіночі та чоловічі сумки, рюкзаки, гаманці, аксесуари й фартухи. Шиємо в Дніпрі, доставка по всій Україні.';
+const structuredData = collectionPageJsonLd({
+  origin: (Astro.site ?? Astro.url).origin,
+  name: 'Наша колекція',
+  description,
+  crumbs: [
+    { name: 'Головна', path: '/' },
+    { name: 'Товари', path: '/products' },
+  ],
+  products,
+});
 ---
 
-<BaseLayout
-  title="Товари"
-  description="Шкіряні сумки та гаманці ручної роботи. Обмежені партії, доставка Новою Поштою по всій Україні."
->
+<BaseLayout title="Шкіряні сумки та гаманці ручної роботи" description={description}>
+  <script type="application/ld+json" slot="head" is:inline set:html={JSON.stringify(structuredData).replace(/</g, '\\u003c')} />
   <Container class="py-8 sm:py-12">
     <Breadcrumbs items={[{ label: 'Головна', href: '/' }, { label: 'Товари' }]} />
 
@@ -69,6 +81,7 @@ const countLabel = `${products.length} ${pluralUk(products.length, {
               swatches={product.swatches}
               soldOut={!product.inStock}
               eager={index < EAGER_CARDS}
+              headingLevel={2}
             />
           ))}
         </div>

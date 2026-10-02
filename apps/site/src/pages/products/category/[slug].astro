@@ -9,6 +9,7 @@ import { createDb } from '@balier/lib/db';
 import { getCategoryBySlug, listActiveCategories } from '@balier/lib/db/queries/categories';
 import { countActiveProducts, listProductsInCategory } from '@balier/lib/db/queries/products';
 import { pluralUk } from '@balier/lib/i18n/plural';
+import { collectionPageJsonLd } from '@balier/lib/seo';
 
 export const prerender = false;
 
@@ -30,13 +31,27 @@ const countLabel = `${products.length} ${pluralUk(products.length, {
   few: 'товари',
   many: 'товарів',
 })}`;
+
+const description =
+  category.description ??
+  `${category.title} ручної роботи від BÁLIER. Обмежені партії, доставка Новою Поштою по всій Україні.`;
+const structuredData = collectionPageJsonLd({
+  origin: (Astro.site ?? Astro.url).origin,
+  name: category.title,
+  description,
+  crumbs: [
+    { name: 'Головна', path: '/' },
+    { name: 'Товари', path: '/products' },
+    { name: category.title, path: `/products/category/${category.slug}` },
+  ],
+  products,
+});
+// "ручної роботи" in the title rather than "з натуральної шкіри": not every
+// category is leather (the Oxford-cloth aprons).
 ---
 
-<BaseLayout
-  title={category.title}
-  description={category.description ??
-    `${category.title} ручної роботи від balier. Обмежені партії, доставка Новою Поштою по всій Україні.`}
->
+<BaseLayout title={`${category.title} ручної роботи`} description={description}>
+  <script type="application/ld+json" slot="head" is:inline set:html={JSON.stringify(structuredData).replace(/</g, '\\u003c')} />
   <Container class="py-8 sm:py-12">
     <Breadcrumbs
       items={[
@@ -74,6 +89,7 @@ const countLabel = `${products.length} ${pluralUk(products.length, {
               swatches={product.swatches}
               soldOut={!product.inStock}
               eager={index < EAGER_CARDS}
+              headingLevel={2}
             />
           ))}
         </div>

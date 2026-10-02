@@ -4,6 +4,7 @@ import SiteHeader from '~/components/SiteHeader.astro';
 import SiteFooter from '~/components/SiteFooter.astro';
 import CartPopup from '~/components/CartPopup.astro';
 import PromoPopup from '~/components/PromoPopup.astro';
+import { clampDescription, pageTitle } from '@balier/lib/seo';
 import '~/styles/global.css';
 
 /**
@@ -28,10 +29,13 @@ interface Props {
   noindex?: boolean;
 }
 
-const { title, description, ogImage, noindex = !SITE_IS_INDEXABLE } = Astro.props;
+const { title, ogImage, noindex = !SITE_IS_INDEXABLE } = Astro.props;
 
 const siteName = 'Balier';
-const fullTitle = title === siteName ? title : `${title} — ${siteName}`;
+// Shaped to what a search result shows: the brand suffix is skipped when the
+// title names it or would overflow, the description is cut at a sentence.
+const fullTitle = pageTitle(title);
+const description = clampDescription(Astro.props.description);
 // Without the trim, the prerendered pages and the SSR ones disagree: a built
 // page's own pathname is the file it is emitted as (`/about.html` under
 // `build.format: 'file'`, `/about/` under the directory format), while the same

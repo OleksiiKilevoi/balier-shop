@@ -15,6 +15,11 @@ interface Props {
   soldOut?: boolean;
   /** Set on the first row of the grid so the LCP image is not lazy. */
   eager?: boolean;
+  /**
+   * 2 on the catalog grids, whose only heading above the cards is the `<h1>`;
+   * 3 where the grid sits under its own `<h2>` (the homepage row).
+   */
+  headingLevel?: 2 | 3;
 }
 
 const {
@@ -27,7 +32,9 @@ const {
   swatches = [],
   soldOut = false,
   eager = false,
+  headingLevel = 3,
 } = Astro.props;
+const Heading = headingLevel === 2 ? 'h2' : 'h3';
 ---
 
 <article
@@ -65,7 +72,7 @@ const {
     {/* A two-column phone grid leaves ~135px per card at 320px, so the padding
         and the title step down rather than eating the line. */}
     <div class="space-y-1 p-3 sm:p-4">
-      <h3 class="font-display text-ink text-base leading-snug font-bold sm:text-lg">{title}</h3>
+      <Heading class="font-display text-ink text-base leading-snug font-bold sm:text-lg">{title}</Heading>
       {category && <p class="text-ink-muted text-xs sm:text-sm">{category}</p>}
 
       <Price amount={price} class="pt-1.5" />

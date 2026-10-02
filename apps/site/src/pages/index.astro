@@ -104,10 +104,14 @@ const teasers = [
 ---
 
 <BaseLayout
-  title="Balier"
-  description="Шкіряні вироби ручної роботи. Обмежені партії, доставка Новою Поштою по всій Україні."
+  title="BÁLIER — шкіряні сумки та гаманці ручної роботи"
+  description="Шкіряні сумки, гаманці та аксесуари ручної роботи від BÁLIER. Шиємо невеликими партіями в майстерні у Дніпрі, доставка Новою Поштою по всій Україні."
 >
   <script type="application/ld+json" slot="head" is:inline set:html={JSON.stringify(structuredData).replace(/</g, '\\u003c')} />
+  {/* The page's one `<h1>`. Visually hidden: the hero went 2026-09-16 so the
+      products open the page, but search engines and screen readers still need
+      a heading that says what the site is. */}
+  <h1 class="sr-only">BÁLIER — шкіряні сумки та гаманці ручної роботи</h1>
   {
     featured.length > 0 && (
       <Container as="section" class="py-12 sm:py-16" aria-labelledby="featured-heading">
