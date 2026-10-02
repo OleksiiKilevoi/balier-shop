@@ -202,6 +202,28 @@ export async function listActiveProducts(db: Db): Promise<ProductCardData[]> {
   return hydrateProductCards(db, rows);
 }
 
+/**
+ * The sitemap's product entries: each active product's slug and when its page
+ * last changed — the later of the product row and any of its variants, since a
+ * price or stock edit lives on the variant. Both are written explicitly on every
+ * panel save (see `./adminProducts.ts`), so the date is a real edit time, not
+ * the seed date.
+ */
+export async function listSitemapProducts(db: Db): Promise<{ slug: string; updatedAt: Date }[]> {
+  return db
+    .select({
+      slug: products.slug,
+      updatedAt: sql<Date>`greatest(${products.updatedAt}, max(${productVariants.updatedAt}))`.mapWith(
+        (value: string | Date) => new Date(value),
+      ),
+    })
+    .from(products)
+    .leftJoin(productVariants, eq(productVariants.productId, products.id))
+    .where(eq(products.status, 'active'))
+    .groupBy(products.id)
+    .orderBy(asc(products.position), desc(products.createdAt));
+}
+
 /** «Усі товари» in the category nav — products without a category included. */
 export async function countActiveProducts(db: Db): Promise<number> {
   const [row] = await db
