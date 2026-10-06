@@ -120,7 +120,8 @@ const structuredData = [
     sku: defaultVariant.sku,
     image: product.images.map((image) => new URL(image.url, origin).href),
     brand: { '@type': 'Brand', name: 'BÁLIER' },
-    ...(product.categoryTitle ? { category: product.categoryTitle } : {}),
+    // No `category`: Google reads it against its own product taxonomy and flags
+    // a free-text name as invalid. The BreadcrumbList below carries the category.
     offers: {
       '@type': 'Offer',
       url: productUrl,
@@ -128,6 +129,18 @@ const structuredData = [
       price: (defaultVariant.price / 100).toFixed(2),
       availability: inStock ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock',
       itemCondition: 'https://schema.org/NewCondition',
+      // The terms on /returns. `returnFees` is left out: the buyer pays Nova
+      // Poshta's tariff for the return, which has no fixed amount to state.
+      // No `shippingDetails` for the same reason — Google requires a rate.
+      hasMerchantReturnPolicy: {
+        '@type': 'MerchantReturnPolicy',
+        applicableCountry: 'UA',
+        returnPolicyCountry: 'UA',
+        returnPolicyCategory: 'https://schema.org/MerchantReturnFiniteReturnWindow',
+        merchantReturnDays: 14,
+        returnMethod: 'https://schema.org/ReturnByMail',
+        merchantReturnLink: `${origin}/returns`,
+      },
     },
     // Only published reviews, and only when there is at least one — an empty
     // aggregateRating is invalid structured data.
