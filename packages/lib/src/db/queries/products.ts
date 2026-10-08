@@ -1,5 +1,6 @@
 import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import type { Db } from '../index';
+import type { ParcelSize } from '../schema';
 import {
   categories,
   categoryTranslations,
@@ -53,6 +54,8 @@ export interface ProductDetailData {
   categorySlug: string | null;
   /** Free text exactly as written on the card, e.g. `30х17х10 см`. */
   dimensions: string | null;
+  /** The Nova Poshta box it ships in — prices the delivery in the page's structured data. */
+  parcelSize: ParcelSize;
   id: string;
   /** The bundle discount on this product's companions (`~/lib/cart/bundle.ts`). */
   companionDiscountPercent: number;
@@ -407,6 +410,7 @@ export async function getProductBySlug(db: Db, slug: string): Promise<ProductDet
       slug: products.slug,
       basePrice: products.basePrice,
       dimensions: products.dimensions,
+      parcelSize: products.parcelSize,
       title: productTranslations.title,
       description: productTranslations.description,
       details: productTranslations.details,
@@ -483,6 +487,7 @@ export async function getProductBySlug(db: Db, slug: string): Promise<ProductDet
     categoryTitle: row.categoryTitle,
     categorySlug: row.categorySlug,
     dimensions: row.dimensions,
+    parcelSize: row.parcelSize,
     id: row.id,
     companionDiscountPercent: row.companionDiscountPercent,
     variants: variants.map((variant) => ({

@@ -7,6 +7,7 @@ import ProductGallery from '~/components/ProductGallery.astro';
 import QuantityStepper from '~/components/QuantityStepper.astro';
 import { createDb } from '@balier/lib/db';
 import { getProductBySlug } from '@balier/lib/db/queries/products';
+import { DELIVERY_DAYS, PARCEL_TARIFFS } from '@balier/lib/novaposhta/parcel';
 import { getProductReviews } from '@balier/lib/db/queries/reviews';
 import { listCompanionOffers } from '@balier/lib/db/queries/cart';
 import {
@@ -129,10 +130,35 @@ const structuredData = [
       price: (defaultVariant.price / 100).toFixed(2),
       availability: inStock ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock',
       itemCondition: 'https://schema.org/NewCondition',
+      // Nova Poshta branch to branch, paid by the recipient: the carrier's
+      // tariff for this product's box (`PARCEL_TARIFFS`), stated, never charged.
+      shippingDetails: {
+        '@type': 'OfferShippingDetails',
+        shippingRate: {
+          '@type': 'MonetaryAmount',
+          value: (PARCEL_TARIFFS[product.parcelSize] / 100).toFixed(2),
+          currency: 'UAH',
+        },
+        shippingDestination: { '@type': 'DefinedRegion', addressCountry: 'UA' },
+        deliveryTime: {
+          '@type': 'ShippingDeliveryTime',
+          handlingTime: {
+            '@type': 'QuantitativeValue',
+            minValue: DELIVERY_DAYS.handling.min,
+            maxValue: DELIVERY_DAYS.handling.max,
+            unitCode: 'DAY',
+          },
+          transitTime: {
+            '@type': 'QuantitativeValue',
+            minValue: DELIVERY_DAYS.transit.min,
+            maxValue: DELIVERY_DAYS.transit.max,
+            unitCode: 'DAY',
+          },
+        },
+      },
       // The terms on /returns: the buyer sends the return by Nova Poshta at
       // their own cost — `ReturnFeesCustomerResponsibility`, which needs no
-      // amount (`ReturnShippingFees` would demand a fixed one). No
-      // `shippingDetails`: Google requires a rate, and the tariff has none.
+      // amount (`ReturnShippingFees` would demand a fixed one).
       hasMerchantReturnPolicy: {
         '@type': 'MerchantReturnPolicy',
         applicableCountry: 'UA',
