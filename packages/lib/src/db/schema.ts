@@ -113,6 +113,13 @@ export const products = pgTable(
     parcelSize: parcelSize('parcel_size').notNull().default('small'),
     status: productStatus('status').notNull().default('draft'),
     isFeatured: boolean('is_featured').notNull().default(false),
+    /**
+     * Kept out of search: not in the sitemap, the Merchant Center feed or
+     * `/llms.txt`, and its page carries `noindex`. For add-ons such as the
+     * greeting card — sold with an order, never a search result of their own.
+     * Still on sale and still offered as a companion.
+     */
+    hiddenFromSearch: boolean('hidden_from_search').notNull().default(false),
     position: integer('position').notNull().default(0),
     /** The bundle discount on every companion in `product_companions` (`~/lib/cart/bundle.ts`). */
     companionDiscountPercent: integer('companion_discount_percent').notNull().default(10),

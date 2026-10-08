@@ -155,6 +155,7 @@ const productSaveSchema = z.object({
   parcelSize: z.enum(parcelSize.enumValues, 'invalid_parcel_size'),
   status: z.enum(productStatus.enumValues),
   isFeatured: checkbox,
+  hiddenFromSearch: checkbox,
   position: wholeNumber(POSITION_MAX, 'invalid_position'),
   /** On every companion in the list below the form (`~/lib/cart/bundle.ts`). */
   companionDiscountPercent: z

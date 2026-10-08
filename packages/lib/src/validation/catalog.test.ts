@@ -162,6 +162,16 @@ describe('product_save', () => {
     if (on.success && on.data.intent === 'product_save') expect(on.data.isFeatured).toBe(true);
   });
 
+  it('reads the hide-from-search checkbox the same way', () => {
+    const off = saveProduct();
+    expect(off.success).toBe(true);
+    if (off.success && off.data.intent === 'product_save') expect(off.data.hiddenFromSearch).toBe(false);
+
+    const on = saveProduct({ hiddenFromSearch: 'on' });
+    expect(on.success).toBe(true);
+    if (on.success && on.data.intent === 'product_save') expect(on.data.hiddenFromSearch).toBe(true);
+  });
+
   it('treats an empty category as no category', () => {
     const result = saveProduct({ categoryId: '' });
     if (result.success && result.data.intent === 'product_save') {

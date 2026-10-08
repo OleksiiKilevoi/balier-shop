@@ -204,6 +204,13 @@
       "when": 1790495364554,
       "tag": "0028_wealthy_baron_zemo",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1791455616619,
+      "tag": "0029_married_satana",
+      "breakpoints": true
     }
   ]
 }

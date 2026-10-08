@@ -458,6 +458,7 @@ export interface ProductFields {
   parcelSize: ParcelSize;
   status: ProductStatus;
   isFeatured: boolean;
+  hiddenFromSearch: boolean;
   position: number;
   companionDiscountPercent: number;
   title: string;
@@ -485,6 +486,7 @@ export async function updateProduct(
           parcelSize: fields.parcelSize,
           status: fields.status,
           isFeatured: fields.isFeatured,
+          hiddenFromSearch: fields.hiddenFromSearch,
           position: fields.position,
           companionDiscountPercent: fields.companionDiscountPercent,
           updatedAt: new Date(),

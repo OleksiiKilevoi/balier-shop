@@ -56,6 +56,8 @@ export interface ProductDetailData {
   dimensions: string | null;
   /** The Nova Poshta box it ships in — prices the delivery in the page's structured data. */
   parcelSize: ParcelSize;
+  /** An add-on kept out of search (`products.hidden_from_search`): its page is `noindex`. */
+  hiddenFromSearch: boolean;
   id: string;
   /** The bundle discount on this product's companions (`~/lib/cart/bundle.ts`). */
   companionDiscountPercent: number;
@@ -222,7 +224,7 @@ export async function listSitemapProducts(db: Db): Promise<{ slug: string; updat
     })
     .from(products)
     .leftJoin(productVariants, eq(productVariants.productId, products.id))
-    .where(eq(products.status, 'active'))
+    .where(and(eq(products.status, 'active'), eq(products.hiddenFromSearch, false)))
     .groupBy(products.id)
     .orderBy(asc(products.position), desc(products.createdAt));
 }
@@ -411,6 +413,7 @@ export async function getProductBySlug(db: Db, slug: string): Promise<ProductDet
       basePrice: products.basePrice,
       dimensions: products.dimensions,
       parcelSize: products.parcelSize,
+      hiddenFromSearch: products.hiddenFromSearch,
       title: productTranslations.title,
       description: productTranslations.description,
       details: productTranslations.details,
@@ -488,6 +491,7 @@ export async function getProductBySlug(db: Db, slug: string): Promise<ProductDet
     categorySlug: row.categorySlug,
     dimensions: row.dimensions,
     parcelSize: row.parcelSize,
+    hiddenFromSearch: row.hiddenFromSearch,
     id: row.id,
     companionDiscountPercent: row.companionDiscountPercent,
     variants: variants.map((variant) => ({
@@ -539,7 +543,14 @@ export async function listFeedVariants(db: Db): Promise<FeedVariantData[]> {
       productTranslations,
       and(eq(productTranslations.productId, products.id), eq(productTranslations.locale, LOCALE)),
     )
-    .where(and(eq(products.status, 'active'), eq(productVariants.isActive, true)))
+    // Add-ons kept out of search stay out of Google Shopping too.
+    .where(
+      and(
+        eq(products.status, 'active'),
+        eq(productVariants.isActive, true),
+        eq(products.hiddenFromSearch, false),
+      ),
+    )
     .orderBy(asc(products.position), asc(productVariants.position));
   if (rows.length === 0) return [];
 

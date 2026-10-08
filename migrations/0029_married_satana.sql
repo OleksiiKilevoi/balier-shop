@@ -1,0 +1,1 @@
+ALTER TABLE "products" ADD COLUMN "hidden_from_search" boolean DEFAULT false NOT NULL;

@@ -393,6 +393,10 @@ const variantRowFailed = (variantId: string) =>
 
 const featured =
   failedIntent === 'product_save' ? body.isFeatured === 'on' : (product?.isFeatured ?? false);
+const hiddenFromSearch =
+  failedIntent === 'product_save'
+    ? body.hiddenFromSearch === 'on'
+    : (product?.hiddenFromSearch ?? false);
 const statusValue = redraw('product_save', 'status', product?.status) || 'draft';
 
 /** Suggested for the next variant, from the slug the product actually has. */
@@ -804,6 +808,17 @@ function imageMeta(image: (typeof images)[number]): string {
               <label class="mt-4 flex items-center gap-2.5 text-sm">
                 <input type="checkbox" name="isFeatured" checked={featured} class="size-4" />
                 <span class="text-fg-muted">Показувати першим на головній</span>
+              </label>
+
+              <label class="mt-2 flex items-start gap-2.5 text-sm">
+                <input type="checkbox" name="hiddenFromSearch" checked={hiddenFromSearch} class="mt-0.5 size-4" />
+                <span class="text-fg-muted">
+                  Не показувати в Google
+                  <span class="text-fg-subtle block text-xs">
+                    Для доповнень до замовлення, як листівка: товар продається і пропонується
+                    до інших, але не потрапляє в пошук, Google Покупки і карту сайту.
+                  </span>
+                </span>
               </label>
 
               {/* The id is how the swap finds it open and leaves it open —

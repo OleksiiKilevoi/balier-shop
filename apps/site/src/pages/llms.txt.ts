@@ -2,7 +2,7 @@ import { env } from 'cloudflare:workers';
 import type { APIRoute } from 'astro';
 import { createDb } from '@balier/lib/db';
 import { listActiveCategories } from '@balier/lib/db/queries/categories';
-import { listActiveProducts } from '@balier/lib/db/queries/products';
+import { listActiveProducts, listSitemapProducts } from '@balier/lib/db/queries/products';
 import { formatPrice } from '@balier/lib/money';
 
 export const prerender = false;
@@ -21,10 +21,15 @@ export const prerender = false;
 export const GET: APIRoute = async ({ site, url }) => {
   const origin = (site ?? url).origin;
   const db = createDb(env.DATABASE_URL);
-  const [categories, products] = await Promise.all([
+  const [categories, allProducts, listed] = await Promise.all([
     listActiveCategories(db),
     listActiveProducts(db),
+    listSitemapProducts(db),
   ]);
+  // The sitemap's product set is the searchable one — add-ons kept out of
+  // search (`hidden_from_search`) stay out of here too.
+  const searchable = new Set(listed.map((product) => product.slug));
+  const products = allProducts.filter((product) => searchable.has(product.slug));
 
   const byCategory = categories.map((category) => ({
     ...category,

@@ -223,6 +223,7 @@ import { variantLabel } from '@balier/lib/products/variant';
   title={product.metaTitle ?? product.title}
   description={product.metaDescription ?? product.description ?? undefined}
   ogImage={product.images[0]?.url}
+  noindex={product.hiddenFromSearch}
 >
   <script type="application/ld+json" slot="head" is:inline set:html={JSON.stringify(structuredData).replace(/</g, '\\u003c')} />
   <Container class="py-6 sm:py-10 lg:py-14">
