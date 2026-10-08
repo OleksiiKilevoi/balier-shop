@@ -78,6 +78,8 @@ import Button from './Button.astro';
 </div>
 
 <script>
+  import { track } from '~/lib/analytics';
+
   const SHOW_AFTER_MS = 60_000;
   const FIRST_SEEN_KEY = 'promo_first_seen';
   const DONE_KEY = 'promo_done';
@@ -161,6 +163,7 @@ import Button from './Button.astro';
         });
         if (!response.ok) throw new Error(String(response.status));
         storage.set(DONE_KEY, '1');
+        track('Promo signup');
         if (sentTo) sentTo.textContent = email.value.trim();
         form.hidden = true;
         done?.classList.remove('hidden');

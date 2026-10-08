@@ -542,6 +542,7 @@ import { variantLabel } from '@balier/lib/products/variant';
   import { orderDeepLink } from '@balier/lib/telegram';
   import { openCartPopup } from '@balier/lib/cartPopup';
   import { addToCart } from '@balier/lib/cart/store';
+  import { track } from '~/lib/analytics';
   import { variantLabel } from '@balier/lib/products/variant';
 
   const root = document.querySelector<HTMLElement>('[data-product]');
@@ -666,6 +667,7 @@ import { variantLabel } from '@balier/lib/products/variant';
         if (!variantId) return;
 
         addToCart(variantId, Number(quantity?.value) || 1);
+        track('Add to cart', { source: 'product', product: location.pathname.split('/').pop() ?? '' });
         openCartPopup();
       });
     }
@@ -675,6 +677,7 @@ import { variantLabel } from '@balier/lib/products/variant';
         const variantId = button.dataset.addCompanion;
         if (!variantId) return;
         addToCart(variantId, 1);
+        track('Add to cart', { source: 'companion', product: location.pathname.split('/').pop() ?? '' });
         openCartPopup();
       });
     }

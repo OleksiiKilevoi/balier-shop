@@ -345,6 +345,7 @@ import { PARTS_AD_LEGAL, PARTS_NAME } from '@balier/lib/monoparts';
   import { formatPrice } from '@balier/lib/money';
   import { applyPhoneMask, isCompletePhoneDigits, phoneDigitsFromInput } from '@balier/lib/phone';
   import { addToCart, cartItems, clearCart } from '@balier/lib/cart/store';
+  import { track } from '~/lib/analytics';
   import { fold, foldQuery } from '@balier/lib/novaposhta/normalize';
 
   interface SettlementResult {
@@ -560,6 +561,7 @@ import { PARTS_AD_LEGAL, PARTS_NAME } from '@balier/lib/monoparts';
           add.addEventListener('click', async () => {
             add.disabled = true;
             addToCart(offer.variantId, 1);
+            track('Add to cart', { source: 'checkout' });
             await refresh();
           });
 
@@ -919,7 +921,11 @@ import { PARTS_AD_LEGAL, PARTS_NAME } from '@balier/lib/monoparts';
         };
 
         if (response.ok && body.redirectUrl) {
+          track('Order placed', { payment: payload.paymentMethod });
           clearCart();
+          // stonks sends the event as an image request, which the navigation
+          // below would abort; a beat lets it leave. Invisible to the buyer.
+          await new Promise((resolve) => setTimeout(resolve, 150));
           window.location.href = body.redirectUrl;
           return;
         }

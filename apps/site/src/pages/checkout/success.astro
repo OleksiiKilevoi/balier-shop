@@ -46,6 +46,18 @@ const conversion =
         transaction_id: order.orderNumber,
       }
     : null;
+
+// Stricter than the conversion above: a card or «частинами» order counts only
+// once the webhook has marked it paid. Monobank returns here on success and
+// failure alike, often before the webhook lands — such a visit counts nothing,
+// a reload after the webhook does. Undercounting beats counting a failed
+// payment. Cash on delivery is a real order the moment it exists.
+const PAID_ONWARD = new Set(['paid', 'packed', 'shipped', 'arrived', 'delivered']);
+const purchaseEvent =
+  import.meta.env.PROD &&
+  (order.paymentMethod === 'cod' ? order.status !== 'cancelled' : PAID_ONWARD.has(order.status))
+    ? { orderNumber: order.orderNumber, payment: order.paymentMethod }
+    : null;
 ---
 
 <BaseLayout title="Замовлення оформлено" noindex>
@@ -55,6 +67,22 @@ const conversion =
   {conversion && (
     <script is:inline slot="head" define:vars={{ conversion }}>
       window.gtag?.('event', 'conversion', conversion);
+    </script>
+  )}
+  {/* One Dollar Stats «Purchase» (`~/lib/analytics.ts`). Inline, so it waits
+      for `load` — the deferred stats script has run by then. Once per order
+      per browser (localStorage): the «частинами» wait refreshes this page
+      every 5 s, and a reload or a second tab must not count again. */}
+  {purchaseEvent && (
+    <script is:inline define:vars={{ purchaseEvent }}>
+      window.addEventListener('load', () => {
+        try {
+          const key = 'ods_purchase_' + purchaseEvent.orderNumber;
+          if (localStorage.getItem(key)) return;
+          window.stonks?.event('Purchase', { payment: purchaseEvent.payment });
+          localStorage.setItem(key, '1');
+        } catch {}
+      });
     </script>
   )}
   <Container class="py-8 sm:py-12">
