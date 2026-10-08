@@ -129,9 +129,10 @@ const structuredData = [
       price: (defaultVariant.price / 100).toFixed(2),
       availability: inStock ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock',
       itemCondition: 'https://schema.org/NewCondition',
-      // The terms on /returns. `returnFees` is left out: the buyer pays Nova
-      // Poshta's tariff for the return, which has no fixed amount to state.
-      // No `shippingDetails` for the same reason — Google requires a rate.
+      // The terms on /returns: the buyer sends the return by Nova Poshta at
+      // their own cost — `ReturnFeesCustomerResponsibility`, which needs no
+      // amount (`ReturnShippingFees` would demand a fixed one). No
+      // `shippingDetails`: Google requires a rate, and the tariff has none.
       hasMerchantReturnPolicy: {
         '@type': 'MerchantReturnPolicy',
         applicableCountry: 'UA',
@@ -139,6 +140,7 @@ const structuredData = [
         returnPolicyCategory: 'https://schema.org/MerchantReturnFiniteReturnWindow',
         merchantReturnDays: 14,
         returnMethod: 'https://schema.org/ReturnByMail',
+        returnFees: 'https://schema.org/ReturnFeesCustomerResponsibility',
         merchantReturnLink: `${origin}/returns`,
       },
     },
