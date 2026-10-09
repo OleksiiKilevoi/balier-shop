@@ -1,12 +1,37 @@
 ---
+import { env } from 'cloudflare:workers';
 import Container from './Container.astro';
+import { createDb } from '@balier/lib/db';
+import { listActiveCategories, type CategoryNavItem } from '@balier/lib/db/queries/categories';
 
 const year = new Date().getFullYear();
+
+/*
+ * Every category under «Магазин», on every page: the category pages are what
+ * should rank for «жіночі сумки», «гаманці», and a site-wide link is the
+ * strongest internal signal they can get. Server-rendered pages only — the
+ * prerendered content pages are built without the database and keep just
+ * «Усі товари». A failed query costs the links, never the page.
+ */
+let categories: CategoryNavItem[] = [];
+if (!Astro.isPrerendered) {
+  try {
+    categories = await listActiveCategories(createDb(env.DATABASE_URL));
+  } catch (err) {
+    console.error('Footer categories failed', err);
+  }
+}
 
 const columns = [
   {
     title: 'Магазин',
-    links: [{ href: '/products', label: 'Усі товари' }],
+    links: [
+      { href: '/products', label: 'Усі товари' },
+      ...categories.map((category) => ({
+        href: `/products/category/${category.slug}`,
+        label: category.title,
+      })),
+    ],
   },
   {
     title: 'Про нас',

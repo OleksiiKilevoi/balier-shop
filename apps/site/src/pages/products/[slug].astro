@@ -3,10 +3,12 @@ import { env } from 'cloudflare:workers';
 import BaseLayout from '~/layouts/BaseLayout.astro';
 import Container from '~/components/Container.astro';
 import Button from '~/components/Button.astro';
+import Breadcrumbs from '~/components/Breadcrumbs.astro';
+import ProductCard from '~/components/ProductCard.astro';
 import ProductGallery from '~/components/ProductGallery.astro';
 import QuantityStepper from '~/components/QuantityStepper.astro';
 import { createDb } from '@balier/lib/db';
-import { getProductBySlug } from '@balier/lib/db/queries/products';
+import { getProductBySlug, listRelatedProducts } from '@balier/lib/db/queries/products';
 import { DELIVERY_DAYS, PARCEL_TARIFFS } from '@balier/lib/novaposhta/parcel';
 import { getProductReviews } from '@balier/lib/db/queries/reviews';
 import { listCompanionOffers } from '@balier/lib/db/queries/cart';
@@ -31,7 +33,11 @@ const [product, reviews] = await Promise.all([
 ]);
 if (!product) return Astro.rewrite('/404');
 
-const companions = await listCompanionOffers(db, product.id, product.companionDiscountPercent);
+// «Ще з категорії» only when there is a category page to point at as well.
+const [companions, related] = await Promise.all([
+  listCompanionOffers(db, product.id, product.companionDiscountPercent),
+  product.categorySlug ? listRelatedProducts(db, product.slug, 4) : Promise.resolve([]),
+]);
 
 
 const reviewDate = new Intl.DateTimeFormat('uk-UA', { day: 'numeric', month: 'long', year: 'numeric' });
@@ -227,6 +233,20 @@ import { variantLabel } from '@balier/lib/products/variant';
 >
   <script type="application/ld+json" slot="head" is:inline set:html={JSON.stringify(structuredData).replace(/</g, '\\u003c')} />
   <Container class="py-6 sm:py-10 lg:py-14">
+    {/* The same trail as the BreadcrumbList above, visible — Google trusts the
+        markup more when the page shows it, and it is a link to the category
+        from every product. */}
+    <Breadcrumbs
+      class="mb-5 sm:mb-6"
+      items={[
+        { label: 'Головна', href: '/' },
+        { label: 'Товари', href: '/products' },
+        ...(product.categoryTitle && product.categorySlug
+          ? [{ label: product.categoryTitle, href: `/products/category/${product.categorySlug}` }]
+          : []),
+        { label: product.title },
+      ]}
+    />
     {/* One column on a phone: the gallery leads, then everything that decides
         the purchase. The mockup's side-by-side split needs both halves ~550px,
         so it only arrives at lg. */}
@@ -532,6 +552,37 @@ import { variantLabel } from '@balier/lib/products/variant';
               </li>
             ))}
           </ul>
+        </section>
+      )
+    }
+
+    {
+      related.length > 0 && product.categorySlug && product.categoryTitle && (
+        <section class="border-line mt-12 border-t pt-8" aria-labelledby="related-heading">
+          <div class="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2">
+            <h2 id="related-heading" class="text-2xl">Ще з категорії «{product.categoryTitle}»</h2>
+            <a
+              href={`/products/category/${product.categorySlug}`}
+              class="text-brand hover:text-brand-hover text-sm underline-offset-2 transition-colors hover:underline"
+            >
+              {product.categoryTitle} — усі товари →
+            </a>
+          </div>
+          <div class="mt-6 grid grid-cols-2 gap-3 sm:gap-5 md:grid-cols-4 lg:gap-6">
+            {related.map((card) => (
+              <ProductCard
+                slug={card.slug}
+                title={card.title}
+                category={card.categoryTitle}
+                price={card.price}
+                imageUrl={card.imageUrl}
+                imageAlt={card.imageAlt}
+                swatches={card.swatches}
+                soldOut={!card.inStock}
+                headingLevel={3}
+              />
+            ))}
+          </div>
         </section>
       )
     }

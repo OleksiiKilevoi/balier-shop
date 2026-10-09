@@ -1,4 +1,5 @@
 import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 import type { Db } from '../index';
 import type { ParcelSize } from '../schema';
 import {
@@ -10,6 +11,7 @@ import {
   products,
 } from '../schema';
 import type { Kopiykas } from '../../money';
+import { followingInOrder } from '../../products/related';
 import { likeContains } from './like';
 import { LOCALE } from './locale';
 import { VARIANT_NAME_SQL } from './variantName';
@@ -248,6 +250,36 @@ export async function listProductsInCategory(
     .orderBy(asc(products.position), desc(products.createdAt));
 
   return hydrateProductCards(db, rows);
+}
+
+/**
+ * «Ще з категорії» on a product page: up to `limit` other products from the
+ * same category, the ones after it in the category's order (see
+ * `followingInOrder`). Products kept out of search are left out — the block
+ * exists for internal linking, and a link to a `noindex` add-on is wasted.
+ * The category is the product's own, looked up here so the page needs no id
+ * it does not otherwise have.
+ */
+export async function listRelatedProducts(
+  db: Db,
+  productSlug: string,
+  limit: number,
+): Promise<ProductCardData[]> {
+  const self = alias(products, 'self');
+  const rows = await selectProductCards(db)
+    .where(
+      and(
+        eq(products.status, 'active'),
+        eq(products.hiddenFromSearch, false),
+        inArray(
+          products.categoryId,
+          db.select({ categoryId: self.categoryId }).from(self).where(eq(self.slug, productSlug)),
+        ),
+      ),
+    )
+    .orderBy(asc(products.position), desc(products.createdAt));
+
+  return hydrateProductCards(db, followingInOrder(rows, productSlug, limit));
 }
 
 /**
