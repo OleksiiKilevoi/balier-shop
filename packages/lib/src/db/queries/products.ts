@@ -210,15 +210,19 @@ export async function listActiveProducts(db: Db): Promise<ProductCardData[]> {
 }
 
 /**
- * The sitemap's product entries: each active product's slug and when its page
+ * The sitemap's product entries: each active product's slug, when its page
  * last changed — the later of the product row and any of its variants, since a
- * price or stock edit lives on the variant. Both are written explicitly on every
- * panel save (see `./adminProducts.ts`), so the date is a real edit time, not
- * the seed date.
+ * price or stock edit lives on the variant — and its photo URLs in gallery
+ * order, for the `<image:image>` entries. Both dates are written explicitly on
+ * every panel save (see `./adminProducts.ts`), so the date is a real edit
+ * time, not the seed date.
  */
-export async function listSitemapProducts(db: Db): Promise<{ slug: string; updatedAt: Date }[]> {
-  return db
+export async function listSitemapProducts(
+  db: Db,
+): Promise<{ slug: string; updatedAt: Date; imageUrls: string[] }[]> {
+  const rows = await db
     .select({
+      id: products.id,
       slug: products.slug,
       updatedAt: sql<Date>`greatest(${products.updatedAt}, max(${productVariants.updatedAt}))`.mapWith(
         (value: string | Date) => new Date(value),
@@ -229,6 +233,19 @@ export async function listSitemapProducts(db: Db): Promise<{ slug: string; updat
     .where(and(eq(products.status, 'active'), eq(products.hiddenFromSearch, false)))
     .groupBy(products.id)
     .orderBy(asc(products.position), desc(products.createdAt));
+  if (rows.length === 0) return [];
+
+  const images = await db
+    .select({ productId: productImages.productId, url: productImages.url })
+    .from(productImages)
+    .where(inArray(productImages.productId, rows.map((row) => row.id)))
+    .orderBy(asc(productImages.position), asc(productImages.id));
+
+  return rows.map(({ id, slug, updatedAt }) => ({
+    slug,
+    updatedAt,
+    imageUrls: images.filter((image) => image.productId === id).map((image) => image.url),
+  }));
 }
 
 /** «Усі товари» in the category nav — products without a category included. */

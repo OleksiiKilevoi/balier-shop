@@ -14,6 +14,10 @@
  * Getting the payload down is the export-size decision in roadmap.md, not a
  * markup change.
  *
+ * Every slide carries alt text — the manager's own, or the title numbered —
+ * because each photo is a separate result in Google Images; the thumbnails
+ * repeat the same photos, so they stay `alt=""` inside their labelled button.
+ *
  * Listens for `product:variant` (the chosen colour's variant ids) so choosing a colour swaps the gallery —
  * `product_images.variant_id` is NULL for photos shared by every variant and set
  * for photos belonging to one colour only.
@@ -58,7 +62,7 @@ const { images, title } = Astro.props;
           >
             <img
               src={image.url}
-              alt={index === 0 ? (image.alt ?? title) : ''}
+              alt={image.alt ?? (index === 0 ? title : `${title} — фото ${index + 1}`)}
               width={image.width ?? undefined}
               height={image.height ?? undefined}
               loading={index === 0 ? 'eager' : 'lazy'}
