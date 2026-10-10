@@ -5,6 +5,7 @@ import { findBundleRules, findCheckoutVariants } from '../db/queries/cart';
 import { bindPromoCode, findUsablePromoCode, hasPriorOrder, promoCodeExists } from '../db/queries/promo';
 import type { Order, OrderItem } from '../db/schema';
 import { orderItems, orders, payments } from '../db/schema';
+import type { Attribution } from '../attribution';
 import type { Kopiykas } from '../money';
 import type { Invoice, NotifierPort, PaymentPort } from '../ports';
 import type { CartItemInput } from '../validation/cart';
@@ -40,6 +41,8 @@ export interface CreateOrderInput {
   items: CartItemInput[];
   /** Normalised by `promoCodeSchema`; absent = no discount asked for. */
   promoCode?: string;
+  /** Where the buyer came from (`~/attribution.ts`), stored as sent. */
+  attribution?: Attribution;
 }
 
 export interface CreateOrderDeps {
@@ -234,6 +237,7 @@ export async function createOrder(
             deliveryTotal: 0,
             total,
             comment: input.comment ?? null,
+            attribution: input.attribution ?? null,
           })
           .returning();
 

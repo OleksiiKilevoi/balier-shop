@@ -60,6 +60,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
         comment: parsed.data.comment,
         items: parsed.data.items,
         promoCode: parsed.data.promoCode,
+        attribution: parsed.data.attribution,
       },
       {
         payment:

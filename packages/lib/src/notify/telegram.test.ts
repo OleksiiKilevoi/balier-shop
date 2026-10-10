@@ -35,6 +35,7 @@ function order(overrides: Partial<Order> = {}): Order {
   deliveryTotal: 0,
     total: 195000,
     comment: null,
+    attribution: null,
     createdAt: new Date(),
     updatedAt: new Date(),
     paidAt: null,

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { PROMO_CODE_PATTERN, campaignCode, normalizePromoCode } from '../orders/promo';
 import { cartItemsSchema } from './cart';
+import { attributionSchema } from '../attribution';
 
 /**
  * The `/checkout` request, shared by the form's client script and
@@ -92,6 +93,11 @@ export const checkoutRequestSchema = z.object({
   paymentMethod: paymentMethodSchema,
   comment: commentSchema,
   items: cartItemsSchema,
+  /**
+   * Where the buyer came from; optional — a browser without storage sends
+   * none. A malformed one is dropped, never a reason to refuse the order.
+   */
+  attribution: attributionSchema.optional().catch(undefined),
 });
 
 export type DeliveryInput = z.infer<typeof deliverySchema>;

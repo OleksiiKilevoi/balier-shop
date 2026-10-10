@@ -13,6 +13,7 @@ import {
   uuid,
 } from 'drizzle-orm/pg-core';
 import { relations, sql } from 'drizzle-orm';
+import type { Attribution } from '../attribution';
 
 /**
  * Conventions enforced across this file:
@@ -304,6 +305,14 @@ export const orders = pgTable(
     total: integer('total').notNull(),
 
     comment: text('comment'),
+    /**
+     * Where the customer came from (`~/attribution.ts`): UTM tags, referrer
+     * host and landing page of the last non-direct visit, as the browser kept
+     * them. NULL for orders from before 2026-10-10, admin-created orders, and
+     * browsers that block storage. Informational only — nothing reads it but
+     * the panel.
+     */
+    attribution: jsonb('attribution').$type<Attribution>(),
 
     createdAt,
     updatedAt,

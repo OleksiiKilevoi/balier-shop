@@ -347,6 +347,17 @@ import { PARTS_AD_LEGAL, PARTS_NAME } from '@balier/lib/monoparts';
   import { addToCart, cartItems, clearCart } from '@balier/lib/cart/store';
   import { track } from '~/lib/analytics';
   import { fold, foldQuery } from '@balier/lib/novaposhta/normalize';
+  import { ATTRIBUTION_STORAGE_KEY, type Attribution } from '@balier/lib/attribution';
+
+  /** What `BaseLayout` kept about where this buyer came from; never blocks the order. */
+  function readAttribution(): Attribution | undefined {
+    try {
+      const raw = localStorage.getItem(ATTRIBUTION_STORAGE_KEY);
+      return raw ? (JSON.parse(raw) as Attribution) : undefined;
+    } catch {
+      return undefined;
+    }
+  }
 
   interface SettlementResult {
     ref: string;
@@ -901,6 +912,7 @@ import { PARTS_AD_LEGAL, PARTS_NAME } from '@balier/lib/monoparts';
         comment: String(data.get('comment') ?? ''),
         promoCode: String(data.get('promoCode') ?? ''),
         items: cartItems.get(),
+        attribution: readAttribution(),
       };
 
       if (submitButton) submitButton.disabled = true;

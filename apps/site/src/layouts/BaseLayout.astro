@@ -117,5 +117,27 @@ import { GOOGLE_ADS_ID } from '~/lib/googleAds';
     <SiteFooter />
     <CartPopup />
     <PromoPopup />
+
+    <script>
+      // Where this visitor came from, for the order (`~/attribution.ts`).
+      // Every page, so a landing on any of them counts; storage failures
+      // (private mode, blocked site data) just mean an order without a source.
+      import { ATTRIBUTION_STORAGE_KEY, nextAttribution, type Attribution } from '@balier/lib/attribution';
+
+      try {
+        const raw = localStorage.getItem(ATTRIBUTION_STORAGE_KEY);
+        const stored = raw ? (JSON.parse(raw) as Attribution) : null;
+        const next = nextAttribution(stored, {
+          search: location.search,
+          referrer: document.referrer,
+          path: location.pathname,
+          ownHost: location.hostname,
+          now: new Date(),
+        });
+        if (next && next !== stored) localStorage.setItem(ATTRIBUTION_STORAGE_KEY, JSON.stringify(next));
+      } catch {
+        /* no storage — no source on the order, nothing else changes */
+      }
+    </script>
   </body>
 </html>

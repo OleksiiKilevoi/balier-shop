@@ -39,6 +39,7 @@ import { confirmPartsHandover,
 import { attachWaybill, detachWaybill } from '@balier/lib/orders/waybill';
 import type { NpSenderSettings } from '@balier/lib/db/queries/settings';
 import { parcelSize } from '@balier/lib/db/schema';
+import { attributionChannel, attributionDetails } from '@balier/lib/attribution';
 import { NP_CARGO_DESCRIPTION_MAX, adminOrderActionSchema } from '@balier/lib/validation/admin';
 
 /**
@@ -598,6 +599,17 @@ const carrierDriven =
                 <div>
                   <dt class="text-fg-subtle text-xs">Коментар</dt>
                   <dd class="text-fg whitespace-pre-line">{order.comment}</dd>
+                </div>
+              )}
+              {/* Recorded from 2026-10-10 on storefront orders only; older and
+                  panel-made orders have none, so the row is left out. */}
+              {order.attribution && (
+                <div>
+                  <dt class="text-fg-subtle text-xs">Джерело</dt>
+                  <dd class="text-fg">{attributionChannel(order.attribution)}</dd>
+                  {attributionDetails(order.attribution) && (
+                    <dd class="text-fg-muted text-xs">{attributionDetails(order.attribution)}</dd>
+                  )}
                 </div>
               )}
             </dl>
