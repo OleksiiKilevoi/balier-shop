@@ -32,6 +32,18 @@ const countLabel = `${products.length} ${pluralUk(products.length, {
   many: 'товарів',
 })}`;
 
+/*
+ * The panel's description is several paragraphs of copy for search as much as
+ * for people. The first one stays under the heading; the rest goes *below*
+ * the grid, so a phone sees bags before a screen of text — and the paragraph
+ * breaks the manager typed survive instead of running into one block.
+ */
+const paragraphs = (category.description ?? '')
+  .split(/\r?\n\s*\r?\n/)
+  .map((paragraph) => paragraph.trim())
+  .filter(Boolean);
+const [intro, ...moreParagraphs] = paragraphs;
+
 const description =
   category.description ??
   `${category.title} ручної роботи від BÁLIER. Обмежені партії, доставка Новою Поштою по всій Україні.`;
@@ -64,7 +76,7 @@ const structuredData = collectionPageJsonLd({
     <header class="mt-5 sm:mt-6">
       <h1 class="text-3xl sm:text-4xl lg:text-5xl">{category.title}</h1>
       <p class="text-ink-muted mt-1.5 text-sm">{countLabel}</p>
-      {category.description && <p class="text-ink-muted mt-3 max-w-prose">{category.description}</p>}
+      {intro && <p class="text-ink-muted mt-3 max-w-prose">{intro}</p>}
     </header>
 
     {/* Mirrors /products: sidebar + grid from lg, chip row above the grid below. */}
@@ -103,5 +115,15 @@ const structuredData = collectionPageJsonLd({
       )
     }
     </div>
+
+    {
+      moreParagraphs.length > 0 && (
+        <section class="border-line text-ink-muted mt-12 max-w-prose space-y-4 border-t pt-8">
+          {moreParagraphs.map((paragraph) => (
+            <p class="whitespace-pre-line">{paragraph}</p>
+          ))}
+        </section>
+      )
+    }
   </Container>
 </BaseLayout>
