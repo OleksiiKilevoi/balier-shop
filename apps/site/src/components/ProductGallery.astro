@@ -1,4 +1,6 @@
 ---
+import { cardImageUrl } from '@balier/lib/media/card';
+
 /**
  * Swipeable, gapless product gallery.
  *
@@ -109,7 +111,7 @@ const { images, title } = Astro.props;
                 class="rounded-card border-line aria-pressed:border-brand not-aria-pressed:hover:border-line-strong group block size-20 cursor-pointer overflow-hidden border-2 transition-colors"
               >
                 <img
-                  src={image.url}
+                  src={cardImageUrl(image.url)}
                   alt=""
                   loading="lazy"
                   decoding="async"

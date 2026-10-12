@@ -223,6 +223,7 @@ const structuredData = [
   },
 ];
 import { variantLabel } from '@balier/lib/products/variant';
+import { cardImageUrl } from '@balier/lib/media/card';
 ---
 
 <BaseLayout
@@ -461,7 +462,7 @@ import { variantLabel } from '@balier/lib/products/variant';
                   <li class="flex items-center gap-4">
                     {companion.imageUrl && (
                       <img
-                        src={companion.imageUrl}
+                        src={cardImageUrl(companion.imageUrl)}
                         alt=""
                         width="64"
                         height="64"

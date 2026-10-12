@@ -19,8 +19,9 @@
   "observability": {
     "enabled": true
   },
-  // Product photography, prepared at the right size before upload — one file is
-  // one object is one URL, nothing is resized here. Served through the app Worker
+  // Product photography, uploaded full size — the gallery shows it that large.
+  // The one exception to «nothing is resized here» is the card-sized copy below
+  // (IMAGES). Served through the app Worker
   // at `/media/**`, never over the bucket's public `r2.dev` URL (rate-limited,
   // and documented as unsuitable for production).
   //   wrangler r2 bucket create balier-media
@@ -33,6 +34,12 @@
   // produces broken data rather than a broken screen. The cost is that dev
   // writes are real writes. `CLOUDFLARE_VITE_FORCE_LOCAL=true pnpm dev` forces
   // the isolated behaviour for a session without editing this file.
+  // Makes the 640px card copy of each photo (`@balier/lib/media/card`) — once per
+  // photo, ever: the copy is stored back in MEDIA and served from there, so the
+  // metered transformation never runs per view. A failed one serves the original.
+  "images": {
+    "binding": "IMAGES"
+  },
   "r2_buckets": [
     {
       "binding": "MEDIA",

@@ -4,6 +4,7 @@
 interface __BaseEnv_Env {
 	RATE_LIMIT: KVNamespace;
 	MEDIA: R2Bucket;
+	IMAGES: ImagesBinding;
 	EMAIL: SendEmail;
 	PUBLIC_SITE_URL: "https://balier.com.ua";
 	ORDER_EMAIL_FROM: "noreply@mail.balier.com.ua";
