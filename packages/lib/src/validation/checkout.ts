@@ -1,7 +1,6 @@
 import { z } from 'zod';
 import { PROMO_CODE_PATTERN, campaignCode, normalizePromoCode } from '../orders/promo';
 import { cartItemsSchema } from './cart';
-import { attributionSchema } from '../attribution';
 
 /**
  * The `/checkout` request, shared by the form's client script and
@@ -83,6 +82,23 @@ export const promoCodeSchema = z
     (value) => value === undefined || PROMO_CODE_PATTERN.test(value) || campaignCode(value) !== null,
     'invalid_promo',
   );
+
+/**
+ * What `POST /api/checkout` accepts as `~/attribution.ts`'s record — here, not
+ * there, because that module runs on every page and must not bring zod along.
+ * The browser is not trusted to keep it short.
+ */
+const tagSchema = z.string().trim().max(100).optional();
+export const attributionSchema = z
+  .object({
+    source: tagSchema,
+    medium: tagSchema,
+    campaign: tagSchema,
+    referrer: tagSchema,
+    landing: z.string().trim().max(200).optional(),
+    at: z.string().trim().max(40).optional(),
+  })
+  .strip();
 
 export const checkoutRequestSchema = z.object({
   customerName: z.string().trim().min(2).max(MAX_CUSTOMER_NAME),

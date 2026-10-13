@@ -1,4 +1,7 @@
 import { z } from 'zod';
+import { MAX_CART_LINES, MAX_ITEM_QUANTITY } from '../cart/limits';
+
+export { MAX_CART_LINES, MAX_ITEM_QUANTITY };
 
 /**
  * The shape of a cart, shared by the browser store, the `/api/cart` route and
@@ -10,16 +13,6 @@ import { z } from 'zod';
  * someone intends to buy but never what it costs. See the money rule in
  * `docs/CONVENTIONS.md`.
  */
-
-/** Per line. Above this it is a wholesale order and a conversation, not a cart. */
-export const MAX_ITEM_QUANTITY = 99;
-
-/**
- * Distinct lines. The catalog is tens of products, so a cart longer than this is
- * a script rather than a shopper — and every line costs a row in the validation
- * query.
- */
-export const MAX_CART_LINES = 30;
 
 export const cartItemSchema = z.object({
   variantId: z.uuid(),
@@ -46,11 +39,8 @@ export function parseCartItems(value: unknown): CartItemInput[] {
   return parsed.success ? parsed.data : [];
 }
 
-/** The same, starting from the raw JSON string the store persists. */
-export function decodeCartItems(raw: string): CartItemInput[] {
-  try {
-    return parseCartItems(JSON.parse(raw));
-  } catch {
-    return [];
-  }
-}
+/**
+ * The browser store's reader lives in `../cart/decode` — same rule, no zod — so
+ * the header badge does not ship this module to every page.
+ */
+export { decodeCartItems } from '../cart/decode';

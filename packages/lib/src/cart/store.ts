@@ -1,7 +1,8 @@
 import { persistentAtom } from '@nanostores/persistent';
 import { computed } from 'nanostores';
 import { mergeCartItems, type CartItem } from './index';
-import { decodeCartItems, MAX_CART_LINES, MAX_ITEM_QUANTITY } from '../validation/cart';
+import { decodeCartItems } from './decode';
+import { MAX_CART_LINES, MAX_ITEM_QUANTITY } from './limits';
 
 /**
  * The browser's cart. Runs only in the browser — never import this from a page's

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { attributionChannel, attributionDetails, attributionSchema, nextAttribution, type Attribution } from './attribution';
+import { attributionChannel, attributionDetails, nextAttribution, type Attribution } from './attribution';
+import { attributionSchema } from './validation/checkout';
 
 const now = new Date('2026-10-10T10:00:00Z');
 const visit = (overrides: Partial<Parameters<typeof nextAttribution>[1]> = {}) => ({

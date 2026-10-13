@@ -1,5 +1,3 @@
-import { z } from 'zod';
-
 /**
  * Where an order's customer came from — kept in the browser from the visit
  * that brought them and sent with the order (`orders.attribution`), so the
@@ -87,19 +85,6 @@ export function nextAttribution(
   const fresh = Number.isFinite(storedAt) && visit.now.getTime() - storedAt < MAX_AGE_MS;
   return stored && fresh ? stored : touch;
 }
-
-/** What `POST /api/checkout` accepts — the browser is not trusted to keep it short. */
-const tagSchema = z.string().trim().max(100).optional();
-export const attributionSchema = z
-  .object({
-    source: tagSchema,
-    medium: tagSchema,
-    campaign: tagSchema,
-    referrer: tagSchema,
-    landing: z.string().trim().max(200).optional(),
-    at: z.string().trim().max(40).optional(),
-  })
-  .strip();
 
 const CHANNELS: [RegExp, string][] = [
   [/^(ig|instagram)$|(^|\.)instagram\.com$/, 'Instagram'],

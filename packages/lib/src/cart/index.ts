@@ -1,6 +1,7 @@
 import type { Kopiykas } from '../money';
 import { applyBundles, type BundleRule } from './bundle';
-import { MAX_CART_LINES, MAX_ITEM_QUANTITY, type CartItemInput } from '../validation/cart';
+import type { CartItemInput } from '../validation/cart';
+import { MAX_CART_LINES, MAX_ITEM_QUANTITY } from './limits';
 
 /**
  * The cart, as a pure function of "what the customer asked for" and "what the
