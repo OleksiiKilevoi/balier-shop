@@ -219,3 +219,54 @@ export async function updateNpSenderSettings(
     if (field in values) await writeSetting(db, key, values[field] ?? null);
   }
 }
+
+/* ------------------------------------------------------------ home banner */
+
+export interface BannerImage {
+  /** Site-relative `/media/…`, like `product_images.url`. */
+  url: string;
+  /** Intrinsic size, so the page reserves the box before the file arrives. */
+  width: number | null;
+  height: number | null;
+}
+
+/**
+ * The picture above «Рекомендовані товари» on the homepage. One row holding
+ * the whole object — it is only ever read and written whole.
+ */
+export interface BannerSettings {
+  enabled: boolean;
+  image: BannerImage | null;
+  /** Shown under 640 px instead of `image`; `null` means `image` everywhere. */
+  imageMobile: BannerImage | null;
+  /** Where a click goes; `null` means the picture is not a link. */
+  link: string | null;
+  alt: string | null;
+}
+
+function asBannerImage(value: unknown): BannerImage | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const { url, width, height } = value as Record<string, unknown>;
+  if (typeof url !== 'string' || url === '') return null;
+  return {
+    url,
+    width: typeof width === 'number' ? width : null,
+    height: typeof height === 'number' ? height : null,
+  };
+}
+
+export async function getBannerSettings(db: Db): Promise<BannerSettings> {
+  const value = await readSetting(db, 'home_banner');
+  const row = typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {};
+  return {
+    enabled: row.enabled === true,
+    image: asBannerImage(row.image),
+    imageMobile: asBannerImage(row.imageMobile),
+    link: asText(row.link),
+    alt: asText(row.alt),
+  };
+}
+
+export async function setBannerSettings(db: Db, values: BannerSettings): Promise<void> {
+  await writeSetting(db, 'home_banner', values);
+}

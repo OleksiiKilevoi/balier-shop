@@ -1,5 +1,5 @@
-import { toMediaExtension } from './index';
-import type { MediaExtension } from './index';
+import { storeImage, toMediaExtension } from './index';
+import type { MediaExtension, MediaTarget, StoredImage } from './index';
 
 /**
  * What the admin upload form will accept, decided before anything is written to
@@ -87,4 +87,29 @@ export function checkUploadedImage({ size, format }: UploadCandidate): UploadIss
   if (toMediaExtension(format) === null) return 'unsupported_format';
 
   return null;
+}
+
+/**
+ * A form's file field, checked and stored: the whole upload path in one call.
+ * `{ issue }` when it is refused, `{ image }` when it is in the bucket.
+ */
+export async function acceptUploadedImage(
+  target: MediaTarget,
+  file: FormDataEntryValue | null,
+): Promise<{ issue: UploadIssue } | { image: StoredImage }> {
+  if (!(file instanceof File) || file.size === 0) return { issue: 'empty' };
+  const bytes = await file.arrayBuffer();
+
+  // The *decoded* format, not the declared one — see `UploadCandidate.format`.
+  let format: string | null = null;
+  try {
+    const body = new Response(bytes).body as unknown as Parameters<ImagesBinding['info']>[0];
+    format = (await target.images.info(body)).format;
+  } catch {
+    // Left null; `checkUploadedImage` refuses on exactly that.
+  }
+
+  const issue = checkUploadedImage({ size: bytes.byteLength, format });
+  if (issue) return { issue };
+  return { image: await storeImage(target, bytes, format!) };
 }

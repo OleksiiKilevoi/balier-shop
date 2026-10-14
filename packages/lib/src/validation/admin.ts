@@ -204,6 +204,34 @@ export const adminPromoSchema = z.object({
     .refine((value) => value >= PROMO_PERCENT_MIN && value <= PROMO_PERCENT_MAX, 'invalid_promo_percent'),
 });
 
+/**
+ * The homepage banner section of `/settings`. The two files travel in the same
+ * form but are not declared here — they are `File`s, checked by
+ * `acceptUploadedImage`. The link is a site path (`/products`) or an https URL;
+ * anything else (`javascript:`, `//host`) is refused rather than rendered.
+ */
+export const BANNER_ALT_MAX = 200;
+
+export const adminBannerSchema = z.object({
+  enabled: z
+    .string()
+    .optional()
+    .transform((value) => value === 'on'),
+  removeMobile: z
+    .string()
+    .optional()
+    .transform((value) => value === 'on'),
+  link: z
+    .string()
+    .transform((raw) => raw.trim())
+    .refine((value) => value === '' || /^(\/(?![/\\])|https:\/\/)\S*$/.test(value), 'invalid_banner_link')
+    .transform((value) => value || null),
+  alt: z
+    .string()
+    .transform((raw) => raw.trim().slice(0, BANNER_ALT_MAX))
+    .transform((value) => value || null),
+});
+
 /* --------------------------------------------------- nova poshta sender ----- */
 
 /**

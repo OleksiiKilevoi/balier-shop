@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  adminBannerSchema,
   COD_LIMIT_MAX_HRYVNIAS,
   COD_LIMIT_MIN_HRYVNIAS,
   PASSWORD_MAX_LENGTH,
@@ -439,5 +440,24 @@ describe('adminOrderEditSchema', () => {
     });
     expect(unpicked.success).toBe(false);
     expect(adminOrderFieldErrors(unpicked.error!).has('settlement')).toBe(true);
+  });
+});
+
+describe('adminBannerSchema link', () => {
+  const link = (value: string) => {
+    const parsed = adminBannerSchema.safeParse({ link: value, alt: '' });
+    return parsed.success ? parsed.data.link : 'refused';
+  };
+
+  it('takes a site path, an https URL, or nothing', () => {
+    expect(link(' /products ')).toBe('/products');
+    expect(link('https://www.instagram.com/balier.ua/')).toBe('https://www.instagram.com/balier.ua/');
+    expect(link('')).toBeNull();
+  });
+
+  it('refuses anything that could leave the site unsafely', () => {
+    for (const bad of ['javascript:alert(1)', '//evil.example', '/\\evil.example', 'http://x.ua', 'products']) {
+      expect(link(bad)).toBe('refused');
+    }
   });
 });

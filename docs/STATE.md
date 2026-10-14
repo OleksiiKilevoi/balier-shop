@@ -4,25 +4,12 @@
 
 ## 📍 CURRENT STATE (overwrite this block; keep tight)
 
-- **Last done (2026-09-22): a security audit of the live shop, and every fix from it deployed.**
-  Two passes — production probed from outside, the auth / upload / injection / webhook code read
-  from inside. Nothing of the «sign in without a password» class: sessions, PBKDF2, the gate, the
-  Monobank signature, parameterised SQL and the escaped `set:html` all hold. Fixed and verified
-  live: **astro 7.1.6 → 7.3.3** (critical advisory, RCE through AVIF optimisation; adapter 14.3.2
-  forced wrangler ≥ 4.135.0 in all three packages, six transitive build packages pinned in
-  `pnpm-workspace.yaml`, `pnpm audit --prod` now clean); **the admin login budget is an atomic
-  Postgres counter** (`auth_attempts`, migration 0021) — KV's read-modify-write let N parallel
-  guesses cost one unit and it was the only gate on password guessing, twelve parallel spends now
-  cost twelve; **security headers** on both apps from the middleware *and* `public/_headers`,
-  because prerendered pages are served off the asset binding and never reach the Worker, with
-  `frame-ancestors 'none'` on the panel the one with teeth (inside a frame its own Origin
-  satisfies Astro's CSRF check); **OTP sends capped per account** at 15/day surviving re-issue and
-  verification bound to the step cookie; **promo mail capped per address** at 2/day. Plus a
-  paid-amount assertion in `confirmPayment`, a `content-length` guard before the upload buffers,
-  the promo settings section made admin-only, a budget on `/checkout/success`, and the admin
-  config's retired `site` hostname. Owner enabled HSTS (12 months, subdomains); both hosts
-  verified. Deliberately left: the Monobank pubkey is still fetched per webhook — caching it
-  would add a key-rotation window to the one path where being wrong costs money.
+- **Last done (2026-10-02): SEO markup fixes from a Jev audit — deployed** (`9772c30`,
+  `8428941`, version `15ba751b`). Homepage `<h1>` (sr-only), titles via `pageTitle` and
+  descriptions via `clampDescription` (`packages/lib/src/seo.ts`), per-page meta on the content
+  pages, `<h2>` catalog cards, CollectionPage / BreadcrumbList JSON-LD, `<lastmod>` on product
+  sitemap URLs. The previous entry (banner, 2026-09-29) is in the session log below — its code
+  is deployed but **still uncommitted**, as are the admin/settings changes beside it.
 - **The shop is open and has taken a real order.** `balier.com.ua` indexable since 2026-09-18,
   Search Console verified with the sitemap submitted; 23 active products / 57 variants, one paid
   order through the production Monobank merchant (card, with a promo code applied). Live since
@@ -112,6 +99,31 @@
 > Empty by design. Everything through the end of Phase 4 was moved to **`docs/history.md`** on
 > 2026-08-05, not rewritten — this file is read in full at every session start and had reached
 > 852 lines. New session entries go here; move a phase's entries across once the phase is done.
+
+**2026-10-02 (SEO, Jev).** «How I can use Jev for SEO optimisations». Jev SEO is TypeSafe AI's
+open-source auditor; ran its Rust CLI (v0.1.2, checksum-verified, scratchpad only, no API key so
+rules only — no Jev semantic scoring yet). Crawl 100/100; its "no compression" and "invalid
+sitemap" were false positives. Fixed the markup findings (18 → 1 on the sampled pages). Left for
+the owner: product meta titles over 60 chars (key holders, slippers, belt) and the new page copy
+to review. Next: with a `TYPESAFE_API_KEY`, rerun with Jev scoring; resubmit the sitemap.
+Reputation check: Safe Browsing clean. Root `_dmarc` moved `p=none` → `p=quarantine` (only the
+Hosting Ukraine mailbox sends as @balier.com.ua; it passes via SPF) — `p=reject` after a few
+quiet weeks. Domain renewed 2026-10-06 at ukraine.com.ua — now expires 2027-10-16.
+2026-10-06: Search Console merchant-listing warnings → `4971afd`, deployed (`56e039da`): Product
+JSON-LD drops free-text `category`, gains `hasMerchantReturnPolicy` (14 days, by post). 2026-10-08 `e528273` (`0b53a50a`): + `returnFees: ReturnFeesCustomerResponsibility`. Merchant Center: one source «balier.com.ua feed (UK)», Ukrainian, 78 items; the Russian-language source deleted. `e821c58` (`b7661c59`): `shippingDetails` from `PARCEL_TARIFFS` (NP 90/135 ₴, tariff 2026-04-13) + `DELIVERY_DAYS` (1–2 handling, 1–3 transit) in `novaposhta/parcel.ts`. Owner to check box size on riukzak, shoper, sumka-na-pleche, sumka-cherez-pleche-na-blyskavtsi (set «до 2 кг»).
+2026-10-08 (cont.): One Dollar Stats funnel events `bfb8b73` (Add to cart / Order placed / Purchase — card & parts only once paid / Promo signup; `apps/site/src/lib/analytics.ts`), reviewed by two agents. «Не показувати в Google» product flag `50dbf82` — migration 0029 `hidden_from_search` applied to production, site `8de12649` + admin `62165e38` deployed; owner to tick it on the greeting card. Not done on purpose (owner's call): shipping rate without NP's 0.5% declared-value commission, `g:shipping` in the feed. Owner questions: made-to-order handling time, returns on personalised items. Search Console MCP: `~/mcp/mcp-gsc` installed and audited, waiting on the owner's service-account key.
+`shippingDetails` left out on purpose — Nova Poshta tariff has no fixed rate; set it in Search
+Console / Merchant Center if wanted. UTM cheat sheet: claude.ai/artifact/QGFsW5ABUCSxAjYkb8nu24
+(Instagram's own tag is `ig`).
+
+**2026-09-29 (banner).** «надо в админку добавить баннер который будет на главной» + the
+owner's PDF. One image-and-link banner, phone variant optional, above the featured grid — which
+undoes part of the 2026-09-16 «сразу должны быть товары» call, at the owner's request. Wrangler
+had lost its login (the site build needs remote bindings); `wrangler login` fixed it. Owner
+reviewed on local dev, then both Workers deployed. Phone text on the desktop picture is small —
+a portrait version for the phone slot is the owner's to supply.
+
+**2026-09-25 (студія, не код).** «хочу использовать этот проект как темплейт». Нічого в репо не змінено. Інвентаризація того, що прибите до balier (~40 файлів з брендом, 3× wrangler, 1 246 рядків inline-копі статики, варіанти лише по кольору) — у плані `~/.claude/plans/toasty-forging-pascal.md`. Результат сесії лежить поза репо, в `~/shop-studio/`: 36 лідів (34 без сайту) з Instagram по нішах кераміка/свічки/шкіра/прикраси/іграшки/епоксидка, директ-скрипти, оферта з цінами ринку, процес follow-up, one-pager як Artifact. Наступне для цього репо: шаблонізація (brand.ts, wrangler через змінні, `scripts/fork.ts`), потім розмірні варіанти.
 
 **2026-09-22 (security).** «проверь сайт на секюрити». Two passes — a subagent over the
 auth / upload / injection / webhook code, live probing from outside. The auth layer held; the
@@ -560,3 +572,27 @@ and `confirmPayment` returns `paid_after_cancellation` → manager Telegram refu
 webhook route, `[orderNumber].astro`, `workers/cron/*`. 213/213 tests; uncommitted like the rest.
 Audit also noted (not built): `confirmPayment` doesn't compare the paid amount; pubkey fetched per
 webhook (works, diverges from OVERVIEW's KV-cache plan); checkout's 5/5min IP budget vs CGNAT.
+
+- 2026-10-08 — Order B260923-TVUVK (COD, shopper, 6 120 ₴) sat `confirmed` since 09-23: the owner shipped it on a waybill made in the NP cabinet, which the panel cannot record (manual TTN entry removed 2026-08-07). At the owner's request moved straight to `delivered` in the prod DB (`update … where status='confirmed'`). No review e-mail goes out for it — `requestReview` fires only on a carrier-tracked transition; the owner sends the review link from the order page by hand.
+
+- 2026-10-09 — Internal linking (`8662c69`, site `946b90ae`): footer «Магазин» lists every active category on SSR pages (prerendered content pages keep only «Усі товари» — no DB at build); visible breadcrumbs on product pages; «Ще з категорії» block (4 cards, the ones *after* the product in category order, wrapping — `followingInOrder`; excludes `hidden_from_search`). Next on this: category description texts (owner) and links from care/palette/personalization. Measure in ~2–4 weeks: GSC internal links + category impressions, ODS pages/visit (API key at `~/.config/onedollarstats/key`).
+
+- 2026-10-09 — Search Console MCP connected (`claude mcp add gsc -s local`, read-only: service account `gsc-reader@balier-seo.iam.gserviceaccount.com`, «Ограниченный», key `~/.config/gsc/balier-gsc.json`, `GSC_ALLOW_DESTRUCTIVE` unset). First pull, 09-10…10-07: 53 clicks / 155 impressions, almost all brand («balier»). **No sitemap submitted in GSC**; URL inspection: 14 of 53 sitemap URLs indexed, 39 «unknown to Google» incl. all 6 categories and most products. Owner to submit `sitemap.xml` + request indexing of the categories.
+
+- 2026-10-09 — SEO audit of all sitemap URLs as Googlebot: all 200, self-canonical, no noindex, unique titles/descs, 120–600 ms. Fixed (`44c21db`, site `7dac0cfd`): every gallery slide gets alt (manager's or «<title> — фото N»; thumbnails stay `alt=""`), and `sitemap.xml` lists product photos as `<image:image>` (363). Requested indexing in GSC UI for 6 categories + hobo/shoper/riukzak (quota hit on the 10th) — all 9 indexed same day; 23/53 indexed, sitemap still pending. Owner: 6 product titles > 60 chars (keyholders ×2, kaptsi, glasses case, dual, belt).
+
+- 2026-10-10 — Order source (`f3736fa`, migration 0030 `orders.attribution jsonb` applied to prod, site `d95c18f2`, admin `81dabf56`): `BaseLayout` keeps the last non-direct touch for 30 days in localStorage `balier_attribution` (utm_source/medium/campaign, referrer *host* only, landing path; Monobank and own host ignored), checkout sends it, `createOrder` stores it, admin order page shows «Джерело» (`attributionChannel`/`attributionDetails`). Malformed attribution is dropped by the schema (`.catch(undefined)`), never refuses an order. Orders before 10-10 and panel-made ones have none. B261010-79HTT (wallet, card) was most likely Instagram per ODS events.
+
+- 2026-10-12 — GSC status: sitemap fetched 10-10 (55 pages + 366 images, 0 errors); 26/57 indexed, 12 «discovered – not indexed», 19 unknown (mostly new products + new category `aksesuary-dlia-tekhniky`). Old-markup warnings only on pages last crawled before the fixes. Requested indexing via GSC UI for 9: mesendzher, klatch-barsetka, chokhol (stale markup), category aksesuary-dlia-tekhniky, mishok, hamanets-b-lier, sumka-na-pleche, bahet, cherez-pleche-na-blyskavtsi. 10-09: best search day so far (8 clicks / 20 impr.); first non-brand queries («сумка днепр» pos 4).
+
+- 2026-10-12 — Card-sized photos (`320efc4`, site `081cc601`), after PageSpeed flagged ~876 KiB of oversized card images. `/media/w640/<hash>.<ext>` → `@balier/lib/media/card`: a 640px WebP copy made once via a new site IMAGES binding and stored in R2 under `w640/` (so the metered transform runs once per photo, ever; a failed one serves the original with a 1 h cache). Used by ProductCard, gallery thumbnails, companions; the gallery slides and og:image stay full size. All 369 copies pre-generated (0 fallbacks, avg 50 KB); `/products` images 8.7 MB → 1.7 MB. **Amends the 2026-08-03 «we do not resize» decision in roadmap.md — roadmap text not updated (docs change only on request).**
+
+- 2026-10-12 — Category copy layout (`934c327`, site `5f6aa5c0`): the panel's multi-paragraph category description now splits on blank lines — first paragraph under the H1 (and the meta description), the rest below the grid, paragraph breaks kept. Owner doc «BÁLIER: план продвижения в Google» (claude.ai/code/artifact/250aaab0-c7ff-4d55-8494-05089e053b01): admin fixes, Google Ads Performance Max setup, Google Business Profile, reviews, links. **Owner action:** `personalizatsiia` (1 ₴ service) is active and in the Merchant Center feed — tick «Не показувати в Google». Google Ads conversion code is ready in `apps/site/src/lib/googleAds.ts`; needs `AW-…` id + purchase label.
+
+- 2026-10-13 — GSC errors: API inspection of all 58 sitemap URLs — 38 indexed, 5 discovered, 15 unknown, 0 fetch/robots/canonical problems; old rich-result warnings (category/shippingDetails/returnPolicy) gone, only missing review/aggregateRating remain. UI «Страницы» report (lags, last update 10-09): all 29 not-indexed URLs are legacy (`/ru/…`, `/shop/…`, `.html`), each now one 301 to a live page. Started validation for «Ошибка переадресации» (`/feedback.html`, transient on 10-07). GSC MCP tools need a Claude Code restart to load.
+
+- 2026-10-13 — PageSpeed «network dependency tree»: zod (18 KB `schemas.js`) loaded on every page via the header badge → cart store → `validation/cart`, and via `attribution.ts`. Fixed (`6ad9d2f`, site `86a8969b`): `cart/decode.ts` hand-written reader held to `cartItemsSchema` by `decode.test.ts` (18 cases), limits in `cart/limits.ts`, `attributionSchema` moved to `validation/checkout.ts`. No client chunk contains zod now.
+
+- 2026-10-14 — GSC recheck: API — 38/58 indexed, 2 discovered, 18 unknown (incl. `personalizatsiia`, still no «Не показувати в Google» tick), 0 fetch/robots/canonical problems. UI: «Данные о товарах продавца» — all 4 old warnings (hasMerchantReturnPolicy, returnFees, shippingDetails, category) now «Подтверждено» 0; «Описания товара» — only missing review/aggregateRating on 14; Breadcrumbs 23/0, HTTPS 19/0, CWV no data yet (too little traffic). «Страницы» report still lags (10-09).
+
+- 2026-10-14 — Requested indexing in GSC UI (ranked by ODS 30-day views among the 18 unknown URLs): hamanets-konvert, /corporate, sumka-cherez-pleche-z-klapanom, kosmetychka-dlia-podorozhei, shkiriana-kosmetychka, dual — all confirmed. Quota hit on the 7th; still to request: sumka-lunet, portfel-dlia-noutbuka, portmone-z-khliastykom (then kaptsi, shkirianyi-fartukh, shkirianyi-hamanets, /delivery, nahrudna-sumka, dorozhnia-sumka, sumka-dlia-telefonu, /returns). Lesson: a stale button ref silently no-ops after navigation — click by coordinates and verify the «Отправлен запрос» dialog; keep browser batches under ~60 s.

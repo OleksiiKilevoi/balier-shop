@@ -33,10 +33,20 @@ import {
   updateNpSenderSettings,
   getPromoSettings,
   setPromoSettings,
+  getBannerSettings,
+  setBannerSettings,
 } from '@balier/lib/db/queries/settings';
 import {
+  MAX_REQUEST_BYTES,
+  MAX_UPLOAD_BYTES,
+  acceptUploadedImage,
+} from '@balier/lib/media/upload';
+import type { UploadIssue } from '@balier/lib/media/upload';
+import {
+  ADMIN_BANNER_HINT,
   ADMIN_COD_LIMIT_HINT,
   ADMIN_PROMO_HINT,
+  ADMIN_UPLOAD_ERRORS,
   ADMIN_NP_SENDER_HINT,
   ADMIN_PASSWORD_HINT,
   ADMIN_SETTINGS_FAILURES,
@@ -60,7 +70,9 @@ import {
   PASSWORD_MAX_LENGTH,
   PASSWORD_MIN_LENGTH,
   adminIssueKey,
+  adminBannerSchema,
   adminNpSettingsSchema,
+  BANNER_ALT_MAX,
   adminPasswordChangeSchema,
   adminPromoSchema,
   adminSettingsSchema,
@@ -131,7 +143,17 @@ let npPlaceDraft: {
   warehouseQuery: string;
 } | null = null;
 
+/** Why a banner file was refused, shown under the field it came from. */
+let bannerUploadIssue: { field: 'image' | 'imageMobile'; issue: UploadIssue } | null = null;
+
 if (Astro.request.method === 'POST') {
+  // Before `formData()`, which buffers the whole body — the banner form carries
+  // two files, so the envelope is one upload wider than the product editor's.
+  const declaredLength = Number(Astro.request.headers.get('content-length') ?? 0);
+  if (declaredLength > MAX_REQUEST_BYTES + MAX_UPLOAD_BYTES) {
+    return new Response('Забагато даних у запиті', { status: 413 });
+  }
+
   const form = await Astro.request.formData();
   const intent = String(form.get('intent') ?? '');
   failedIntent = intent;
@@ -166,6 +188,50 @@ if (Astro.request.method === 'POST') {
       } else {
         await setPromoSettings(db, parsed.data);
         return Astro.redirect(`${SELF_URL}?m=promo_updated`, 303);
+      }
+    }
+  } else if (intent === 'banner') {
+    if (me.role !== 'admin') {
+      banner = 'bad_request';
+    } else {
+      const parsed = adminBannerSchema.safeParse({
+        enabled: form.get('enabled') ?? undefined,
+        removeMobile: form.get('removeMobile') ?? undefined,
+        link: form.get('link') ?? '',
+        alt: form.get('alt') ?? '',
+      });
+      if (!parsed.success) {
+        banner = parsed.error.issues.some((issue) => issue.message === 'invalid_banner_link')
+          ? 'invalid_banner_link'
+          : 'bad_request';
+      } else {
+        const current = await getBannerSettings(db);
+        const next = {
+          ...current,
+          enabled: parsed.data.enabled,
+          link: parsed.data.link,
+          alt: parsed.data.alt,
+          imageMobile: parsed.data.removeMobile ? null : current.imageMobile,
+        };
+
+        // An empty file field keeps the stored picture — only a chosen file replaces it.
+        for (const field of ['image', 'imageMobile'] as const) {
+          const file = form.get(field);
+          if (!(file instanceof File) || file.size === 0) continue;
+          const upload = await acceptUploadedImage({ bucket: env.MEDIA, images: env.IMAGES }, file);
+          if ('issue' in upload) {
+            bannerUploadIssue = { field, issue: upload.issue };
+            break;
+          }
+          next[field] = upload.image;
+        }
+
+        if (bannerUploadIssue) {
+          banner = 'banner_upload_failed';
+        } else {
+          await setBannerSettings(db, next);
+          return Astro.redirect(`${SELF_URL}?m=banner_updated`, 303);
+        }
       }
     }
   } else if (intent === 'np_fetch') {
@@ -361,6 +427,7 @@ const [promo, promoCounts] = await Promise.all([getPromoSettings(db), countPromo
    for a manager — the page must not leak what it will not show. */
 const isAdmin = me.role === 'admin';
 const np = isAdmin ? await getNpSenderSettings(db) : null;
+const homeBanner = isAdmin ? await getBannerSettings(db) : null;
 
 /* The chosen branch, resolved back into words — a ref answers nothing when an
    admin wonders where their parcels ship from. */
@@ -602,6 +669,97 @@ const formFailed = (intent: string) => banner !== null && failedIntent === inten
           Від {PROMO_PERCENT_MIN} до {PROMO_PERCENT_MAX} %. Видано кодів: {promoCounts.issued}, використано в
           замовленнях: {promoCounts.used}.
         </p>
+      </form>
+    </section>
+    )}
+
+    {/* Admin-only, like the promo: it is the shop's front page. */}
+    {homeBanner && (
+    <section class="admin-card mt-6 p-5">
+      <h2 class="text-fg text-base font-semibold">Банер на головній</h2>
+      <p class="text-fg-muted mt-1 text-sm">{ADMIN_BANNER_HINT}</p>
+
+      <form
+        method="post"
+        action={SELF_URL}
+        enctype="multipart/form-data"
+        data-form="banner"
+        class="mt-4 space-y-4"
+      >
+        <input type="hidden" name="intent" value="banner" />
+
+        <label class="min-h-touch flex items-center gap-2.5 text-sm md:min-h-10">
+          <input type="checkbox" name="enabled" checked={homeBanner.enabled} class="size-4" />
+          Показувати банер на сайті
+        </label>
+
+        {([
+          ['image', 'Картинка', homeBanner.image],
+          ['imageMobile', 'Картинка для телефона (необов’язково)', homeBanner.imageMobile],
+        ] as const).map(([field, label, stored]) => (
+          <div>
+            <label for={`banner-${field}`} class="text-fg-subtle text-xs">{label}</label>
+            {stored && (
+              <img
+                src={stored.url}
+                alt=""
+                width={stored.width ?? undefined}
+                height={stored.height ?? undefined}
+                class="border-border rounded-card mt-1 mb-2 max-h-40 w-auto border"
+              />
+            )}
+            <input
+              id={`banner-${field}`}
+              name={field}
+              type="file"
+              accept="image/webp,image/avif,image/jpeg,image/png"
+              class:list={[
+                'admin-field mt-1 py-2',
+                bannerUploadIssue?.field === field && 'border-danger',
+              ]}
+            />
+            {bannerUploadIssue?.field === field && (
+              <p role="alert" class="text-danger mt-2 text-xs">
+                {ADMIN_UPLOAD_ERRORS[bannerUploadIssue.issue]}
+              </p>
+            )}
+            {field === 'imageMobile' && stored && (
+              <label class="mt-2 flex items-center gap-2.5 text-sm">
+                <input type="checkbox" name="removeMobile" class="size-4" />
+                Прибрати картинку для телефона
+              </label>
+            )}
+          </div>
+        ))}
+
+        <div>
+          <label for="banner-link" class="text-fg-subtle text-xs">Посилання</label>
+          <input
+            id="banner-link"
+            name="link"
+            type="text"
+            value={homeBanner.link ?? ''}
+            placeholder="/products"
+            autocomplete="off"
+            class:list={['admin-field mt-1', message === 'invalid_banner_link' && 'border-danger']}
+          />
+        </div>
+
+        <div>
+          <label for="banner-alt" class="text-fg-subtle text-xs">Текст для незрячих і пошуку (alt)</label>
+          <input
+            id="banner-alt"
+            name="alt"
+            type="text"
+            value={homeBanner.alt ?? ''}
+            maxlength={BANNER_ALT_MAX}
+            placeholder="Характер у деталях — BÁLIER"
+            autocomplete="off"
+            class="admin-field mt-1"
+          />
+        </div>
+
+        <button type="submit" class="admin-btn admin-btn-primary">Зберегти</button>
       </form>
     </section>
     )}

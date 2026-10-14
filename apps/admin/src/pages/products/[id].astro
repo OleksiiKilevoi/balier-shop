@@ -37,8 +37,8 @@ import {
   formatFileSize,
 } from '@balier/lib/i18n/admin';
 import type { AdminProductMessage } from '@balier/lib/i18n/admin';
-import { mediaKeyFromUrl, storeImage } from '@balier/lib/media';
-import { MAX_REQUEST_BYTES, checkUploadedImage } from '@balier/lib/media/upload';
+import { mediaKeyFromUrl } from '@balier/lib/media';
+import { MAX_REQUEST_BYTES, acceptUploadedImage } from '@balier/lib/media/upload';
 import type { UploadIssue } from '@balier/lib/media/upload';
 import { formatPrice } from '@balier/lib/money';
 import { suggestSku } from '@balier/lib/products/slug';
@@ -167,64 +167,17 @@ if (Astro.request.method === 'POST') {
         }
 
         case 'image_add': {
-          if (!(file instanceof File) || file.size === 0) {
-            uploadIssue = 'empty';
+          const upload = await acceptUploadedImage({ bucket: env.MEDIA, images: env.IMAGES }, file);
+          if ('issue' in upload) {
+            uploadIssue = upload.issue;
             break;
           }
-
-          const bytes = await file.arrayBuffer();
-
-          /*
-           * The *decoded* format, not what the browser declared. Those differ
-           * more often than they should — a `curl -F` upload arrives as
-           * `application/octet-stream` and is still a perfectly good WebP — and
-           * the binding throws outright on a file that is not an image at all,
-           * which is what leaves `format` null and is refused as «unreadable».
-           *
-           * Width and height decide nothing any more (see `~/lib/media/upload`);
-           * they are read here only to be stored, so the markup can reserve the
-           * space and the page does not shift as photos load.
-           */
-          let format: string | null = null;
-          let width: number | null = null;
-          let height: number | null = null;
-          try {
-            const info = await env.IMAGES.info(
-              new Response(bytes).body as ReadableStream<Uint8Array>,
-            );
-            format = info.format;
-            if ('width' in info) {
-              width = info.width;
-              height = info.height;
-            }
-          } catch {
-            // Left null; `checkUploadedImage` refuses on exactly that.
-          }
-
-          const issue = checkUploadedImage({ size: bytes.byteLength, format });
-          if (issue) {
-            uploadIssue = issue;
-            break;
-          }
-
-          /*
-           * `storeImage` reads the dimensions again for its own return value.
-           * Two `info()` calls per upload rather than one, accepted so the
-           * signature stays byte-identical to the one `pnpm media:ingest` calls
-           * — the whole point of sharing it is that the two paths cannot drift.
-           * `info()` is metadata, not a transformation, so it costs no quota.
-           */
-          const stored = await storeImage(
-            { bucket: env.MEDIA, images: env.IMAGES },
-            bytes,
-            format!,
-          );
 
           await addProductImage(txDb, productId, {
-            url: stored.url,
+            url: upload.image.url,
             alt: action.alt,
-            width: stored.width ?? width,
-            height: stored.height ?? height,
+            width: upload.image.width,
+            height: upload.image.height,
             variantId: action.variantId,
           });
 

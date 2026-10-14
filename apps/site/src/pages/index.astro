@@ -6,6 +6,7 @@ import Button from '~/components/Button.astro';
 import ProductCard from '~/components/ProductCard.astro';
 import { createDb } from '@balier/lib/db';
 import { listFeaturedProducts } from '@balier/lib/db/queries/products';
+import { getBannerSettings } from '@balier/lib/db/queries/settings';
 
 export const prerender = false;
 
@@ -18,7 +19,13 @@ const FEATURED_COUNT = 4;
 
 // Per request — never a module-scope singleton, every request is a fresh isolate.
 const db = createDb(env.DATABASE_URL);
-const featured = await listFeaturedProducts(db, FEATURED_COUNT);
+const [featured, banner] = await Promise.all([
+  listFeaturedProducts(db, FEATURED_COUNT),
+  getBannerSettings(db),
+]);
+/** Set in `/settings` → «Банер на головній»; nothing renders while it is off or empty. */
+const showBanner = banner.enabled && banner.image !== null;
+const BannerTag = banner.link ? 'a' : 'div';
 
 /**
  * Teasers for the content pages, so `/about`, `/care`, `/personalization` and `/palette` have an entry point
@@ -112,6 +119,34 @@ const teasers = [
       products open the page, but search engines and screen readers still need
       a heading that says what the site is. */}
   <h1 class="sr-only">BÁLIER — шкіряні сумки та гаманці ручної роботи</h1>
+  {
+    showBanner && banner.image && (
+      <Container class="pt-6 sm:pt-8">
+        {/* The banner owns the LCP when it is on, hence eager + high priority. */}
+        <BannerTag href={banner.link ?? undefined} class="rounded-card block overflow-hidden">
+          <picture>
+            {banner.imageMobile && (
+              <source
+                media="(max-width: 639px)"
+                srcset={banner.imageMobile.url}
+                width={banner.imageMobile.width ?? undefined}
+                height={banner.imageMobile.height ?? undefined}
+              />
+            )}
+            <img
+              src={banner.image.url}
+              alt={banner.alt ?? 'BÁLIER'}
+              width={banner.image.width ?? undefined}
+              height={banner.image.height ?? undefined}
+              loading="eager"
+              fetchpriority="high"
+              class="block h-auto w-full"
+            />
+          </picture>
+        </BannerTag>
+      </Container>
+    )
+  }
   {
     featured.length > 0 && (
       <Container as="section" class="py-12 sm:py-16" aria-labelledby="featured-heading">
