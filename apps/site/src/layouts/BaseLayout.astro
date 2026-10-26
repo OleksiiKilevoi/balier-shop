@@ -32,6 +32,7 @@ interface Props {
 const { title, ogImage, noindex = !SITE_IS_INDEXABLE } = Astro.props;
 
 const siteName = 'Balier';
+const GTAG_IDS = [GA4_MEASUREMENT_ID, GOOGLE_ADS_ID].filter(Boolean);
 // Shaped to what a search result shows: the brand suffix is skipped when the
 // title names it or would overflow, the description is cut at a sentence.
 const fullTitle = pageTitle(title);
@@ -46,12 +47,32 @@ const canonical = new URL(path, Astro.site ?? Astro.url).href;
 // Every page gets a share image: the page's own, or the brand's python leather.
 const ogImageUrl = new URL(ogImage ?? '/images/og-default.jpg', Astro.site ?? Astro.url).href;
 import { GOOGLE_ADS_ID } from '~/lib/googleAds';
+import { GTM_ID } from '~/lib/googleTagManager';
+import { GA4_MEASUREMENT_ID } from '~/lib/googleAnalytics';
 ---
 
 <html lang="uk">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    {/* Google Tag Manager — Google's snippet verbatim, the container ID from
+        `~/lib/googleTagManager.ts`. As high in <head> as Google asks; its
+        <noscript> half sits right after <body>. Production only. */}
+    {import.meta.env.PROD && GTM_ID && (
+      <script is:inline define:vars={{ id: GTM_ID }}>
+        (function (w, d, s, l, i) {
+          w[l] = w[l] || [];
+          w[l].push({ 'gtm.start': new Date().getTime(), event: 'gtm.js' });
+          var f = d.getElementsByTagName(s)[0],
+            j = d.createElement(s),
+            dl = l != 'dataLayer' ? '&l=' + l : '';
+          j.async = true;
+          j.src = 'https://www.googletagmanager.com/gtm.js?id=' + i + dl;
+          f.parentNode.insertBefore(j, f);
+        })(window, document, 'script', 'dataLayer', id);
+      </script>
+    )}
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="canonical" href={canonical} />
 
@@ -81,18 +102,20 @@ import { GOOGLE_ADS_ID } from '~/lib/googleAds';
       <script is:inline defer src="https://assets.onedollarstats.com/stonks.js"></script>
     )}
 
-    {/* Google Ads tag: production only, and only once an ID is set in
-        `~/lib/googleAds.ts`. The purchase event fires from /checkout/success. */}
-    {import.meta.env.PROD && GOOGLE_ADS_ID && (
+    {/* gtag.js, loaded once for every ID that is set: GA4 from
+        `~/lib/googleAnalytics.ts` and Google Ads from `~/lib/googleAds.ts`.
+        Production only. The Ads purchase event fires from /checkout/success
+        through the same `window.gtag`. */}
+    {import.meta.env.PROD && GTAG_IDS.length > 0 && (
       <>
-        <script is:inline async src={`https://www.googletagmanager.com/gtag/js?id=${GOOGLE_ADS_ID}`}></script>
-        <script is:inline define:vars={{ id: GOOGLE_ADS_ID }}>
+        <script is:inline async src={`https://www.googletagmanager.com/gtag/js?id=${GTAG_IDS[0]}`}></script>
+        <script is:inline define:vars={{ ids: GTAG_IDS }}>
           window.dataLayer = window.dataLayer || [];
           window.gtag = function () {
             window.dataLayer.push(arguments);
           };
           window.gtag('js', new Date());
-          window.gtag('config', id);
+          for (const id of ids) window.gtag('config', id);
         </script>
       </>
     )}
@@ -101,6 +124,15 @@ import { GOOGLE_ADS_ID } from '~/lib/googleAds';
   </head>
 
   <body class="flex min-h-dvh flex-col">
+    {import.meta.env.PROD && GTM_ID && (
+      <noscript>
+        <iframe
+          src={`https://www.googletagmanager.com/ns.html?id=${GTM_ID}`}
+          height="0"
+          width="0"
+          style="display:none;visibility:hidden"></iframe>
+      </noscript>
+    )}
     <a
       href="#main"
       class="bg-ink text-paper sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:px-4 focus:py-2"
