@@ -30,9 +30,21 @@
   - Turnstile stays commented out on `/api/checkout`; a 5-per-300 s per-IP budget is the only bot
     defence on the endpoint that creates orders and calls Monobank.
   - Cloudflare → Security: confirm WAF and bot protection are on (the only audit item not checked).
-  - Search Console: press «Перевірити виправлення» on the 404 / 5xx / robots groups now the 301s
-    are live, and resubmit the sitemap.
-  - Neon still on the Free plan; no point-in-time recovery window.
+  - Search Console (looked 2026-10-15): 37 indexed. «Обнаружена, не проиндексирована» holds 19
+    live pages (17 products + `/corporate`, `/delivery`), found 13.10 and simply not crawled yet —
+    wait, or «Запросить индексирование» on the top ones (~10 a day). The 404 / 5xx / robots /
+    redirect-error validations have been running since 07.10; every URL in them 301s now.
+  - Two product names carry a typed «| BÁLIER» suffix (`shkirianyi-hamanets`,
+    `cholovicha-shkiriana-sumka-cherez-pleche`) — it leaks into the h1, breadcrumb and Product
+    JSON-LD name; strip it in the panel.
+  - Neon is on the **Free plan** (moved there 2026-10-21): 100 CU-hours a month per project,
+    scale-to-zero after 5 min that cannot be switched off, 6 h of history, 1 GB storage (DB is
+    64 MB). 100 CU-hours is ~400 h of a 0.25 CU compute; the `*/15` cron alone keeps it awake
+    ~22 min an hour ≈ 68 CU-hours, before any visitor. **Running out suspends the database until
+    the next month.** Done 2026-10-21: the cron sweep is hourly (`0 * * * *`, deployed
+    `190d97ee`, uncommitted) and the owner pinned max compute to 0.25 CU in the Neon console the
+    same day. Left: look at the Usage graph around 2026-10-28 — over 25 CU-hours in the first
+    7 days means the month won't fit, and the next lever is an edge cache for catalog pages.
   - Russian-language version: the site is Ukrainian only. Decide with the Search Console query
     report in ~4 weeks, not by default — a `/ru` tree is 3–5 days plus translation.
 - **Loose ends carried:** the neon CLI's link files (`neon.ts`, `@neon/config` + `@neon/env` in
@@ -99,6 +111,63 @@
 > Empty by design. Everything through the end of Phase 4 was moved to **`docs/history.md`** on
 > 2026-08-05, not rewritten — this file is read in full at every session start and had reached
 > 852 lines. New session entries go here; move a phase's entries across once the phase is done.
+
+**2026-10-15 (Search Console).** The owner pasted the «Страница просканирована, но пока не
+проиндексирована» drilldown (3 URLs, validation failed 13.10). Nothing to fix: the product page is
+«Submitted and indexed» per the URL Inspection API since the 13.10 crawl (the report lags a day);
+`faq.html` / `dostavka.html` are old-site URLs last crawled in May that 301 to `/delivery`. Looked
+at the rest of the Pages report too: «Ошибка переадресации» on `feedback.html` (07.10) passes a
+live test now; the 19 «Обнаружена, не проиндексирована» are live products found 13.10 and not yet
+crawled. No code changed. Two product names carry a typed «| BÁLIER» suffix — owner's fix in the
+panel. The GSC MCP (`~/mcp/mcp-gsc`) works now: URL inspection ran through it.
+2026-10-16 (cont.): «потяни ошибки индексации рекомендации от гугл» — the full pull. All 58
+sitemap URLs through the Inspection API: 44 indexed, 5 «Discovered», 9 «unknown to Google»
+(`/delivery` and `/returns` among them), no technical fault on any. Every legacy URL in the eight
+reason groups 301s to the right place. Merchant listings: 0 errors, all four warnings confirmed
+fixed. Product snippets: `review` / `aggregateRating` missing on 17 — only real reviews fix that,
+the belt already carries one. Manual actions and security: none. Google's one recommendation: link
+Search Console to Merchant Center «Balier (5871202153)» — a click for the owner, not done.
+2026-10-21 (cont.): «по поиску balier в гугл мне не выдало сайт». Reproduced from the owner's
+screenshot: their Chrome profile is English, and with `hl=en&gl=ua` the bare query «balier» has no
+balier.com.ua on pages 1–3 (Instagram, Rozetka, Facebook, ZRK, Shafa, Work.ua, YouTube instead);
+the English AI Overview cites only those. With `hl=uk` or `hl=ru`, with `lr=lang_uk`, or for
+«balier bags» the homepage is first. Search Console: «balier» at position 2.3, 57 impressions /
+44 clicks in 28 days, 47 of them mobile at 1.8 — the uk/ru audience finds it. Cause: the site is
+`lang="uk"` only, no English page or hreflang, so for an English-interface user Google's language
+preference drops a month-old domain off the bare brand query. Not a code bug. Owner's call: an
+English version (same decision as the deferred Russian one), or accept. Side finding: the Business
+Profile website link is `http://balier.com.ua/` — 50 impressions, 0 clicks on that URL in GSC;
+change it to https in Business Profile.
+«перешел на фри тир в неоне» → «давай крон раз в час и задеплой»: Neon Free is 100 CU-hours a
+month, scale-to-zero at 5 min, 6 h history, 1 GB storage; running out suspends the DB until the
+next month. The `*/15` cron alone would burn ~68 CU-hours. Trigger and handler case moved to
+`0 * * * *` (`workers/cron/wrangler.jsonc`, `workers/cron/index.ts`), gate green, `balier-cron`
+deployed `190d97ee` with schedules `0 * * * *` and `0 4 * * *`. Uncommitted. Catalog and product
+pages still hit the DB per visit (edge cache covers only the NP lookups) — a later, separate ask.
+2026-10-23: GTM container `GTM-NZK3XGBG` pasted by the owner («add to web site») → `~/lib/googleTagManager.ts`
++ both halves of Google's snippet in `BaseLayout.astro`, production only like the other tags; gate
+green, site deployed `98f2e7cc`, verified on `/`, `/about` (prerendered) and a product page.
+`GOOGLE_ADS_ID` is still empty, so GTM is the only Google tag — no double counting. Uncommitted.
+Edge cache for the catalog: «давай сделаем edge-кеш», owner chose invalidation by a catalog version
+in KV (option A); design presented, awaiting approval before the spec in `~/.claude/plans/`.
+«проверь usage неон нужен ли кеш?» Production Neon is **`curly-smoke-75808809` («Acelerator»,
+org «Oleksii» `org-silent-tooth-80755892`, owner oleksii.kilevoi@drizzle.team)** — the project the
+Neon MCP is connected to (launch.md was right; the «balier» project in Mykhailo's «mlosko» org is
+the old dev DB, still woken every 15 min by something outside this repo, not our quota). Free
+period started at the downgrade, 2026-10-21 13:08 UTC. 43.5 h later: 6.53 CU-hours, compute active
+25.9 h of 43.5 (59 %), production endpoint `ep-holy-sunset-b1lcnrei` capped 0.25↔0.25 CU. Rate
+≈ 3.6 CU-hours/day ≈ 110 a month → fits October (period is short) but **overruns 100 in a full
+November**, DB suspended for its last days. Cron is ~0.6 of the 3.6; the rest is traffic waking
+the compute. Verdict: the edge cache is needed on Free, or Build ($10, 250 CU-hours) instead.
+GA4 `G-P9NKSG62B4` pasted («Добавить тег») → `~/lib/googleAnalytics.ts`; the Ads-only gtag block in
+`BaseLayout.astro` became one `gtag.js` load for every ID in `GTAG_IDS` (GA4 + Ads when set), so
+the Ads conversion on `/checkout/success` keeps working through the same `window.gtag`. Gate green,
+site deployed `855064c1`, verified live on three pages. Uncommitted. GTM and GA4 are both on the
+page now: if a GA4 tag is ever added inside the GTM container, views count twice — one place only.
+2026-10-26 «проверь neon usage»: 20.45 CU-hours after 114.9 h of the period, compute active
+81.3 h (71 %); the last three days alone ran at 4.7 CU-hours/day with the compute awake 78 % of the
+time. Projection: October ends near 47, a full November ≈ 130–145 → the 100 limit falls around
+20–23 November. Trend is up, not down. Cache (or Build plan) still undecided by the owner.
 
 **2026-10-02 (SEO, Jev).** «How I can use Jev for SEO optimisations». Jev SEO is TypeSafe AI's
 open-source auditor; ran its Rust CLI (v0.1.2, checksum-verified, scratchpad only, no API key so
