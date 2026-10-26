@@ -38,9 +38,10 @@ import { confirmPayment } from '@balier/lib/orders/confirmPayment';
 const handler = {
   async scheduled(event: ScheduledController, env: Env): Promise<void> {
     switch (event.cron) {
-      // Every 15 minutes — close out orders that were never paid, and follow
-      // every live waybill's carrier status (NP-4).
-      case '*/15 * * * *': {
+      // Hourly — close out orders that were never paid, and follow every live
+      // waybill's carrier status (NP-4). The interval is a Neon Free-plan
+      // budget decision; see the trigger comment in `wrangler.jsonc`.
+      case '0 * * * *': {
         const results = await Promise.allSettled([
           sweepUnpaidOrders(env),
           trackWaybillStatuses(env),

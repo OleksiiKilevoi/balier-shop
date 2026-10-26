@@ -15,8 +15,11 @@
     "crons": [
       // Release stock reserved by orders that were never paid, reconcile
       // `awaiting_payment` orders against Monobank before cancelling them,
-      // and follow every live waybill's carrier status (NP-4).
-      "*/15 * * * *",
+      // and follow every live waybill's carrier status (NP-4). Hourly, not
+      // every 15 minutes: Neon's Free plan (2026-10-21) gives 100 CU-hours a
+      // month and every run wakes the database for at least its 5-minute
+      // idle window, so four runs an hour alone would spend two thirds of it.
+      "0 * * * *",
       // Refresh the Nova Poshta settlement/warehouse cache.
       "0 4 * * *"
     ]
