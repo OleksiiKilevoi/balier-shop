@@ -30,6 +30,12 @@ describe('legacyRedirect', () => {
     expect(legacyRedirect('/')).toBeNull();
   });
 
+  it('sends a renamed product slug of our own site to its new slug', () => {
+    expect(legacyRedirect('/products/shkirianyi-chokhol-na-viiskovyi-kvytok')).toBe(
+      '/products/shkirianyi-chokhol-viiskovyi-kvytok',
+    );
+  });
+
   it('knows nothing about the new site or random paths', () => {
     expect(legacyRedirect('/products/sumka-lunet')).toBeNull();
     expect(legacyRedirect('/about')).toBeNull();

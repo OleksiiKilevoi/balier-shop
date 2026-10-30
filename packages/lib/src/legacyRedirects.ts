@@ -38,6 +38,17 @@ const EXACT: Record<string, string> = {
   '/reminding.html': '/products',
 };
 
+/**
+ * Our own renamed product slugs. The panel has no slug history: when a
+ * manager edits a slug the old URL simply 404s, and Google may already hold
+ * it (2026-10-21: the category page linked the old slug the day before the
+ * rename, and the coverage report filed the 404). Add a line here per rename;
+ * the row is removed once the old URL has been out of the index for a while.
+ */
+const RENAMED: Record<string, string> = {
+  '/products/shkirianyi-chokhol-na-viiskovyi-kvytok': '/products/shkirianyi-chokhol-viiskovyi-kvytok',
+};
+
 /** Old category/product slugs → the new category, first match wins. */
 const SHOP_CATEGORIES: readonly [RegExp, string][] = [
   [/ryukzak|dorozhn/, '/products/category/backpacks-travel'],
@@ -47,6 +58,9 @@ const SHOP_CATEGORIES: readonly [RegExp, string][] = [
 ];
 
 export function legacyRedirect(pathname: string): string | null {
+  const renamed = RENAMED[pathname];
+  if (renamed) return renamed;
+
   const bare = pathname.replace(LANGUAGE_PREFIX, '') || '/';
   // `/ru` and `/ru/` were the Russian front page.
   if (bare === '/') return bare === pathname ? null : '/';
