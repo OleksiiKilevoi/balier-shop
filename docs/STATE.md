@@ -168,6 +168,41 @@ page now: if a GA4 tag is ever added inside the GTM container, views count twice
 81.3 h (71 %); the last three days alone ran at 4.7 CU-hours/day with the compute awake 78 % of the
 time. Projection: October ends near 47, a full November ≈ 130–145 → the 100 limit falls around
 20–23 November. Trend is up, not down. Cache (or Build plan) still undecided by the owner.
+2026-10-28 «проверь ошибки по search.google»: sitemap 67 URLs (new category
+`obkladynky-dlia-dokumentiv` + 8 products), Inspection API: 51 indexed, 3 «Discovered», 13
+«unknown» — all 16 are 200, no noindex, self-canonical, just uncrawled; 13 of them unchanged since
+16.10. Report: 49 indexed / 43 not, redirect-error group confirmed fixed, Merchant Center linked
+16.10. One real finding: product slug renamed from `shkirianyi-chokhol-na-viiskovyi-kvytok` to
+`shkirianyi-chokhol-viiskovyi-kvytok` after Google saw the old one on the category page → 404 in
+the report; no slug-history mechanism exists, a one-line entry in `legacyRedirects.ts` fixes it
+(offered, not applied). `/user/avtorizatsiya.html` 404 is the old site's login page, honest 404.
+Product snippets warnings (`review`/`aggregateRating`) now on 12, Merchant listings clean.
+2026-10-30: «давай добавь редирект и задеплой» → `RENAMED` map in `legacyRedirects.ts` (our own
+renamed product slugs, checked before the old-site rules; one line per rename, test first), site
+deployed `3c6a7331`, old slug 301s live. Uncommitted. Neon the same day: 40.6 CU-hours after
+210.8 h of the period, compute active 77 %; the last four days ran at 5.0 CU-hours/day (84 %
+awake). October ends ≈ 49; a full November at this rate ≈ 150 → the 100 limit falls ~20 November.
+«проверь ошибки и исправления» + «запроси индексацию» (same day): report unchanged (49 / 43), the
+old slug still filed as 404 until recrawl. Requested indexing through the URL inspector for 11 of
+the 16 uncrawled pages — `shkirianyi-hamanets`, `cholovicha-shkiriana-nahrudna-sumka`,
+`portfel-dlia-noutbuka`, `dorozhnia-sumka`, `sumka-lunet`, `sumka-dlia-telefonu`,
+`portmone-z-khliastykom`, `hamanets-iz-vikonechkom-dlia-dokumentiv`, `fartukhoksford`,
+`shkirianyi-fartukh`, `shkiriani-kaptsi-dlia-budynku` — then «Квота превышена». Left for the next
+day: `personalizatsiia`, `chokhol-dlia-zakordonnoho-pasportu`, `shkirianyi-braslet`,
+`sumka-dlia-dokumentiv`, `/returns`. Oddity: the inspector says none of them is referenced by a
+sitemap, though all are in `/sitemap.xml` (Google read 65 of 67 URLs on 27.10).
+«Давай настроим рекламу…» → plan given in chat (measure first: GA4 e-commerce events, Meta
+Pixel + CAPI, margin for a CPA ceiling, Neon cache; then Shopping → brand/category Search →
+Instagram retargeting; admin order attribution as the source of truth). «давай с событий GA4» →
+built: `packages/lib/src/analytics/ga4.ts` (tested, 7 cases; `item_id` = SKU like the Merchant
+feed's `g:id`), `apps/site/src/lib/ga4.ts` wrapper, `view_item` + `add_to_cart` on the product
+page (button and «до комплекту»), `add_to_cart` + `begin_checkout` on `/checkout`, `purchase` on
+`/checkout/success` under the existing paid/COD gate and once-per-order guard; `CompanionOffer`
+gained `sku`. Gate green; the auto-mode classifier refused `pnpm deploy:site`, the owner ran it
+(`d0dff5c4`). Verified live in Chrome through `window.dataLayer`: `view_item`, `add_to_cart` and
+`begin_checkout` carry SKU, name, variant, category and hryvnia prices; `purchase` waits for the
+first real order (GA4 Realtime). Next for ads: Meta Pixel + CAPI, then link GA4 ↔ Google Ads and
+import `purchase` as the conversion. Uncommitted.
 
 **2026-10-02 (SEO, Jev).** «How I can use Jev for SEO optimisations». Jev SEO is TypeSafe AI's
 open-source auditor; ran its Rust CLI (v0.1.2, checksum-verified, scratchpad only, no API key so
