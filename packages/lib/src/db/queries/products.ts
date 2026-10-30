@@ -2,6 +2,7 @@ import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import type { Db } from '../index';
 import type { ParcelSize } from '../schema';
+import { leadImages } from '../../products/feedImage';
 import {
   categories,
   categoryTranslations,
@@ -568,7 +569,7 @@ export interface FeedVariantData {
   size: string | null;
   price: Kopiykas;
   inStock: boolean;
-  /** The variant's own photo when it has one, else the product's lead photo. Relative. */
+  /** The variant's own photo, else its colour's, else the product's (`leadImages`). Relative. */
   imageUrl: string | null;
 }
 
@@ -610,14 +611,6 @@ export async function listFeedVariants(db: Db): Promise<FeedVariantData[]> {
     .where(inArray(productImages.productId, [...new Set(rows.map((row) => row.productId))]))
     .orderBy(asc(productImages.position), asc(productImages.id));
 
-  const lead = new Map<string, string>();
-  for (const image of images) {
-    const key = image.variantId ?? `product:${image.productId}`;
-    if (!lead.has(key)) lead.set(key, image.url);
-  }
-
-  return rows.map(({ variantId, ...row }) => ({
-    ...row,
-    imageUrl: lead.get(variantId) ?? lead.get(`product:${row.productId}`) ?? null,
-  }));
+  const lead = leadImages(rows, images);
+  return rows.map(({ variantId, ...row }) => ({ ...row, imageUrl: lead.get(variantId) ?? null }));
 }
