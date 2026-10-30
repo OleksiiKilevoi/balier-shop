@@ -202,7 +202,18 @@ gained `sku`. Gate green; the auto-mode classifier refused `pnpm deploy:site`, t
 (`d0dff5c4`). Verified live in Chrome through `window.dataLayer`: `view_item`, `add_to_cart` and
 `begin_checkout` carry SKU, name, variant, category and hryvnia prices; `purchase` waits for the
 first real order (GA4 Realtime). Next for ads: Meta Pixel + CAPI, then link GA4 ↔ Google Ads and
-import `purchase` as the conversion. Uncommitted.
+import `purchase` as the conversion. Committed and pushed (`b1a5a97`).
+«поехали по рекламе» (2026-10-30): account recon under the owner's Google login. **Google Ads: two
+accounts, neither live** — `994-552-9742` «BÁLIER (выполняется настройка)» holds an unfinished
+Search-campaign draft (keywords pre-filled, no billing), `434-539-4915` «Аккаунт … Balier» is empty
+(Merchant Center's auto-created one). **Merchant Center** `5871202153`: 108 items, 100 approved,
+8 disapproved «Отсутствует изображение товара» (MacBook case sizes, UBD cover colours), 60 free
+clicks / 28 d, «Стоимость возврата: неполная информация», 43 «Жіночі сумки» items with thin
+descriptions. **GA4** property `a207930162p286962167`, stream `balier` id 16187400809, 79 users
+/ 7 d, channels Direct 45 · Organic Social 35 · Organic Search 22; Search Console not linked.
+Fixed in code: `products/feedImage.ts` `leadImages` — a size borrows its colour's photo, then the
+product-level one, then any photo of the product (tests first; black/green UBD covers simply have
+no photos, owner to upload). Gate green, **deploy left to the owner** (classifier). Uncommitted.
 
 **2026-10-02 (SEO, Jev).** «How I can use Jev for SEO optimisations». Jev SEO is TypeSafe AI's
 open-source auditor; ran its Rust CLI (v0.1.2, checksum-verified, scratchpad only, no API key so
