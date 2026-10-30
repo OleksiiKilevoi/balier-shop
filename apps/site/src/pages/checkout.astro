@@ -340,6 +340,8 @@ import { PARTS_AD_LEGAL, PARTS_NAME } from '@balier/lib/monoparts';
 <script>
   import type { CartLine, CartSummary } from '@balier/lib/cart';
   import { fetchCartSummary } from '@balier/lib/cart/client';
+  import { ga4 } from '~/lib/ga4';
+  import { GA4_CURRENCY, checkoutParams, ga4Item, hryvniaValue } from '@balier/lib/analytics/ga4';
   import { PROMO_ERROR_TEXT, checkoutNoticeText, codOverLimitText, settlementLabel } from '@balier/lib/i18n/checkout';
   import { campaignCode, discountFor, normalizePromoCode } from '@balier/lib/orders/promo';
   import { formatPrice } from '@balier/lib/money';
@@ -407,6 +409,8 @@ import { PARTS_AD_LEGAL, PARTS_NAME } from '@balier/lib/monoparts';
     const codOverLimitNote = form.querySelector<HTMLElement>('[data-cod-over-limit]');
 
     let cart: CartSummary | null = null;
+    /** `begin_checkout` once per visit to the page, not on every cart refresh. */
+    let checkoutSent = false;
     let codLimitKopiykas = 0;
     /** «Частинами» as `/api/checkout/limits` reports it; null = not offered. */
     let partsOffer: { minTotalKopiykas: number; maxCount: number } | null = null;
@@ -573,6 +577,20 @@ import { PARTS_AD_LEGAL, PARTS_NAME } from '@balier/lib/monoparts';
             add.disabled = true;
             addToCart(offer.variantId, 1);
             track('Add to cart', { source: 'checkout' });
+            ga4('add_to_cart', {
+              currency: GA4_CURRENCY,
+              value: hryvniaValue(offer.bundleUnitPrice),
+              items: [
+                ga4Item({
+                  sku: offer.sku,
+                  title: offer.productTitle,
+                  variantName: null,
+                  categoryTitle: null,
+                  unitPrice: offer.bundleUnitPrice,
+                  quantity: 1,
+                }),
+              ],
+            });
             await refresh();
           });
 
@@ -843,6 +861,10 @@ import { PARTS_AD_LEGAL, PARTS_NAME } from '@balier/lib/monoparts';
         }
 
         cart = summary;
+        if (!checkoutSent) {
+          checkoutSent = true;
+          ga4('begin_checkout', checkoutParams(summary));
+        }
         codLimitKopiykas = limit;
         paintSummary(summary);
         paintCodAvailability();

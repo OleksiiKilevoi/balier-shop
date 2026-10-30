@@ -258,6 +258,7 @@ import { cardImageUrl } from '@balier/lib/media/card';
       data-url={productUrl}
       data-manager={manager}
       data-variants={JSON.stringify(variantData)}
+      data-category={product.categoryTitle ?? ''}
       data-colour-choice={String(hasColourChoice)}
       data-size-choice={String(hasSizeChoice)}
     >
@@ -484,7 +485,14 @@ import { cardImageUrl } from '@balier/lib/media/card';
                         <span class="price">{formatPrice(companion.bundleUnitPrice)}</span>
                       </p>
                     </div>
-                    <Button variant="secondary" size="sm" data-add-companion={companion.variantId}>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      data-add-companion={companion.variantId}
+                      data-companion-sku={companion.sku}
+                      data-companion-title={companion.productTitle}
+                      data-companion-price={companion.bundleUnitPrice}
+                    >
                       + Додати
                     </Button>
                   </li>
@@ -596,6 +604,8 @@ import { cardImageUrl } from '@balier/lib/media/card';
   import { openCartPopup } from '@balier/lib/cartPopup';
   import { addToCart } from '@balier/lib/cart/store';
   import { track } from '~/lib/analytics';
+  import { ga4 } from '~/lib/ga4';
+  import { GA4_CURRENCY, ga4Item, hryvniaValue } from '@balier/lib/analytics/ga4';
   import { variantLabel } from '@balier/lib/products/variant';
 
   const root = document.querySelector<HTMLElement>('[data-product]');
@@ -628,6 +638,18 @@ import { cardImageUrl } from '@balier/lib/media/card';
     const manager = root.dataset.manager ?? '';
     const showsColour = root.dataset.colourChoice === 'true';
     const showsSize = root.dataset.sizeChoice === 'true';
+    const categoryTitle = root.dataset.category || null;
+
+    /** The GA4 item for a variant of this product, at the quantity given. */
+    const itemFor = (variant: VariantData, quantity: number) =>
+      ga4Item({
+        sku: variant.sku,
+        title,
+        variantName: variantLabel(showsColour ? variant.colour : null, showsSize ? variant.size : null) || null,
+        categoryTitle,
+        unitPrice: variant.price,
+        quantity,
+      });
 
     /** The pressed colour and size — the variant every action on the page applies to. */
     let current: VariantData | undefined = variants[0];
@@ -719,8 +741,16 @@ import { cardImageUrl } from '@balier/lib/media/card';
         const variantId = current?.id;
         if (!variantId) return;
 
-        addToCart(variantId, Number(quantity?.value) || 1);
+        const count = Number(quantity?.value) || 1;
+        addToCart(variantId, count);
         track('Add to cart', { source: 'product', product: location.pathname.split('/').pop() ?? '' });
+        if (current) {
+          ga4('add_to_cart', {
+            currency: GA4_CURRENCY,
+            value: hryvniaValue(current.price * count),
+            items: [itemFor(current, count)],
+          });
+        }
         openCartPopup();
       });
     }
@@ -731,8 +761,29 @@ import { cardImageUrl } from '@balier/lib/media/card';
         if (!variantId) return;
         addToCart(variantId, 1);
         track('Add to cart', { source: 'companion', product: location.pathname.split('/').pop() ?? '' });
+        const price = Number(button.dataset.companionPrice);
+        if (button.dataset.companionSku && Number.isFinite(price)) {
+          ga4('add_to_cart', {
+            currency: GA4_CURRENCY,
+            value: hryvniaValue(price),
+            items: [
+              ga4Item({
+                sku: button.dataset.companionSku,
+                title: button.dataset.companionTitle ?? '',
+                variantName: null,
+                categoryTitle: null,
+                unitPrice: price,
+                quantity: 1,
+              }),
+            ],
+          });
+        }
         openCartPopup();
       });
+    }
+
+    if (current) {
+      ga4('view_item', { currency: GA4_CURRENCY, value: hryvniaValue(current.price), items: [itemFor(current, 1)] });
     }
   }
 </script>

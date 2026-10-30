@@ -205,6 +205,7 @@ export async function findCompanionOffer(
   const [row] = await db
     .select({
       variantId: productVariants.id,
+      sku: productVariants.sku,
       productSlug: products.slug,
       productTitle: productTranslations.title,
       unitPrice: sql<number>`coalesce(${productVariants.priceOverride}, ${products.basePrice})`,

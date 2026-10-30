@@ -8,6 +8,7 @@ import { findOrderByNumber, findPartsFailureState } from '@balier/lib/db/queries
 import { PARTS_COMMON_FAILURES, orderStatusCopy, partsFailureText } from '@balier/lib/i18n/checkout';
 import { formatPrice } from '@balier/lib/money';
 import { GOOGLE_ADS_ID, GOOGLE_ADS_PURCHASE_LABEL } from '~/lib/googleAds';
+import { purchaseParams } from '@balier/lib/analytics/ga4';
 
 export const prerender = false;
 
@@ -58,6 +59,16 @@ const purchaseEvent =
   (order.paymentMethod === 'cod' ? order.status !== 'cancelled' : PAID_ONWARD.has(order.status))
     ? { orderNumber: order.orderNumber, payment: order.paymentMethod }
     : null;
+
+// GA4 `purchase`, under the same gate and the same once-per-order guard.
+const ga4Purchase = purchaseEvent
+  ? purchaseParams({
+      orderNumber: order.orderNumber,
+      total: order.total,
+      promoCode: order.promoCode,
+      items: order.items,
+    })
+  : null;
 ---
 
 <BaseLayout title="Замовлення оформлено" noindex>
@@ -69,17 +80,19 @@ const purchaseEvent =
       window.gtag?.('event', 'conversion', conversion);
     </script>
   )}
-  {/* One Dollar Stats «Purchase» (`~/lib/analytics.ts`). Inline, so it waits
-      for `load` — the deferred stats script has run by then. Once per order
-      per browser (localStorage): the «частинами» wait refreshes this page
-      every 5 s, and a reload or a second tab must not count again. */}
+  {/* One Dollar Stats «Purchase» (`~/lib/analytics.ts`) and GA4 `purchase`
+      (`@balier/lib/analytics/ga4`). Inline, so it waits for `load` — the
+      deferred stats script has run by then. Once per order per browser
+      (localStorage): the «частинами» wait refreshes this page every 5 s, and
+      a reload or a second tab must not count again. */}
   {purchaseEvent && (
-    <script is:inline define:vars={{ purchaseEvent }}>
+    <script is:inline define:vars={{ purchaseEvent, ga4Purchase }}>
       window.addEventListener('load', () => {
         try {
           const key = 'ods_purchase_' + purchaseEvent.orderNumber;
           if (localStorage.getItem(key)) return;
           window.stonks?.event('Purchase', { payment: purchaseEvent.payment });
+          if (ga4Purchase) window.gtag?.('event', 'purchase', ga4Purchase);
           localStorage.setItem(key, '1');
         } catch {}
       });

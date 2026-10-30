@@ -49,6 +49,8 @@ export interface CartLine extends CartVariantData {
 /** A companion product the cart could still take at its bundle price. */
 export interface CompanionOffer {
   variantId: string;
+  /** The GA4 `item_id`, the same id the Merchant feed sends. */
+  sku: string;
   productSlug: string;
   productTitle: string;
   imageUrl: string | null;
