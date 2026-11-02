@@ -97,6 +97,44 @@ const CHANNELS: [RegExp, string][] = [
   [/(^|\.)bing\.com$|^bing$/, 'Bing'],
 ];
 
+/**
+ * What `BaseLayout` kept in this browser about where the visitor came from,
+ * or null: no record, no storage (private mode, server), or a record that
+ * does not parse. Never throws — nothing that reads it may block a sale.
+ */
+export function readStoredAttribution(): Attribution | null {
+  try {
+    // Through `globalThis`, typed structurally: this file is also compiled by
+    // the Workers packages, whose tsconfig has no DOM lib (`env.d.ts`).
+    const storage = (globalThis as { localStorage?: { getItem(key: string): string | null } }).localStorage;
+    const raw = storage?.getItem(ATTRIBUTION_STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as Attribution) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** One Dollar Stats forbids `;` and `=` in event values (they delimit props). */
+const forbidden = (value: string) => value.replace(/[;=]/g, '-').slice(0, 64);
+
+/**
+ * The source, medium and campaign of the visit as event props, so «Add to
+ * cart» and «Order placed» in One Dollar Stats can be compared by campaign
+ * the way page views already can. Tags when the visit had them, else the
+ * referrer host as the source; nothing at all for a direct visit. Named
+ * `utm_*` on purpose: «Add to cart» already has a `source` of its own (the
+ * button it came from), and the first live test lost the campaign to it.
+ */
+export function attributionEventProps(attribution: Attribution | null | undefined): Record<string, string> {
+  if (!attribution) return {};
+  const props: Record<string, string> = {};
+  const source = attribution.source ?? attribution.referrer;
+  if (source) props.utm_source = forbidden(source);
+  if (attribution.medium) props.utm_medium = forbidden(attribution.medium);
+  if (attribution.campaign) props.utm_campaign = forbidden(attribution.campaign);
+  return props;
+}
+
 /** The panel's one-line answer: «Instagram», «Google», «Прямий захід». */
 export function attributionChannel(attribution: Attribution | null): string {
   if (!attribution) return 'Невідомо';

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { attributionChannel, attributionDetails, nextAttribution, type Attribution } from './attribution';
+import { attributionChannel, attributionDetails, nextAttribution, type Attribution, attributionEventProps } from './attribution';
 import { attributionSchema } from './validation/checkout';
 
 const now = new Date('2026-10-10T10:00:00Z');
@@ -114,5 +114,26 @@ describe('attributionDetails', () => {
       attributionDetails({ source: 'ig', medium: 'social', referrer: 'l.instagram.com', landing: '/products/shoper' }),
     ).toBe('utm: ig / social · з l.instagram.com · перша сторінка /products/shoper');
     expect(attributionDetails({})).toBe('');
+  });
+});
+
+describe('attributionEventProps', () => {
+  it('turns UTM tags into utm_* event props, named so they never clash with an event\'s own props', () => {
+    expect(
+      attributionEventProps({ source: 'google', medium: 'cpc', campaign: 'search-sumky-ua', landing: '/products' }),
+    ).toEqual({ utm_source: 'google', utm_medium: 'cpc', utm_campaign: 'search-sumky-ua' });
+  });
+
+  it('falls back to the referrer host as the source when there are no tags', () => {
+    expect(attributionEventProps({ referrer: 'l.instagram.com', landing: '/' })).toEqual({ utm_source: 'l.instagram.com' });
+  });
+
+  it('sends nothing for a direct visit or no record', () => {
+    expect(attributionEventProps(null)).toEqual({});
+    expect(attributionEventProps({ landing: '/' })).toEqual({});
+  });
+
+  it('strips the two characters the stats script forbids in values', () => {
+    expect(attributionEventProps({ source: 'a=b;c', campaign: 'x;y=z' })).toEqual({ utm_source: 'a-b-c', utm_campaign: 'x-y-z' });
   });
 });

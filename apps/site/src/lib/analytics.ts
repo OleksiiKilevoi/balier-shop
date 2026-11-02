@@ -8,6 +8,8 @@
  * and must not contain `;` or `=`. No personal data in props, ever.
  */
 
+import { attributionEventProps, readStoredAttribution } from '@balier/lib/attribution';
+
 export type AnalyticsEvent = 'Add to cart' | 'Order placed' | 'Promo signup';
 
 declare global {
@@ -16,9 +18,15 @@ declare global {
   }
 }
 
+/**
+ * Every event carries the visit's `utm_source`, `utm_medium` and
+ * `utm_campaign` (the same record the order is attributed from), so the stats
+ * dashboard can compare events by campaign and not only page views. The
+ * event's own props keep their names; the prefix is what keeps them apart.
+ */
 export function track(name: AnalyticsEvent, props?: Record<string, string>): void {
   try {
-    window.stonks?.event(name, props);
+    window.stonks?.event(name, { ...attributionEventProps(readStoredAttribution()), ...props });
   } catch {
     // Analytics never breaks a purchase.
   }
