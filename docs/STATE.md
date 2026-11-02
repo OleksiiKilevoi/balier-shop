@@ -213,7 +213,75 @@ descriptions. **GA4** property `a207930162p286962167`, stream `balier` id 161874
 / 7 d, channels Direct 45 · Organic Social 35 · Organic Search 22; Search Console not linked.
 Fixed in code: `products/feedImage.ts` `leadImages` — a size borrows its colour's photo, then the
 product-level one, then any photo of the product (tests first; black/green UBD covers simply have
-no photos, owner to upload). Gate green, **deploy left to the owner** (classifier). Uncommitted.
+no photos, owner to upload). Gate green, committed `2b03c8d`, owner deployed `ea5d8e29`.
+Google Ads, same day: the owner finished the wizard and prepaid 4 000 ₴ (Visa, manual payments,
+autopay off; a «spend 10k by 29.12, get 10k» promo is active). Campaign `24419555902` renamed
+«Search · Сумки · UA», 150 ₴/day, Max clicks with a **12 ₴ CPC cap** (was 15), Ukraine, en/ru/uk,
+status «Допущено (обучение)», ad and keywords under review. Fixed in the kabinet on «исправь то
+что нужно»: Display Network off (search partners stay), all 35 keywords **phrase match** (were 36
+broad, «bag in bag» deleted), final-URL suffix
+`utm_source=google&utm_medium=cpc&utm_campaign={campaignid}&utm_term={keyword}` so the admin's
+attribution shows google / cpc (it drops gclid), GA4 «lambda-df702» + Merchant Center «Balier»
+linked in Data manager (YouTube deliberately not). **Left:** import `purchase` from GA4 as the
+conversion — the simplified wizard offers only tag-based setup until the link propagates (≤24 h);
+until then the campaign optimises clicks. Ad strength and sitelinks not verified (column empty
+until moderation). The owner's message: production on a generator, ≤2 bags/day — keep 150 ₴, do
+not scale; honest lead times on the site once the owner gives a number.
+«можем добавить кампанию в onedollarstats?» → «давай оба»: ODS collects UTM on the first page view
+by itself, so the campaign appears once ads run. (1) Google Ads final-URL suffix now names the
+campaign: `utm_campaign=search-sumky-ua` instead of `{campaignid}`. (2) Code: `readStoredAttribution()`
+and `attributionEventProps()` in `packages/lib/src/attribution.ts` (tests first, 4 cases; storage
+read through `globalThis` so the Workers packages compile without the DOM lib), `track()` in
+`apps/site/src/lib/analytics.ts` now adds `source` / `medium` / `campaign` to every ODS event,
+checkout reuses the shared reader. The first live test (`c32714eb`) showed the event's own `source`
+(product / companion / checkout) overwriting the visit source, so the props were renamed `utm_source`
+/ `utm_medium` / `utm_campaign` (tests red → green); owner redeployed `b4bb1337`. Uncommitted.
+«создай рутину… раз в 2 дня» → «просто скрипт запускай на маке»: a cloud routine cannot reach Ads,
+GSC or Neon (only claude.ai connectors), so **`pnpm metrics` (`scripts/metrics.ts`)** instead: GA4
+Data API (the linked Ads account's impressions/clicks/cost per campaign + sessions/carts/purchases),
+Search Console totals, and production orders by campaign (`packages/lib/src/metrics/report.ts`,
+tested: sales = paid card/parts + confirmed COD; CPC/CTR/cost-per-sale/ROAS) over 2 d / 7 d / since
+launch; appends a JSON line to `.metrics/log.jsonl` (gitignored). Auth = the GSC service account
+`gsc-reader@balier-seo.iam.gserviceaccount.com`. First run: DB and GSC fine, **GA4 403 — the
+Analytics Data API is not enabled in the `balier-seo` Cloud project, and the account still needs
+Viewer on the GA4 property** (owner's two clicks). launchd schedule not set up yet.
+Geo: asked about limiting to big cities → no, bid adjustments after 2–3 weeks; tried to exclude
+occupied territories — Google Ads offers neither Crimea nor Donetsk in the picker, nothing to do.
+2026-11-02 «как идет кампания» → since launch 1 575 impressions, 80 clicks, CTR 5.1 %, 460 ₴
+(≈150/day, budget fully spent), CPC 5.75 ₴, balance 3 396 ₴, **0 orders** in the DB, GA4 still 403
+(owner's two clicks pending). Four keywords flagged «Показывается редко (низкий показатель
+качества)» — all landed on `/products`. «исправь ссылки» → keyword-level final URLs set in the
+kabinet: 13 «жіноч…» → `/products/category/womens-bags`, 2 «рюкзак…» → `backpacks-travel`,
+12 «чолов…» → `mens-bags`, «чоловічі гаманці» → `wallets`, «дорожні сумки» → `backpacks-travel`;
+generic leather-bag keywords keep the catalogue URL from the ad. Keywords go back through review.
+«ставь на паузу» → the one accessory keyword «чоловічі гаманці» paused (accessories don't fit the
+10–20 % cost-per-order rule on cold search); 33 keywords stay active.
+«проверь добавления в корзину» (GA4 UI, events since 30.10): paid traffic 83 sessions / 77 users →
+`view_item` 39 events by only **8 users**, `add_to_cart` **0 real** (the 3 recorded are my own
+browser tests: 2 tagged google/cpc, 1 direct), `begin_checkout` 1 (mine). Paid visitors mostly
+bounce off the catalogue without opening a product; the category landing pages set today are the
+first fix, product-page conversion is the next question.
+«подключи GA4» → done in the browser: Analytics Data API enabled in Cloud project `balier-seo`,
+`gsc-reader@…` added to the GA4 property as «Читатель» (no e-mail). `pnpm metrics` now returns GA4:
+since launch 1 730 impressions / 90 clicks / 78 sessions / 0 purchases. Two fixes in the script on
+the way: GA4 reports money in the **property's currency, which is USD** (`metadata.currencyCode`;
+11.31 USD ≈ the 460 ₴), so cost/CPC are printed in that currency and cost-per-sale/ROAS only when
+it is UAH; and GA4 names auto-tagged clicks by the Ads campaign name «Search · Сумки · UA» while the
+UTM suffix and the DB say `search-sumky-ua` — `canonicalCampaign` / `foldTraffic` in `report.ts`
+(6 tests) merge them. «меняй» → GA4 property currency switched USD → UAH in the browser (the form
+also demanded industry «Покупки», size «1–10», objective «Стимулирование продаж»); the Data API
+confirms `currencyCode: UAH` and the imported Ads cost came back converted for the past days too:
+since launch 1 731 impressions / 90 clicks / 511 ₴ / CPC 6 ₴ / 78 sessions / 0 orders. ROAS and
+cost per sale now print. 436/436 tests, build green, uncommitted.
+«что еще можем сделать?» → «давай» (search terms first). Search-terms report 30.10–1.11: 441 terms,
+53 visible clicks / 890 impr. (+27 clicks / 685 impr. Google hides as «другие»); overall on target —
+women's/men's/leather bags in uk/ru. Junk ≈ 5 clicks (~30 ₴) + ~75 impr.: other brands (guess,
+coach, polina & eiterou, бугатті, neri karra…), marketplaces (олх, розетка), price intent
+(«недорого» ×10, розпродаж, акції), Italy, экокожа/замша/нейлон, DIY/фото, wallets (keyword paused
+29.10). Added **145 campaign-level broad-match negatives** in the kabinet (brands, marketplaces,
+discount words, Italy, non-leather materials, kids/sport/beach, DIY/photo/repair, гаманці/портмоне).
+Next on ads: Shopping campaign from the feed (needs the owner's Merchant Center return policy),
+GA4 `purchase` import into Ads, trust strip + honest lead time on category/product pages.
 
 **2026-10-02 (SEO, Jev).** «How I can use Jev for SEO optimisations». Jev SEO is TypeSafe AI's
 open-source auditor; ran its Rust CLI (v0.1.2, checksum-verified, scratchpad only, no API key so

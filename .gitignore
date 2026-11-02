@@ -41,3 +41,6 @@ Thumbs.db
 # panel and lives in R2, never in the repository.
 test-products/
 .neon
+
+# `pnpm metrics` appends its runs here; a local log, not a record
+.metrics/
